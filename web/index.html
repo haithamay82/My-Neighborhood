@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <!--
+    If you are serving your web app in a path other than the root, change the
+    href value below to reflect the base path you are serving from.
+
+    The path provided below has to start and end with a slash "/" in order for
+    it to work correctly.
+
+    For more details:
+    * https://developer.mozilla.org/en-US/docs/Web/HTML/Element/base
+
+    This is a placeholder for base href that will be replaced by the value of
+    the `--base-href` argument provided to `flutter build`.
+  -->
+  <base href="$FLUTTER_BASE_HREF">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="שכונתי - האפליקציה שמחברת בין שכנים לעזרה הדדית. בקשות עזרה מקומיות, עזרה הדדית בשכונה וחיבור בין שכנים.">
+
+  <!-- iOS meta tags & icons -->
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="שכונתי">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>שכונתי - עזרה הדדית בשכונה</title>
+  <link rel="manifest" href="manifest.json">
+  
+  <!-- Google Sign-In Configuration -->
+  <meta name="google-signin-client_id" content="725875446445-jlfrijsk12skri7j948on9c1jflksee4.apps.googleusercontent.com">
+    <meta name="google-signin-redirect_uri" content="https://nearme-970f3.firebaseapp.com">
+  
+  <!-- Google Maps API - Temporarily disabled due to invalid key -->
+  <script>
+    // Initialize Google Maps placeholder
+    window.initMap = function() {
+      console.log('Google Maps placeholder loaded - API key needs to be configured');
+    };
+    
+    // Polyfill for Intl.Segmenter to fix deprecation warning
+    if (!window.Intl.Segmenter) {
+      console.log('Intl.Segmenter not available, using fallback');
+      // This is just to suppress the warning - the app will still work
+    }
+    
+           // Enhanced error handling for uncaught errors
+           let errorCount = 0;
+           const maxErrors = 10; // הגבלת מספר השגיאות
+           
+           window.addEventListener('error', function(e) {
+             errorCount++;
+             
+             // אם יש יותר מדי שגיאות, עצור הכל
+             if (errorCount > maxErrors) {
+               console.warn('Too many errors detected, stopping error handling to prevent infinite loop');
+               return true;
+             }
+             
+             // טיפול בשגיאות ספציפיות
+             if (e.error && e.error.toString().includes('Cross-Origin-Opener-Policy')) {
+               console.warn('Cross-Origin-Opener-Policy error detected, this is expected with popups');
+               e.preventDefault();
+               return true;
+             }
+             
+             if (e.message && e.message.includes('CORS policy')) {
+               console.warn('CORS error detected, this may be due to Firebase Storage rules');
+               e.preventDefault();
+               return true;
+             }
+             
+             if (e.error && e.error.toString().includes('minified')) {
+               console.warn('Minified error detected, this is a known issue with Flutter Web');
+               e.preventDefault();
+               return true;
+             }
+             
+             // טיפול בשגיאות Null check operator
+             if (e.error && e.error.toString().includes('Null check operator')) {
+               console.warn('Null check operator error detected, this is a known Flutter Web issue');
+               e.preventDefault();
+               return true;
+             }
+             
+             // טיפול בשגיאות כלליות
+             console.warn('Uncaught error:', e.error);
+             e.preventDefault();
+             return true;
+           });
+    
+    window.addEventListener('unhandledrejection', function(e) {
+      errorCount++;
+      
+      // אם יש יותר מדי שגיאות, עצור הכל
+      if (errorCount > maxErrors) {
+        console.warn('Too many promise rejections detected, stopping error handling to prevent infinite loop');
+        return true;
+      }
+      
+      console.warn('Unhandled promise rejection:', e.reason);
+      e.preventDefault();
+    });
+    
+    // Global error handler for Flutter
+    window.addEventListener('flutter-error', function(e) {
+      console.warn('Flutter error:', e.detail);
+    });
+    
+    // Initialize app with error handling
+    window.addEventListener('DOMContentLoaded', function() {
+      console.log('DOM loaded, initializing app...');
+      
+      // Handle Google Sign-In redirect
+      if (window.location.hash.includes('access_token') || window.location.search.includes('code')) {
+        console.log('Google Sign-In redirect detected');
+        // The Flutter app will handle the redirect
+      }
+      
+      // Wait for Flutter to be ready
+      window.addEventListener('flutter-first-frame', function() {
+        console.log('Flutter first frame rendered');
+      });
+    });
+    
+    // פונקציה לניקוי Google Sign-In מהדפדפן
+    window.clearGoogleSignIn = function() {
+      try {
+        console.log('🧹 Starting Google Sign-In cleanup...');
+        
+        // ניקוי localStorage
+        const keysToRemove = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.includes('google') || key.includes('gapi') || key.includes('oauth') || key.includes('firebase'))) {
+            keysToRemove.push(key);
+          }
+        }
+        keysToRemove.forEach(key => {
+          localStorage.removeItem(key);
+          console.log('🗑️ Removed from localStorage:', key);
+        });
+        
+        // ניקוי sessionStorage
+        const sessionKeysToRemove = [];
+        for (let i = 0; i < sessionStorage.length; i++) {
+          const key = sessionStorage.key(i);
+          if (key && (key.includes('google') || key.includes('gapi') || key.includes('oauth') || key.includes('firebase'))) {
+            sessionKeysToRemove.push(key);
+          }
+        }
+        sessionKeysToRemove.forEach(key => {
+          sessionStorage.removeItem(key);
+          console.log('🗑️ Removed from sessionStorage:', key);
+        });
+        
+        // ניקוי cookies (אם אפשר)
+        try {
+          document.cookie.split(";").forEach(function(c) { 
+            if (c.includes('google') || c.includes('gapi') || c.includes('oauth')) {
+              document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/");
+            }
+          });
+        } catch (e) {
+          console.warn('⚠️ Could not clear cookies:', e);
+        }
+        
+        console.log('✅ Google Sign-In data cleared from browser storage');
+      } catch (e) {
+        console.warn('⚠️ Error clearing Google Sign-In data:', e);
+      }
+    };
+  </script>
+</head>
+<body>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

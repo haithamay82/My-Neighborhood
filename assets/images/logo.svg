@@ -1,0 +1,62 @@
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle with gradient -->
+  <defs>
+    <radialGradient id="heartGradient" cx="50%" cy="40%" r="50%">
+      <stop offset="0%" style="stop-color:#ff1744;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#c2185b;stop-opacity:1" />
+    </radialGradient>
+  </defs>
+  
+  <!-- Heart in center with 3D effect -->
+  <path d="M100 160 C100 160, 60 120, 60 90 C60 75, 75 60, 90 60 C95 60, 100 65, 100 70 C100 65, 105 60, 110 60 C125 60, 140 75, 140 90 C140 120, 100 160, 100 160 Z" 
+        fill="url(#heartGradient)" 
+        stroke="#ffffff" 
+        stroke-width="2"/>
+  
+  <!-- Hands around the heart in different colors -->
+  <!-- Hand 1 - Dark Gray (top) -->
+  <path d="M100 25 C95 20, 85 20, 80 25 C75 30, 75 40, 80 45 C85 40, 90 35, 95 30 C100 25, 100 25, 100 25 Z" fill="#424242"/>
+  
+  <!-- Hand 2 - Orange (top right) -->
+  <path d="M140 50 C145 45, 150 50, 145 55 C140 60, 135 55, 130 50 C135 45, 140 50, 140 50 Z" fill="#FF9800"/>
+  
+  <!-- Hand 3 - Light Blue (right) -->
+  <path d="M160 100 C165 95, 170 100, 165 105 C160 110, 155 105, 150 100 C155 95, 160 100, 160 100 Z" fill="#03A9F4"/>
+  
+  <!-- Hand 4 - Pink (bottom right) -->
+  <path d="M140 150 C145 145, 150 150, 145 155 C140 160, 135 155, 130 150 C135 145, 140 150, 140 150 Z" fill="#E91E63"/>
+  
+  <!-- Hand 5 - Dark Gray (bottom) -->
+  <path d="M100 175 C95 170, 85 170, 80 175 C75 180, 75 190, 80 195 C85 190, 90 185, 95 180 C100 175, 100 175, 100 175 Z" fill="#424242"/>
+  
+  <!-- Hand 6 - Orange (bottom left) -->
+  <path d="M60 150 C55 145, 50 150, 55 155 C60 160, 65 155, 70 150 C65 145, 60 150, 60 150 Z" fill="#FF9800"/>
+  
+  <!-- Hand 7 - Light Blue (left) -->
+  <path d="M40 100 C35 95, 30 100, 35 105 C40 110, 45 105, 50 100 C45 95, 40 100, 40 100 Z" fill="#03A9F4"/>
+  
+  <!-- Hand 8 - Pink (top left) -->
+  <path d="M60 50 C55 45, 50 50, 55 55 C60 60, 65 55, 70 50 C65 45, 60 50, 60 50 Z" fill="#E91E63"/>
+  
+  <!-- Hand 9 - Green (top) -->
+  <path d="M100 25 C105 20, 115 20, 120 25 C125 30, 125 40, 120 45 C115 40, 110 35, 105 30 C100 25, 100 25, 100 25 Z" fill="#4CAF50"/>
+  
+  <!-- Hand 10 - Green (right) -->
+  <path d="M160 100 C165 95, 170 100, 165 105 C160 110, 155 105, 150 100 C155 95, 160 100, 160 100 Z" fill="#4CAF50"/>
+  
+  <!-- Text "שכונתי" in arc -->
+  <path id="textPath1" d="M 50 80 A 30 30 0 0 1 150 80" fill="none"/>
+  <text font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#424242">
+    <textPath href="#textPath1" startOffset="50%">
+      <tspan text-anchor="middle">שכונתי</tspan>
+    </textPath>
+  </text>
+  
+  <!-- Text "שכונה חזקה בפעולה" in arc -->
+  <path id="textPath2" d="M 50 120 A 30 30 0 0 0 150 120" fill="none"/>
+  <text font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#424242">
+    <textPath href="#textPath2" startOffset="50%">
+      <tspan text-anchor="middle">שכונה חזקה בפעולה</tspan>
+    </textPath>
+  </text>
+</svg>

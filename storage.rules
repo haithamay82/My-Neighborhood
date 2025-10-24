@@ -1,0 +1,11 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Allow public read access for all files to avoid CORS issues
+    match /{allPaths=**} {
+      allow read: if true; // Public read access for all files
+      allow write, delete: if request.auth != null;
+    }
+  }
+}
