@@ -50,6 +50,28 @@ android {
         jniLibs {
             useLegacyPackaging = false
         }
+        // Exclude duplicate files
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "/META-INF/DEPENDENCIES"
+            excludes += "/META-INF/LICENSE"
+            excludes += "/META-INF/LICENSE.txt"
+            excludes += "/META-INF/license.txt"
+            excludes += "/META-INF/NOTICE"
+            excludes += "/META-INF/NOTICE.txt"
+            excludes += "/META-INF/notice.txt"
+        }
+    }
+    
+    // Configure to resolve duplicate classes and version conflicts
+    configurations.all {
+        resolutionStrategy {
+            // Force specific versions to avoid conflicts
+            force("androidx.core:core:1.12.0")
+            force("androidx.core:core-ktx:1.12.0")
+            // Prefer project dependencies over transitive ones
+            preferProjectModules()
+        }
     }
 
     buildTypes {
