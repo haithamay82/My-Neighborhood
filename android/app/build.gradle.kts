@@ -101,6 +101,10 @@ dependencies {
     implementation("androidx.core:core:1.12.0")
     implementation("androidx.core:core-ktx:1.12.0")
     
+    // Activity dependency required by flutter_facebook_auth
+    implementation("androidx.activity:activity:1.8.2")
+    implementation("androidx.activity:activity-ktx:1.8.2")
+    
     // WorkManager for background tasks
     implementation("androidx.work:work-runtime-ktx:2.9.0")
     
