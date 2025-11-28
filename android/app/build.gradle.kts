@@ -60,7 +60,9 @@ android {
             excludes += "/META-INF/NOTICE"
             excludes += "/META-INF/NOTICE.txt"
             excludes += "/META-INF/notice.txt"
+            excludes += "META-INF/*"
         }
+        pickFirst("lib/**/libflutter.so")
     }
     
     // Configure to resolve duplicate classes and version conflicts
@@ -68,7 +70,6 @@ android {
         resolutionStrategy {
             // Force specific versions to avoid conflicts
             force("androidx.core:core:1.12.0")
-            force("androidx.core:core-ktx:1.12.0")
             // Prefer project dependencies over transitive ones
             preferProjectModules()
         }
