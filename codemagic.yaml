@@ -6,14 +6,15 @@ workflows:
     environment:
       groups:
         - keystore_credentials
+        - apple_credentials
       vars:
         PACKAGE_NAME: "com.myneighborhood.app"
-    flutter: stable
+      flutter: stable
     scripts:
       - name: Get Flutter dependencies
         script: |
           flutter pub get
-      - name: Flutter build
+      - name: Build Android
         script: |
           flutter build appbundle --release
       - name: Build iOS
@@ -22,8 +23,10 @@ workflows:
     artifacts:
       - build/app/outputs/bundle/**/*.aab
       - build/ios/ipa/*.ipa
-    code_signing:
-      ios:
-        distribution_type: development
-        bundle_identifier: com.myneighborhood.app
-        team_id: # to be filled later
+
+code_signing:
+  android-workflow:
+    ios:
+      distribution_type: development
+      bundle_identifier: com.myneighborhood.app
+      team_id: # Codemagic fills automatically after Apple Developer integration
