@@ -7,7 +7,7 @@ workflows:
       groups:
         - keystore_credentials
       vars:
-        PACKAGE_NAME: "com.myneighborhood.app"
+        PACKAGE_NAME: "com.example.flutter1"
       flutter: stable
     scripts:
       - name: Get Flutter dependencies
@@ -16,15 +16,6 @@ workflows:
       - name: Flutter build
         script: |
           flutter build appbundle --release
-      - name: Build iOS
-        script: |
-          flutter build ipa --release --no-codesign
     artifacts:
       - build/app/outputs/bundle/**/*.aab
-      - build/ios/ipa/*.ipa
-    code_signing:
-      ios:
-        distribution_type: development
-        bundle_identifier: com.myneighborhood.app
-        team_id: # to be filled later
 
