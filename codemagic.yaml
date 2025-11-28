@@ -18,12 +18,4 @@ workflows:
           flutter build appbundle --release
     artifacts:
       - build/app/outputs/bundle/**/*.aab
-    publishing:
-      # Configure publishing as needed
-      # email:
-      #   recipients:
-      #     - your-email@example.com
-      #   notify:
-      #     success: true
-      #     failure: true
-
+    
