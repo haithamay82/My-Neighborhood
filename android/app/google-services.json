@@ -8,17 +8,17 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:725875446445:android:1399519fbff5bf9b0aec24",
+        "mobilesdk_app_id": "1:725875446445:android:965972e181b446ff0aec24",
         "android_client_info": {
-          "package_name": "com.example.flutter1"
+          "package_name": "com.myneighborhood.app"
         }
       },
       "oauth_client": [
         {
-          "client_id": "725875446445-uhm05oij2dnqdh5e1kou487p8sf7578r.apps.googleusercontent.com",
+          "client_id": "725875446445-qacnsh4bhauivs01om5ovonuh5jp755l.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
-            "package_name": "com.example.flutter1",
+            "package_name": "com.myneighborhood.app",
             "certificate_hash": "1135e3e18d1de45276dcab6107359eba2307491c"
           }
         },
@@ -43,7 +43,7 @@
               "client_id": "725875446445-uiagbgmnep3dod6tsdsccs2v1312tgr7.apps.googleusercontent.com",
               "client_type": 2,
               "ios_info": {
-                "bundle_id": "com.example.flutter1"
+                "bundle_id": "com.myneighborhood.app"
               }
             }
           ]
