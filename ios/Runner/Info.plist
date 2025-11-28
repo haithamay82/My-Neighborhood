@@ -28,6 +28,7 @@
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>
 	<string>Main</string>
+
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
@@ -41,20 +42,38 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+
+	<!-- רקע: מיקום / עיבוד -->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
 		<string>location</string>
 		<string>processing</string>
 	</array>
+
+	<!-- הרשאות מיקום -->
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>האפליקציה זקוקה למיקום שלך כדי להציג בקשות רלוונטיות באזור שלך</string>
+
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>האפליקציה זקוקה למיקום שלך כדי להציג בקשות רלוונטיות באזור שלך גם כאשר האפליקציה ברקע</string>
+
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>האפליקציה משתמשת במיקום ברקע לצורך זיהוי בקשות באזור שלך.</string>
+
+	<!-- תמיכה ב-iOS 15 ומעלה -->
+	<key>NSLocationTemporaryUsageDescriptionDictionary</key>
+	<dict>
+		<key>BackgroundLocation</key>
+		<string>האפליקציה צריך גישה זמנית למיקום ברקע כדי להציע שירותים רלוונטיים בקרבתך.</string>
+	</dict>
+
+	<!-- הרשאות נוספות קיימות (תקין) -->
 	<key>NSCameraUsageDescription</key>
 	<string>האפליקציה זקוקה לגישה למצלמה כדי לצלם תמונות לבקשות עזרה</string>
 	<key>NSPhotoLibraryUsageDescription</key>
@@ -63,6 +82,8 @@
 	<string>האפליקציה זקוקה לגישה למיקרופון כדי להקליט הודעות קוליות</string>
 	<key>NSUserNotificationsUsageDescription</key>
 	<string>האפליקציה זקוקה להרשאה לשלוח התראות על בקשות חדשות והודעות</string>
+
+	<!-- URL Schemes -->
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -77,5 +98,6 @@
 			</array>
 		</dict>
 	</array>
+
 </dict>
 </plist>
