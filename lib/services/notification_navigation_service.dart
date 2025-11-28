@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../screens/chat_screen.dart';
 import '../screens/notifications_screen.dart';
 import '../screens/profile_screen.dart';
+import 'app_state_service.dart';
 
 /// שירות לניווט לפי התראות
 class NotificationNavigationService {
@@ -21,7 +22,11 @@ class NotificationNavigationService {
     try {
       switch (payload) {
         case 'new_request':
+          if (requestId != null) {
+            await _navigateToRequest(context, requestId);
+          } else {
           await _navigateToHome(context);
+          }
           break;
           
         case 'chat_message':
@@ -49,12 +54,30 @@ class NotificationNavigationService {
           await _navigateToNotifications(context);
           break;
           
+        case 'filter_match':
+          if (requestId != null) {
+            await _navigateToRequest(context, requestId);
+          } else {
+            await _navigateToHome(context);
+          }
+          break;
+          
+        case 'service_provider_match':
+          if (requestId != null) {
+            await _navigateToRequest(context, requestId);
+          } else {
+            await _navigateToHome(context);
+          }
+          break;
+          
         default:
           await _navigateToHome(context);
       }
     } catch (e) {
       debugPrint('❌ Error navigating from notification: $e');
       // במקרה של שגיאה, נווט למסך הבית
+      // Guard context usage after async gap
+      if (!context.mounted) return;
       await _navigateToHome(context);
     }
   }
@@ -62,10 +85,10 @@ class NotificationNavigationService {
   /// ניווט למסך הבית
   static Future<void> _navigateToHome(BuildContext context) async {
     if (context.mounted) {
-      // ניווט למסך הבית בלי למחוק את ה-MainScreen
+      // ניווט למסך הראשי המוגדר באפליקציה
       Navigator.of(context).pushNamedAndRemoveUntil(
-        '/home',
-        (route) => route.settings.name == '/main',
+        '/main',
+        (route) => false,
       );
     }
   }
@@ -73,10 +96,10 @@ class NotificationNavigationService {
   /// ניווט לצ'אט
   static Future<void> _navigateToChat(BuildContext context, String chatId) async {
     if (context.mounted) {
-      // ניווט למסך הבית בלי למחוק את ה-MainScreen
+      // ניווט למסך הראשי
       Navigator.of(context).pushNamedAndRemoveUntil(
-        '/home',
-        (route) => route.settings.name == '/main',
+        '/main',
+        (route) => false,
       );
       
       // המתן קצת ואז פתח את הצ'אט
@@ -98,24 +121,34 @@ class NotificationNavigationService {
   /// ניווט לבקשה ספציפית
   static Future<void> _navigateToRequest(BuildContext context, String requestId) async {
     if (context.mounted) {
-      // ניווט למסך הבית בלי למחוק את ה-MainScreen
+      // הגדרת סמן שמגיעים מהתראות
+      AppStateService.setFromNotification(true);
+      // שמירת הבקשה לפתיחה במסך הבית
+      AppStateService.setPendingRequestToOpen(requestId);
+      
+      // ניווט למסך הראשי
       Navigator.of(context).pushNamedAndRemoveUntil(
-        '/home',
-        (route) => route.settings.name == '/main',
+        '/main',
+        (route) => false,
       );
       
       // TODO: ניווט לבקשה ספציפית (אם יש מסך כזה)
       debugPrint('🔔 Navigating to request: $requestId');
+      
+      // איפוס הסמן לאחר זמן קצר כדי לאפשר למסך להיטען
+      Future.delayed(const Duration(seconds: 2), () {
+        AppStateService.clearFromNotification();
+      });
     }
   }
 
   /// ניווט לפרופיל
   static Future<void> _navigateToProfile(BuildContext context) async {
     if (context.mounted) {
-      // ניווט למסך הבית בלי למחוק את ה-MainScreen
+      // ניווט למסך הראשי
       Navigator.of(context).pushNamedAndRemoveUntil(
-        '/home',
-        (route) => route.settings.name == '/main',
+        '/main',
+        (route) => false,
       );
       
       // המתן קצת ואז פתח את הפרופיל
@@ -134,10 +167,10 @@ class NotificationNavigationService {
   /// ניווט להתראות
   static Future<void> _navigateToNotifications(BuildContext context) async {
     if (context.mounted) {
-      // ניווט למסך הבית בלי למחוק את ה-MainScreen
+      // ניווט למסך הראשי
       Navigator.of(context).pushNamedAndRemoveUntil(
-        '/home',
-        (route) => route.settings.name == '/main',
+        '/main',
+        (route) => false,
       );
       
       // המתן קצת ואז פתח את מסך ההתראות

@@ -1,14 +1,16 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter/foundation.dart';
 import 'dart:io';
 import '../models/user_profile.dart';
 import '../models/request.dart';
 import 'notification_service.dart';
 
 class GuestAuthService {
-  static const int GUEST_TRIAL_DAYS = 30;
+  // ignore: constant_identifier_names
   static const int GUEST_MAX_REQUESTS = 10; // כמו עסקי מנוי
+  // ignore: constant_identifier_names
   static const double GUEST_MAX_RADIUS = 3.0; // כמו עסקי מנוי
   
   /// יצירת משתמש אורח חדש
@@ -23,7 +25,12 @@ class GuestAuthService {
     }
 
     final now = DateTime.now();
-    final trialEndDate = now.add(Duration(days: GUEST_TRIAL_DAYS));
+    // 60 יום תקופת ניסיון
+    final trialEndDate = now.add(Duration(days: 60));
+    
+    debugPrint('🔍 Creating guest user:');
+    debugPrint('   - Now: $now');
+    debugPrint('   - Trial end date: $trialEndDate (60 days from now)');
     
     // קבלת device ID למניעת ניצול
     final deviceId = await _getDeviceId();
@@ -96,6 +103,23 @@ class GuestAuthService {
     return DateTime.now().isAfter(trialEndDate);
   }
 
+  /// בדיקה מהירה - האם תקופת האורח הסתיימה (לבדיקות)
+  static Future<bool> isGuestTrialExpiredForTesting(String userId, {DateTime? testDate}) async {
+    final doc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(userId)
+        .get();
+    
+    if (!doc.exists) return false;
+    
+    final data = doc.data()!;
+    if (data['userType'] != 'guest') return false;
+    
+    final trialEndDate = (data['guestTrialEndDate'] as Timestamp).toDate();
+    final now = testDate ?? DateTime.now();
+    return now.isAfter(trialEndDate);
+  }
+
   /// מעבר אוטומטי מאורח לפרטי חינם
   static Future<void> transitionGuestToPersonal(String userId) async {
     final userDoc = await FirebaseFirestore.instance
@@ -138,8 +162,8 @@ class GuestAuthService {
     // שליחת התראה למשתמש
     await NotificationService.sendNotification(
       toUserId: userId,
-      title: 'עברת למנוי פרטי חינם',
-      message: 'המידע שלך נשמר! תוכל לשדרג בכל עת לקבלת תנאים משופרים',
+      title: 'המנוי שלך עבר לסוג "פרטי חינם"',
+      message: 'שדרג עכשיו למנוי "פרטי מנוי" או "עסקי"',
     );
   }
 
@@ -189,52 +213,91 @@ class GuestAuthService {
         await NotificationService.sendNotification(
           toUserId: adminDoc.id,
           title: 'אורח חדש הצטרף',
-          message: '${guestProfile.displayName} התחיל תקופת אורח של 30 ימים',
+          message: '${guestProfile.displayName} התחיל תקופת אורח של דקה אחת (לבדיקה)',
         );
       }
     } catch (e) {
-      print('Error notifying admin about new guest: $e');
+      debugPrint('Error notifying admin about new guest: $e');
     }
   }
 
   /// בדיקה יומית של אורחים שצריכים לעבור לפרטי
   static Future<void> checkAndTransitionExpiredGuests() async {
     final now = DateTime.now();
+    debugPrint('🔍 ===== GUEST TRIAL EXPIRY CHECK START =====');
+    debugPrint('🔍 Current time: $now');
     
-    // מציאת אורחים שהתקופה שלהם הסתיימה
-    final expiredGuestsQuery = await FirebaseFirestore.instance
+    // מציאת כל האורחים (ללא אינדקס מורכב)
+    final guestsQuery = await FirebaseFirestore.instance
         .collection('users')
         .where('userType', isEqualTo: 'guest')
-        .where('guestTrialEndDate', isLessThan: Timestamp.fromDate(now))
         .get();
 
-    for (final guestDoc in expiredGuestsQuery.docs) {
-      await transitionGuestToPersonal(guestDoc.id);
+    debugPrint('🔍 Found ${guestsQuery.docs.length} guest users total');
+    
+    for (final guestDoc in guestsQuery.docs) {
+      final data = guestDoc.data();
+      final guestTrialEndDate = data['guestTrialEndDate'] as Timestamp?;
+      final guestTrialStartDate = data['guestTrialStartDate'] as Timestamp?;
+      
+      debugPrint('🔍 Checking guest ${guestDoc.id}:');
+      debugPrint('   - Trial start: $guestTrialStartDate');
+      debugPrint('   - Trial end: $guestTrialEndDate');
+      
+      if (guestTrialEndDate == null) {
+        debugPrint('❌ Guest ${guestDoc.id} has no trial end date - skipping');
+        continue;
+      }
+      
+      final trialEndDate = guestTrialEndDate.toDate();
+      final timeUntilExpiry = trialEndDate.difference(now);
+      
+      debugPrint('   - Trial end date: $trialEndDate');
+      debugPrint('   - Time until expiry: $timeUntilExpiry');
+      debugPrint('   - Is now after trial end: ${now.isAfter(trialEndDate)}');
+      
+      if (now.isAfter(trialEndDate)) {
+        debugPrint('✅ Guest ${guestDoc.id} trial expired - transitioning to personal');
+        await transitionGuestToPersonal(guestDoc.id);
+      } else {
+        debugPrint('⏰ Guest ${guestDoc.id} trial still active until $trialEndDate');
+      }
     }
+    
+    debugPrint('🔍 ===== GUEST TRIAL EXPIRY CHECK END =====');
   }
 
   /// שליחת תזכורת 7 ימים לפני סיום תקופת אורח
   static Future<void> sendTrialReminderNotifications() async {
-    final sevenDaysFromNow = DateTime.now().add(Duration(days: 7));
-    
-    // מציאת אורחים שנותרו להם 7 ימים או פחות
+    // מציאת כל האורחים (ללא אינדקס מורכב)
     final guestsQuery = await FirebaseFirestore.instance
         .collection('users')
         .where('userType', isEqualTo: 'guest')
-        .where('guestTrialEndDate', isLessThanOrEqualTo: Timestamp.fromDate(sevenDaysFromNow))
         .get();
 
+    debugPrint('🔍 Found ${guestsQuery.docs.length} guest users for reminder check');
+    
     for (final guestDoc in guestsQuery.docs) {
       final data = guestDoc.data();
-      final trialEndDate = (data['guestTrialEndDate'] as Timestamp).toDate();
+      final guestTrialEndDate = data['guestTrialEndDate'] as Timestamp?;
+      
+      if (guestTrialEndDate == null) {
+        debugPrint('❌ Guest ${guestDoc.id} has no trial end date - skipping');
+        continue;
+      }
+      
+      final trialEndDate = guestTrialEndDate.toDate();
       final daysLeft = trialEndDate.difference(DateTime.now()).inDays;
       
-      if (daysLeft > 0) {
+      if (daysLeft > 0 && daysLeft <= 7) {
+        debugPrint('📅 Guest ${guestDoc.id} has $daysLeft days left - sending reminder');
         await NotificationService.sendNotification(
           toUserId: guestDoc.id,
           title: 'תקופת האורח שלך מסתיימת בקרוב',
           message: 'נותרו לך $daysLeft ימים. שדרג עכשיו כדי לשמור על הגישה המלאה!',
         );
+      } else {
+        debugPrint('⏰ Guest ${guestDoc.id} has $daysLeft days left - no reminder needed');
       }
     }
   }
@@ -255,12 +318,16 @@ class GuestAuthService {
     final trialEndDate = (data['guestTrialEndDate'] as Timestamp).toDate();
     final now = DateTime.now();
     
+    final timeLeft = trialEndDate.difference(now);
+    final isExpired = now.isAfter(trialEndDate);
+    
     return {
       'startDate': trialStartDate,
       'endDate': trialEndDate,
-      'daysLeft': trialEndDate.difference(now).inDays,
-      'isExpired': now.isAfter(trialEndDate),
-      'progress': (now.difference(trialStartDate).inDays / GUEST_TRIAL_DAYS * 100).clamp(0, 100),
+      'daysLeft': timeLeft.inDays > 0 ? timeLeft.inDays : 0, // הצג רק ימים
+      'minutesLeft': timeLeft.inMinutes,
+      'isExpired': isExpired,
+      'progress': (now.difference(trialStartDate).inDays / 60 * 100).clamp(0, 100), // 60 ימים
     };
   }
 }

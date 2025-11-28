@@ -237,7 +237,7 @@ class _NotificationTestScreenState extends State<NotificationTestScreen> {
       appBar: AppBar(
         title: const Text('בדיקת התראות'),
         backgroundColor: Theme.of(context).brightness == Brightness.dark 
-            ? const Color(0xFFFF9800) // כתום ענתיק
+            ? const Color(0xFF9C27B0) // סגול יפה
             : Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
       ),

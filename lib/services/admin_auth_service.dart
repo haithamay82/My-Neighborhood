@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import '../models/request.dart';
 
 class AdminAuthService {
@@ -15,12 +16,12 @@ class AdminAuthService {
   static bool isCurrentUserAdmin() {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      print('🔍 Admin check: No current user');
+      debugPrint('🔍 Admin check: No current user');
       return false;
     }
     
     final isAdmin = _adminEmails.contains(user.email);
-    print('🔍 Admin check: User email: ${user.email}, Is admin: $isAdmin');
+    debugPrint('🔍 Admin check: User email: ${user.email}, Is admin: $isAdmin');
     return isAdmin;
   }
   
@@ -45,7 +46,7 @@ class AdminAuthService {
       
       return false;
     } catch (e) {
-      print('Admin login error: $e');
+      debugPrint('Admin login error: $e');
       return false;
     }
   }
@@ -54,16 +55,16 @@ class AdminAuthService {
   static Future<void> ensureAdminProfile() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      print('❌ ensureAdminProfile: No current user');
+      debugPrint('❌ ensureAdminProfile: No current user');
       return;
     }
     
     if (!isCurrentUserAdmin()) {
-      print('❌ ensureAdminProfile: Current user is not admin');
+      debugPrint('❌ ensureAdminProfile: Current user is not admin');
       return;
     }
 
-    print('✅ ensureAdminProfile: Ensuring admin profile for user: ${user.email}');
+    debugPrint('✅ ensureAdminProfile: Ensuring admin profile for user: ${user.email}');
     await _ensureAdminProfile(user);
     
     // וידוא שהמנהל מעודכן עם businessCategories נכון
@@ -80,9 +81,9 @@ class AdminAuthService {
         'businessCategories': RequestCategory.values.map((e) => e.name).toList(),
         'updatedAt': FieldValue.serverTimestamp(),
       });
-      print('Admin business categories updated successfully');
+      debugPrint('Admin business categories updated successfully');
     } catch (e) {
-      print('Error updating admin business categories: $e');
+      debugPrint('Error updating admin business categories: $e');
     }
   }
 
@@ -101,9 +102,9 @@ class AdminAuthService {
         'village': address,
         'updatedAt': FieldValue.serverTimestamp(),
       });
-      print('Admin location updated successfully');
+      debugPrint('Admin location updated successfully');
     } catch (e) {
-      print('Error updating admin location: $e');
+      debugPrint('Error updating admin location: $e');
     }
   }
 
@@ -166,59 +167,59 @@ class AdminAuthService {
         });
       }
     } catch (e) {
-      print('Error ensuring admin profile: $e');
+      debugPrint('Error ensuring admin profile: $e');
     }
   }
   
   /// יצירת חשבון מנהל (רק פעם אחת)
   static Future<bool> createAdminAccount() async {
     try {
-      print('🔧 Starting admin account creation process...');
+      debugPrint('🔧 Starting admin account creation process...');
       
       // בדיקה אם החשבון כבר קיים
       try {
-        print('🔍 Checking if admin account already exists...');
+        debugPrint('🔍 Checking if admin account already exists...');
         await FirebaseAuth.instance.signInWithEmailAndPassword(
           email: _adminEmail,
           password: _adminPassword,
         );
-        print('✅ Admin account already exists');
+        debugPrint('✅ Admin account already exists');
         await FirebaseAuth.instance.signOut(); // התנתקות אחרי הבדיקה
         return true; // החשבון כבר קיים
       } catch (e) {
-        print('ℹ️ Admin account does not exist, will create new one. Error: $e');
+        debugPrint('ℹ️ Admin account does not exist, will create new one. Error: $e');
         // החשבון לא קיים, בואו ניצור אותו
       }
       
       // יצירת חשבון מנהל
-      print('🔨 Creating new admin account...');
+      debugPrint('🔨 Creating new admin account...');
       final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: _adminEmail,
         password: _adminPassword,
       );
       
       if (credential.user != null) {
-        print('✅ Admin account created successfully');
+        debugPrint('✅ Admin account created successfully');
         
         // עדכון שם המנהל
         await credential.user!.updateDisplayName('מנהל מערכת');
-        print('✅ Admin display name updated');
+        debugPrint('✅ Admin display name updated');
         
         // יצירת פרופיל מנהל ב-Firestore
         await _ensureAdminProfile(credential.user!);
-        print('✅ Admin profile created in Firestore');
+        debugPrint('✅ Admin profile created in Firestore');
         
         // התנתקות אחרי יצירת החשבון
         await FirebaseAuth.instance.signOut();
-        print('✅ Signed out after account creation');
+        debugPrint('✅ Signed out after account creation');
         
         return true;
       }
       
-      print('❌ Failed to create admin account - no user returned');
+      debugPrint('❌ Failed to create admin account - no user returned');
       return false;
     } catch (e) {
-      print('❌ Error creating admin account: $e');
+      debugPrint('❌ Error creating admin account: $e');
       return false;
     }
   }
@@ -231,16 +232,16 @@ class AdminAuthService {
   /// בדיקה אם יש מנהל רשום במערכת
   static Future<bool> hasAdminAccount() async {
     try {
-      print('🔍 Checking if admin account exists...');
+      debugPrint('🔍 Checking if admin account exists...');
       await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _adminEmail,
         password: _adminPassword,
       );
-      print('✅ Admin account exists and credentials are valid');
+      debugPrint('✅ Admin account exists and credentials are valid');
       await FirebaseAuth.instance.signOut();
       return true;
     } catch (e) {
-      print('❌ Admin account does not exist or credentials are invalid: $e');
+      debugPrint('❌ Admin account does not exist or credentials are invalid: $e');
       return false;
     }
   }
@@ -255,13 +256,13 @@ class AdminAuthService {
       );
       
       if (credential.user != null) {
-        print('✅ Admin account exists');
+        debugPrint('✅ Admin account exists');
         await FirebaseAuth.instance.signOut();
         return true;
       }
       return false;
     } catch (e) {
-      print('❌ Admin account check failed: $e');
+      debugPrint('❌ Admin account check failed: $e');
       return false;
     }
   }

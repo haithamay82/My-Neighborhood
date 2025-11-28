@@ -5,6 +5,9 @@ import '../models/notification.dart';
 import '../l10n/app_localizations.dart';
 import '../services/permission_service.dart';
 import '../services/notification_service.dart';
+import '../services/notification_navigation_service.dart';
+import '../services/auto_login_service.dart';
+import 'manage_notifications_screen.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -15,7 +18,7 @@ class NotificationsScreen extends StatefulWidget {
 
 class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsBindingObserver {
   bool _hasNotificationPermission = false;
-  bool _hasShownTutorial = false;
+  final bool _hasShownTutorial = false;
   
   @override
   void initState() {
@@ -59,8 +62,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
         appBar: AppBar(
           title: Text(l10n.notifications),
         ),
-        body: const Center(
-          child: Text('משתמש לא מחובר'),
+        body: Center(
+          child: Text(l10n.userNotConnected),
         ),
       );
     }
@@ -77,15 +80,27 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
             ),
           ),
           backgroundColor: Theme.of(context).brightness == Brightness.dark 
-              ? const Color(0xFFFF9800) // כתום ענתיק
+              ? const Color(0xFF9C27B0) // סגול יפה
               : Theme.of(context).colorScheme.primary,
           foregroundColor: Colors.white,
           toolbarHeight: 50,
           actions: [
             IconButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const ManageNotificationsScreen(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.settings, color: Colors.white),
+              tooltip: l10n.manageNotifications,
+            ),
+            IconButton(
               onPressed: _markAllAsRead,
               icon: const Icon(Icons.done_all, color: Colors.white),
-              tooltip: 'סמן הכל כנקרא',
+              tooltip: l10n.markAllAsRead,
             ),
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, color: Colors.white),
@@ -97,13 +112,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
                 }
               },
               itemBuilder: (context) => [
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: 'clear_all',
                   child: Row(
                     children: [
-                      Icon(Icons.clear_all, color: Colors.red),
-                      SizedBox(width: 8),
-                      Text('נקה כל ההתראות'),
+                      const Icon(Icons.clear_all, color: Colors.red),
+                      const SizedBox(width: 8),
+                      Text(AppLocalizations.of(context).clearAllNotifications),
                     ],
                   ),
                 ),
@@ -131,7 +146,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'התראות חסומות - אנא הפעל הרשאות התראות בהגדרות הטלפון',
+                            l10n.notificationsBlocked,
                             style: TextStyle(
                               color: Colors.orange.shade700,
                               fontWeight: FontWeight.bold,
@@ -150,17 +165,14 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
                         backgroundColor: Colors.orange.shade700,
                         foregroundColor: Colors.white,
                       ),
-                      child: const Text('הפעל התראות'),
+                      child: Text(l10n.enableNotifications),
                     ),
                   ],
                 ),
               ),
             Expanded(
-              child: StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('notifications')
-                    .where('toUserId', isEqualTo: user.uid)
-                    .snapshots(),
+              child: StreamBuilder<List<AppNotification>>(
+                stream: NotificationService.getUserNotifications(user.uid),
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
@@ -168,11 +180,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
 
                   if (snapshot.hasError) {
                     return Center(
-                      child: Text('שגיאה: ${snapshot.error}'),
+                      child: Text(l10n.errorMessage(snapshot.error.toString())),
                     );
                   }
 
-                  if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                  if (!snapshot.hasData || snapshot.data!.isEmpty) {
                     return Center(
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -182,37 +194,34 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
                             size: 64,
                             color: Theme.of(context).brightness == Brightness.dark 
                                 ? Colors.white 
-                                : Colors.grey[400],
+                                : Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                           const SizedBox(height: 16),
                           Text(
-                            'אין התראות חדשות',
+                            l10n.noNewNotifications,
                             style: TextStyle(
                               fontSize: 18,
                               color: Theme.of(context).brightness == Brightness.dark 
                                   ? Colors.white 
-                                  : Colors.grey[600],
+                                  : Theme.of(context).colorScheme.onSurfaceVariant,
                             ),
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            'כאשר מישהו יגיב לבקשות שלך או יציע עזרה,\nתקבל התראה כאן',
+                            l10n.notificationInfo,
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: Theme.of(context).brightness == Brightness.dark 
                                   ? Colors.white 
-                                  : Colors.grey[500],
-                            ),
+                                  : Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
-                        ],
-                      ),
-                    );
+                        ),
+                      ],
+                    ),
+                  );
                   }
 
-                  final notifications = snapshot.data!.docs
-                      .map((doc) => AppNotification.fromFirestore(doc))
-                      .toList()
-                    ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+                  final notifications = snapshot.data!;
 
                   return Column(
                     children: [
@@ -246,7 +255,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
         side: BorderSide(
           color: Theme.of(context).brightness == Brightness.dark 
               ? Colors.white 
-              : Colors.grey[600]!,
+              : Theme.of(context).colorScheme.onSurfaceVariant,
           width: 2,
         ),
       ),
@@ -256,7 +265,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
           border: Border.all(
             color: Theme.of(context).brightness == Brightness.dark 
                 ? Colors.white 
-                : Colors.grey[500]!,
+                : Theme.of(context).colorScheme.onSurfaceVariant,
             width: 1,
           ),
         ),
@@ -268,8 +277,8 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
             _getNotificationIcon(notification.type),
             color: notification.read 
                 ? (Theme.of(context).brightness == Brightness.dark 
-                    ? Colors.grey[400] 
-                    : Colors.grey[600]) 
+                    ? Theme.of(context).colorScheme.onSurfaceVariant 
+                    : Theme.of(context).colorScheme.onSurfaceVariant) 
                 : Colors.white,
           ),
         ),
@@ -289,7 +298,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
               style: TextStyle(
                 color: Theme.of(context).brightness == Brightness.dark 
                     ? Colors.white 
-                    : Colors.grey[700],
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
                 fontSize: 14,
               ),
             ),
@@ -299,10 +308,40 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
               style: TextStyle(
                 color: Theme.of(context).brightness == Brightness.dark 
                     ? Colors.white 
-                    : Colors.grey[500],
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
                 fontSize: 12,
               ),
             ),
+            if (notification.type == NotificationType.newRequest && notification.data != null && notification.data!['requestId'] != null)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () {
+                    final String reqId = notification.data!['requestId'];
+                    // נווט דרך שירות הניווט הייעודי
+                    NotificationNavigationService.navigateFromNotification(
+                      context,
+                      'new_request',
+                      requestId: reqId,
+                    );
+                  },
+                  icon: const Icon(Icons.open_in_new),
+                  label: Text(l10n.openRequest),
+                ),
+              ),
+            // כפתור "הירשם" עבור משתמשים אורחים זמניים
+            if (notification.data != null && notification.data!['action'] == 'register')
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () => _performLogoutForRegistration(),
+                  icon: const Icon(Icons.person_add),
+                  label: Text(l10n.register),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+              ),
           ],
         ),
         trailing: notification.read
@@ -336,9 +375,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
   }
 
   Color _getNotificationColor(NotificationType type, bool read) {
-    if (read) return Theme.of(context).brightness == Brightness.dark 
-        ? Colors.grey[600]! 
-        : Colors.grey[300]!;
+    if (read) {
+      return Theme.of(context).brightness == Brightness.dark 
+          ? Theme.of(context).colorScheme.onSurfaceVariant 
+          : Theme.of(context).colorScheme.surfaceContainerHighest;
+    }
     
     switch (type) {
       case NotificationType.subscriptionApproved:
@@ -357,9 +398,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
       await NotificationService.markAsRead(notificationId);
     } catch (e) {
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('שגיאה בעדכון התראה: $e'),
+          content: Text(l10n.errorUpdatingNotification(e.toString())),
           backgroundColor: Colors.red,
         ),
       );
@@ -374,17 +416,19 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
       await NotificationService.markAllAsRead(user.uid);
 
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('כל ההתראות סומנו כנקראו'),
+        SnackBar(
+          content: Text(l10n.allNotificationsMarkedAsRead),
           backgroundColor: Colors.green,
         ),
       );
     } catch (e) {
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('שגיאה בעדכון התראות: $e'),
+          content: Text(l10n.errorUpdatingNotifications(e.toString())),
           backgroundColor: Colors.red,
         ),
       );
@@ -394,27 +438,30 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
   void _showClearAllDialog() {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('נקה כל ההתראות'),
-        content: const Text('האם אתה בטוח שברצונך למחוק את כל ההתראות? פעולה זו לא ניתנת לביטול.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('ביטול'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _clearAllNotifications();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
+      builder: (context) {
+        final dialogL10n = AppLocalizations.of(context);
+        return AlertDialog(
+          title: Text(dialogL10n.clearAllNotificationsTitle),
+          content: Text(dialogL10n.clearAllNotificationsMessage),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(dialogL10n.cancel),
             ),
-            child: const Text('נקה הכל'),
-          ),
-        ],
-      ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _clearAllNotifications();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: Text(dialogL10n.clearAll),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -438,17 +485,19 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
       }
 
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('כל ההתראות נמחקו בהצלחה'),
+        SnackBar(
+          content: Text(l10n.allNotificationsDeletedSuccessfully),
           backgroundColor: Colors.green,
         ),
       );
     } catch (e) {
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('שגיאה במחיקת התראות: $e'),
+          content: Text(l10n.errorDeletingNotifications(e.toString())),
           backgroundColor: Colors.red,
         ),
       );
@@ -458,27 +507,30 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
   void _showDeleteNotificationDialog(AppNotification notification) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('מחק התראה'),
-        content: Text('האם אתה בטוח שברצונך למחוק את ההתראה "${notification.title}"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('ביטול'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _deleteNotification(notification.notificationId);
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
+      builder: (context) {
+        final dialogL10n = AppLocalizations.of(context);
+        return AlertDialog(
+          title: Text(dialogL10n.deleteNotification),
+          content: Text(dialogL10n.deleteNotificationMessage(notification.title)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(dialogL10n.cancel),
             ),
-            child: const Text('מחק'),
-          ),
-        ],
-      ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                _deleteNotification(notification.notificationId);
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: Text(dialogL10n.delete),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -490,17 +542,19 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
           .delete();
 
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('ההתראה נמחקה בהצלחה'),
+        SnackBar(
+          content: Text(l10n.notificationDeletedSuccessfully),
           backgroundColor: Colors.green,
         ),
       );
     } catch (e) {
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('שגיאה במחיקת ההתראה: $e'),
+          content: Text(l10n.errorDeletingNotification(e.toString())),
           backgroundColor: Colors.red,
         ),
       );
@@ -508,19 +562,47 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
   }
 
   String _formatTime(DateTime dateTime) {
+    final l10n = AppLocalizations.of(context);
     final now = DateTime.now();
     final difference = now.difference(dateTime);
 
     if (difference.inMinutes < 1) {
-      return 'עכשיו';
+      return l10n.now;
     } else if (difference.inHours < 1) {
-      return 'לפני ${difference.inMinutes} דקות';
+      return l10n.minutesAgo(difference.inMinutes);
     } else if (difference.inDays < 1) {
-      return 'לפני ${difference.inHours} שעות';
+      return l10n.hoursAgo(difference.inHours);
     } else if (difference.inDays < 7) {
-      return 'לפני ${difference.inDays} ימים';
+      return l10n.daysAgo(difference.inDays);
     } else {
       return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
+    }
+  }
+
+  /// ביצוע התנתקות לצורך הרשמה (למשתמש אורח זמני)
+  Future<void> _performLogoutForRegistration() async {
+    try {
+      // התנתקות מלאה - מוחקת את כל המידע השמור
+      await AutoLoginService.logout();
+      
+      // חזרה למסך התחברות
+      if (mounted) {
+        Navigator.pushNamedAndRemoveUntil(
+          context,
+          '/auth',
+          (route) => false,
+        );
+      }
+    } catch (e) {
+      debugPrint('Error during logout for registration: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה בהתנתקות: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 }

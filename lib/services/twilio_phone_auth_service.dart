@@ -1,4 +1,5 @@
 import 'package:twilio_flutter/twilio_flutter.dart';
+import 'package:flutter/foundation.dart';
 
 class TwilioPhoneAuthService {
   static final TwilioFlutter _twilioFlutter = TwilioFlutter(
@@ -30,7 +31,7 @@ class TwilioPhoneAuthService {
 
       return true;
     } catch (e) {
-      print('שגיאה בשליחת SMS: $e');
+      debugPrint('שגיאה בשליחת SMS: $e');
       return false;
     }
   }

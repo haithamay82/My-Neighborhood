@@ -24,6 +24,8 @@ class SocialAuthService {
         await launchUrl(webUrl, mode: LaunchMode.externalApplication);
       }
       
+      // Guard context usage after async gap
+      if (!context.mounted) return;
       // הצג הודעה למשתמש
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -34,6 +36,8 @@ class SocialAuthService {
       );
     } catch (e) {
       debugPrint('Instagram login error: $e');
+      // Guard context usage after async gap
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('שגיאה בפתיחת אינסטגרם: $e'),
@@ -58,6 +62,8 @@ class SocialAuthService {
         await launchUrl(webUrl, mode: LaunchMode.externalApplication);
       }
       
+      // Guard context usage after async gap
+      if (!context.mounted) return;
       // הצג הודעה למשתמש
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -68,6 +74,8 @@ class SocialAuthService {
       );
     } catch (e) {
       debugPrint('TikTok login error: $e');
+      // Guard context usage after async gap
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('שגיאה בפתיחת טיקטוק: $e'),
@@ -86,6 +94,8 @@ class SocialAuthService {
         final OAuthCredential credential = FacebookAuthProvider.credential(result.accessToken!.tokenString);
         final userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
         
+        // Guard context usage after async gap
+        if (!context.mounted) return userCredential;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('התחברות מוצלחת דרך פייסבוק!'),
@@ -95,6 +105,8 @@ class SocialAuthService {
         
         return userCredential;
       } else {
+        // Guard context usage after async gap
+        if (!context.mounted) return null;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('התחברות נכשלה'),
@@ -105,6 +117,8 @@ class SocialAuthService {
       }
     } catch (e) {
       debugPrint('Facebook login error: $e');
+      // Guard context usage after async gap
+      if (!context.mounted) return null;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('שגיאה בכניסה לפייסבוק: $e'),
@@ -134,6 +148,8 @@ class SocialAuthService {
           // כניסה עם Firebase Auth - השתמש רק ב-redirect כדי להימנע מבעיות Cross-Origin-Opener-Policy
           debugPrint('🔄 Using redirect for Google Sign-In to avoid Cross-Origin-Opener-Policy issues');
           
+          // Guard context usage before async gap
+          if (!context.mounted) return null;
           // הצג הודעה למשתמש שהדפדפן יעבור לדף Google
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
@@ -148,6 +164,8 @@ class SocialAuthService {
           return null; // נחזור null כי המשתמש יעבור לדף Google
         } catch (e) {
           debugPrint('❌ Google Sign-In error: $e');
+          // Guard context usage after async gap
+          if (!context.mounted) return null;
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('שגיאה בכניסה לגוגל: $e'),
@@ -173,6 +191,8 @@ class SocialAuthService {
         debugPrint('  - Access Token: ${googleAuth.accessToken != null ? "Present" : "NULL"}');
         debugPrint('  - ID Token: ${googleAuth.idToken != null ? "Present" : "NULL"}');
         
+        // Guard context usage after async gap
+        if (!context.mounted) return null;
         // בדיקה אם יש לפחות אחד מהטוקנים
         if (googleAuth.accessToken == null && googleAuth.idToken == null) {
           debugPrint('❌ Google Sign-In failed: Both tokens are null');
@@ -193,6 +213,8 @@ class SocialAuthService {
         
         final userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
         
+        // Guard context usage after async gap
+        if (!context.mounted) return null;
         // בדיקת null safety עבור user
         if (userCredential.user == null) {
           debugPrint('❌ Google Sign-In failed: User is null after Firebase authentication');
@@ -205,6 +227,8 @@ class SocialAuthService {
           return null;
         }
         
+        // Guard context usage after async gap
+        if (!context.mounted) return userCredential;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('התחברות מוצלחת דרך גוגל!'),
@@ -217,6 +241,8 @@ class SocialAuthService {
       return null;
     } catch (e) {
       debugPrint('Google login error: $e');
+      // Guard context usage after async gap
+      if (!context.mounted) return null;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('שגיאה בכניסה לגוגל: $e'),

@@ -1,22 +1,26 @@
 import 'package:flutter/material.dart';
+import '../l10n/app_localizations.dart';
 
 class TermsAndPrivacyScreen extends StatelessWidget {
   final VoidCallback onAccept;
   final VoidCallback onDecline;
+  final bool readOnly;
 
   const TermsAndPrivacyScreen({
-    Key? key,
+    super.key,
     required this.onAccept,
     required this.onDecline,
-  }) : super(key: key);
+    this.readOnly = false,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('תנאי שימוש ומדיניות פרטיות'),
+        title: Text(l10n.termsAndPrivacyTitle),
         centerTitle: true,
-        backgroundColor: Colors.blue[600],
+        backgroundColor: Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
       ),
       body: SingleChildScrollView(
@@ -27,10 +31,10 @@ class TermsAndPrivacyScreen extends StatelessWidget {
             // כותרת
             Center(
               child: Text(
-                'ברוכים הבאים לאפליקציה שלנו',
+                l10n.welcomeToTermsScreen,
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.bold,
-                  color: Colors.blue[700],
+                  color: Theme.of(context).colorScheme.primary,
                 ),
               ),
             ),
@@ -39,20 +43,19 @@ class TermsAndPrivacyScreen extends StatelessWidget {
             // תנאי שימוש
             _buildSection(
               context,
-              'תנאי שימוש',
+              l10n.termsOfService,
               [
-                '1. השימוש באפליקציה מותנה בקבלת תנאי השימוש הללו.',
-                '2. השימוש באפליקציה מיועד למשתמשים מעל גיל 18 בלבד. החברה שומרת על זכותה לבקש הוכחת גיל בכל שלב.',
-                '3. האפליקציה מיועדת לעזרה הדדית בין שכנים - חיבור בין מבקשי עזרה לנותני עזרה בקהילה המקומית.',
-                '4. המשתמש מתחייב לספק מידע אמיתי ומדויק בלבד, לרבות פרטי מיקום ופרטי יצירת קשר.',
-                '5. אסור להשתמש באפליקציה למטרות לא חוקיות, לא מוסריות או מסחריות. האפליקציה מיועדת לעזרה הדדית בלבד.',
-                '6. המשתמשים אחראים באופן בלעדי לתוכן שהם מפרסמים ולכל אינטראקציה עם משתמשים אחרים.',
-                '7. שכונתי היא מתווכת בלבד ואינה אחראית לאיכות השירותים, למהימנות המשתמשים או לנזקים כלשהם.',
-                '8. המשתמש מתחייב לדווח על התנהגות לא הולמת, פוגענית או מסוכנת מיד לתמיכה או לרשויות הרלוונטיות.',
-                '9. ניתן לבטל בקשה עד 30 דקות ממועד הפרסום. ביטול מאוחר יותר מותנה בהסכמת נותן השירות.',
-                '10. החברה שומרת לעצמה את הזכות להפסיק את השירות, לחסום משתמשים או להסיר תוכן בכל עת.',
-                '11. המשתמש אחראי לשמירה על סיסמת הכניסה שלו ולאבטחת המידע האישי שלו.',
-                '12. כל מחלוקת תיפתר על פי החוק הישראלי ובהתאם לדיני מדינת ישראל.',
+                l10n.termsSection1,
+                l10n.termsSection2,
+                l10n.termsSection3,
+                l10n.termsSection4,
+                l10n.termsSection5,
+                l10n.termsSection6,
+                l10n.termsSection7,
+                l10n.termsSection8,
+                l10n.termsSection10,
+                l10n.termsSection11,
+                l10n.termsSection12,
               ],
             ),
 
@@ -61,16 +64,15 @@ class TermsAndPrivacyScreen extends StatelessWidget {
             // עזרה הדדית ובטיחות
             _buildSection(
               context,
-              'עזרה הדדית ובטיחות',
+              l10n.mutualHelpAndSafety,
               [
-                '1. האפליקציה מיועדת לעזרה הדדית בין שכנים - עזרה מתוך רצון טוב ולא למטרות מסחריות.',
-                '2. אין חובה חוקית לספק שירות, אך מומלץ לעמוד בהתחייבויות שניתנו לאחרים.',
-                '3. מערכת הדירוגים והביקורות חייבת להיות אמיתית ומדויקת. דירוגים כוזבים או פוגעניים יובילו לחסימת המשתמש.',
-                '4. במקרה של חשד לסכנה, התנהגות לא הולמת או ניצול, יש לדווח מיד לתמיכה או לרשויות הרלוונטיות.',
-                '5. אנו שומרים לעצמנו את הזכות לחסום משתמשים שמפרים את הכללים או מתנהגים בצורה לא הולמת.',
-                '6. התשלומים בין משתמשים הם באחריותם הבלעדית. שכונתי אינה אחראית לתשלומים או לעסקאות בין המשתמשים.',
-                '7. מומלץ להיפגש במקומות ציבוריים או עם אנשים נוספים בעת מתן/קבלת עזרה.',
-                '8. במקרה של בעיה או סכסוך, אנו ממליצים לנסות לפתור את הבעיה בדרכי שלום לפני פנייה לתמיכה.',
+                l10n.mutualHelpSection1,
+                l10n.mutualHelpSection2,
+                l10n.mutualHelpSection3,
+                l10n.mutualHelpSection4,
+                l10n.mutualHelpSection5,
+                l10n.mutualHelpSection6,
+                l10n.mutualHelpSection8,
               ],
             ),
 
@@ -79,118 +81,133 @@ class TermsAndPrivacyScreen extends StatelessWidget {
             // מדיניות פרטיות
             _buildSection(
               context,
-              'מדיניות פרטיות',
+              l10n.privacyPolicy,
               [
-                '1. אנו מכבדים את פרטיות המשתמשים ומתחייבים להגן על המידע האישי שלך.',
-                '2. המידע האישי נאסף לצורך מתן השירותים, לרבות מיקום גיאוגרפי לחיבור שכנים, פרטי יצירת קשר ומידע על בקשות עזרה.',
-                '3. אנו לא נמכור או נשתף את המידע האישי עם צדדים שלישיים ללא הסכמה מפורשת, למעט במקרים הנדרשים על פי חוק.',
-                '4. המידע נשמר בשרתים מאובטחים ומוצפנים. מיקום גיאוגרפי נשמר באופן מוצפן ולא מועבר לצדדים שלישיים.',
-                '5. יש לך בקרה מלאה על מי רואה את המידע שלך. תוכל להגדיר רמות פרטיות שונות עבור בקשות שונות.',
-                '6. המשתמש רשאי לבקש לגשת, לתקן או למחוק את המידע האישי שלו בכל עת.',
-                '7. אנו משתמשים בעוגיות (cookies) ובטכנולוגיות דומות לשיפור חוויית המשתמש ולניתוח השימוש באפליקציה.',
-                '8. המידע עשוי להיות מועבר לספקי שירותים חיצוניים (כגון Firebase) לצורך מתן השירותים, אך תמיד תחת הגנות אבטחה מתאימות.',
-                '9. אנו נוקטים באמצעי אבטחה סבירים כדי להגן על המידע שלך מפני גישה בלתי מורשית, שימוש או חשיפה.',
-                '10. במקרה של פריצת אבטחה או חשיפת מידע, נדווח על כך בהקדם האפשרי וננקוט בצעדים מתאימים.',
-                '11. אנו מתחייבים לעדכן את המשתמשים על כל שינוי במדיניות הפרטיות באמצעות האפליקציה או בדרכים אחרות.',
-                '12. האפליקציה עשויה להכיל קישורים לאתרים או שירותים של צדדים שלישיים. איננו אחראים למדיניות הפרטיות שלהם.',
+                l10n.privacySection1,
+                l10n.privacySection2,
+                l10n.privacySection3,
+                l10n.privacySection4,
+                l10n.privacySection5,
+                l10n.privacySection6,
+                l10n.privacySection7,
+                l10n.privacySection8,
+                l10n.privacySection9,
+                l10n.privacySection10,
+                l10n.privacySection11,
+                l10n.privacySection12,
+                l10n.privacySection13,
+                l10n.privacySection14,
+                l10n.privacySection15,
               ],
             ),
 
-            const SizedBox(height: 32),
+            // הצג את החלק הזה רק אם זה לא readOnly (כלומר, במהלך הרשמה)
+            if (!readOnly) ...[
+              const SizedBox(height: 32),
 
-            // אזהרה חשובה
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.orange[50],
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.orange[200]!),
+              // אזהרה חשובה
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.tertiaryContainer,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Theme.of(context).colorScheme.tertiary),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.warning,
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? Theme.of(context).colorScheme.onSurface
+                              : Theme.of(context).colorScheme.tertiary,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          l10n.importantNote,
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Theme.of(context).brightness == Brightness.dark
+                                ? Theme.of(context).colorScheme.onSurface
+                                : Theme.of(context).colorScheme.onTertiaryContainer,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      l10n.byContinuingYouConfirm,
+                      style: TextStyle(
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? Theme.of(context).colorScheme.onSurface
+                            : Theme.of(context).colorScheme.onTertiaryContainer,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+
+              const SizedBox(height: 32),
+
+              // כפתורי פעולה
+              Row(
                 children: [
-                  Row(
-                    children: [
-                      Icon(Icons.warning, color: Colors.orange[600]),
-                      const SizedBox(width: 8),
-                      Text(
-                        'חשוב לדעת',
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Colors.orange[700],
-                          fontSize: 16,
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: onDecline,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Theme.of(context).colorScheme.error,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                    ],
+                      child: Text(
+                        l10n.doNotAgree,
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                    ),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'על ידי המשך השימוש באפליקציה, אתה מאשר שקראת והבנת את תנאי השימוש ומדיניות הפרטיות, ואתה מסכים להם.',
-                    style: TextStyle(
-                      color: Colors.orange[700],
-                      fontSize: 14,
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: onAccept,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        l10n.agreeAndContinue,
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ),
                 ],
               ),
-            ),
 
-            const SizedBox(height: 32),
+              const SizedBox(height: 16),
 
-            // כפתורי פעולה
-            Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: onDecline,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red[400],
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text(
-                      'לא מסכים',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
+              // הודעה על עדכונים
+              Center(
+                child: Text(
+                  l10n.termsMayBeUpdated,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontSize: 12,
                   ),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: onAccept,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green[600],
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text(
-                      'מסכים וממשיך',
-                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 16),
-
-            // הודעה על עדכונים
-            Center(
-              child: Text(
-                'תנאי השימוש ומדיניות הפרטיות עשויים להתעדכן מעת לעת.\nתוכל למצוא את הגרסה העדכנית ביותר באפליקציה.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: Colors.grey[600],
-                  fontSize: 12,
                 ),
               ),
-            ),
+            ],
           ],
         ),
       ),
@@ -205,28 +222,46 @@ class TermsAndPrivacyScreen extends StatelessWidget {
           title,
           style: Theme.of(context).textTheme.titleLarge?.copyWith(
             fontWeight: FontWeight.bold,
-            color: Colors.blue[700],
+            color: Theme.of(context).colorScheme.primary,
           ),
         ),
         const SizedBox(height: 12),
-        ...points.map((point) => Padding(
+        ...points.asMap().entries.map((entry) {
+          final point = entry.value;
+          // נסה לחלץ את המספר מהתחלה של הטקסט
+          final numberMatch = RegExp(r'^(\d+)\.\s*').firstMatch(point);
+          if (numberMatch != null) {
+            final number = numberMatch.group(1);
+            final text = point.substring(numberMatch.end);
+            return Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                point.split(' ')[0] + ' ',
+                    '$number. ',
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               Expanded(
                 child: Text(
-                  point.substring(point.indexOf(' ') + 1),
+                      text,
                   style: const TextStyle(height: 1.4),
                 ),
               ),
             ],
           ),
-        )),
+            );
+          } else {
+            // אם אין מספר, פשוט הצג את הטקסט
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                point,
+                style: const TextStyle(height: 1.4),
+              ),
+            );
+          }
+        }),
       ],
     );
   }

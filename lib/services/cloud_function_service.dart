@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
+import 'dart:io' show Platform;
 
 class CloudFunctionService {
   static Future<void> sendPushNotification({
@@ -79,5 +81,52 @@ class CloudFunctionService {
         'requestTitle': requestTitle,
       },
     );
+  }
+
+  /// שליחת אימייל אימות מותאם אישית
+  static Future<bool> sendCustomVerificationEmail({
+    required String email,
+    String? userId,
+    String? password, // הסיסמה להוספה לאימייל
+  }) async {
+    try {
+      final functions = FirebaseFunctions.instance;
+      final callable = functions.httpsCallable('sendCustomVerificationEmail');
+      
+      // זיהוי platform
+      String platform = 'web';
+      try {
+        if (kIsWeb) {
+          platform = 'web';
+        } else if (Platform.isAndroid) {
+          platform = 'android';
+        } else if (Platform.isIOS) {
+          platform = 'ios';
+        }
+      } catch (e) {
+        // אם יש שגיאה, נשתמש ב-web כברירת מחדל
+        platform = 'web';
+      }
+      
+      final result = await callable.call({
+        'email': email,
+        if (userId != null) 'userId': userId,
+        if (password != null) 'password': password, // שולח את הסיסמה
+        'platform': platform, // שולח את ה-platform
+      });
+      
+      final success = result.data['success'] as bool? ?? false;
+      
+      if (success) {
+        debugPrint('✅ Custom verification email sent successfully to: $email');
+        return true;
+      } else {
+        debugPrint('❌ Failed to send custom verification email');
+        return false;
+      }
+    } catch (e) {
+      debugPrint('❌ Error sending custom verification email: $e');
+      return false;
+    }
   }
 }

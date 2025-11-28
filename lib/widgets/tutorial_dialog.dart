@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/tutorial_service.dart';
+import '../l10n/app_localizations.dart';
 
 class TutorialDialog extends StatelessWidget {
   final String tutorialKey;
@@ -57,9 +58,9 @@ class TutorialDialog extends StatelessWidget {
             ),
             if (features.isNotEmpty) ...[
               const SizedBox(height: 16),
-              const Text(
-                'מה תוכל לעשות:',
-                style: TextStyle(
+              Text(
+                AppLocalizations.of(context).whatYouCanDo,
+                style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
                 ),
@@ -98,7 +99,7 @@ class TutorialDialog extends StatelessWidget {
                 Navigator.of(context).pop();
               }
             },
-            child: const Text('לא להציג שוב'),
+            child: Text(AppLocalizations.of(context).dontShowAgain),
           ),
         if (actionText != null && onAction != null)
           ElevatedButton(
@@ -121,7 +122,7 @@ class TutorialDialog extends StatelessWidget {
               Navigator.of(context).pop();
             }
           },
-          child: const Text('הבנתי'),
+          child: Text(AppLocalizations.of(context).understood),
         ),
       ],
     );

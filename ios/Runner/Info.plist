@@ -48,6 +48,34 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
+		<string>location</string>
+		<string>processing</string>
+	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>האפליקציה זקוקה למיקום שלך כדי להציג בקשות רלוונטיות באזור שלך</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>האפליקציה זקוקה למיקום שלך כדי להציג בקשות רלוונטיות באזור שלך גם כאשר האפליקציה ברקע</string>
+	<key>NSCameraUsageDescription</key>
+	<string>האפליקציה זקוקה לגישה למצלמה כדי לצלם תמונות לבקשות עזרה</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>האפליקציה זקוקה לגישה לגלריה כדי לבחור תמונות להעלאה לבקשות עזרה</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>האפליקציה זקוקה לגישה למיקרופון כדי להקליט הודעות קוליות</string>
+	<key>NSUserNotificationsUsageDescription</key>
+	<string>האפליקציה זקוקה להרשאה לשלוח התראות על בקשות חדשות והודעות</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.example.flutter1</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>shchunati</string>
+				<string>com.example.flutter1</string>
+			</array>
+		</dict>
 	</array>
 </dict>
 </plist>

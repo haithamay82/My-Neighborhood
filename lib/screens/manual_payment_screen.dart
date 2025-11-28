@@ -283,7 +283,7 @@ class _ManualPaymentScreenState extends State<ManualPaymentScreen> {
           children: [
             Icon(
               Icons.check_circle,
-              color: Colors.green[600],
+              color: Theme.of(context).colorScheme.primary,
               size: 28,
             ),
             const SizedBox(width: 8),
@@ -311,13 +311,13 @@ class _ManualPaymentScreenState extends State<ManualPaymentScreen> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.blue[50],
+                color: Theme.of(context).colorScheme.primaryContainer,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue[200]!),
+                border: Border.all(color: Theme.of(context).colorScheme.primary),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.info, color: Colors.blue[600], size: 20),
+                  Icon(Icons.info, color: Theme.of(context).colorScheme.primary, size: 20),
                   const SizedBox(width: 8),
                   const Expanded(
                     child: Text(
@@ -349,7 +349,7 @@ class _ManualPaymentScreenState extends State<ManualPaymentScreen> {
                 debugPrint('✅ All dialogs closed, should be back to profile');
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green[600],
+                backgroundColor: Theme.of(context).colorScheme.primary,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 12),
               ),
@@ -389,7 +389,7 @@ class _ManualPaymentScreenState extends State<ManualPaymentScreen> {
             ),
           ),
           backgroundColor: Theme.of(context).brightness == Brightness.dark 
-              ? const Color(0xFFFF9800) // כתום ענתיק
+              ? const Color(0xFF9C27B0) // סגול יפה
               : Theme.of(context).colorScheme.primary,
           foregroundColor: Colors.white,
           toolbarHeight: 50,
@@ -406,7 +406,7 @@ class _ManualPaymentScreenState extends State<ManualPaymentScreen> {
                         borderRadius: BorderRadius.circular(20),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
+                            color: Colors.black.withValues(alpha: 0.1),
                             blurRadius: 10,
                             offset: const Offset(0, 5),
                           ),
@@ -431,7 +431,7 @@ class _ManualPaymentScreenState extends State<ManualPaymentScreen> {
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w500,
-                              color: Colors.grey[700],
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ],
@@ -448,7 +448,7 @@ class _ManualPaymentScreenState extends State<ManualPaymentScreen> {
                   children: [
                     // כרטיס הוראות תשלום
                     Card(
-                      color: Colors.blue[50],
+                      color: Theme.of(context).colorScheme.primaryContainer,
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Column(
@@ -456,14 +456,14 @@ class _ManualPaymentScreenState extends State<ManualPaymentScreen> {
                           children: [
                             Row(
                               children: [
-                                Icon(Icons.payment, color: Colors.blue[700]),
+                                Icon(Icons.payment, color: Theme.of(context).colorScheme.primary),
                                 const SizedBox(width: 8),
                                 Text(
                                   'הוראות תשלום',
                                   style: TextStyle(
                                     fontSize: 18,
                                     fontWeight: FontWeight.bold,
-                                    color: Colors.blue[700],
+                                    color: Theme.of(context).colorScheme.primary,
                                   ),
                                 ),
                               ],
@@ -474,9 +474,9 @@ class _ManualPaymentScreenState extends State<ManualPaymentScreen> {
                               Container(
                                 padding: const EdgeInsets.all(16),
                                 decoration: BoxDecoration(
-                                  color: Colors.blue[50],
+                                  color: Theme.of(context).colorScheme.primaryContainer,
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.blue[200]!),
+                                  border: Border.all(color: Theme.of(context).colorScheme.primary),
                                 ),
                                 child: Column(
                                   children: [
@@ -494,7 +494,7 @@ class _ManualPaymentScreenState extends State<ManualPaymentScreen> {
                                       style: TextStyle(
                                         fontSize: 24,
                                         fontWeight: FontWeight.bold,
-                                        color: Colors.blue[700],
+                                        color: Theme.of(context).colorScheme.primary,
                                       ),
                                     ),
                                   ],
@@ -584,7 +584,7 @@ class _ManualPaymentScreenState extends State<ManualPaymentScreen> {
                         labelText: 'הערה (אופציונלי)',
                         labelStyle: const TextStyle(color: Colors.black87),
                         hintText: 'הוסף הערה על התשלום...',
-                        hintStyle: TextStyle(color: Colors.grey[600]),
+                        hintStyle: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
                         border: const OutlineInputBorder(),
                       ),
                     ),

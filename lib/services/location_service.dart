@@ -1,11 +1,15 @@
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'notification_tracking_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:io' show Platform;
+import '../l10n/app_localizations.dart';
+import 'notification_service.dart';
+import 'notification_preferences_service.dart';
 
 class LocationService {
   /// בדיקת הרשאות מיקום
@@ -72,9 +76,10 @@ class LocationService {
       // קבלת המיקום
       debugPrint('Attempting to get current position...');
       Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-        timeLimit: const Duration(seconds: 15),
-      );
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      ).timeout(const Duration(seconds: 15));
 
       debugPrint('Position obtained: ${position.latitude}, ${position.longitude}');
       return position;
@@ -192,7 +197,7 @@ class LocationService {
     return isLocationInRange(userLat, userLon, targetLat, targetLon, maxDistanceKm);
   }
 
-  /// חישוב טווח מקסימלי לפי סוג מנוי
+  /// חישוב טווח מקסימלי לפי סוג משתמש (במטרים)
   static double calculateMaxRadiusForUser({
     required String userType,
     required bool isSubscriptionActive,
@@ -200,38 +205,24 @@ class LocationService {
     double averageRating = 0.0,
     bool isAdmin = false,
   }) {
-    double baseRadius = 1000.0; // טווח בסיסי במטרים (1 ק"מ)
+    // קביעת טווח מקסימלי קשיח לפי סוג המשתמש
+    // הערכים הם במטרים
+    if (isAdmin) {
+      return 250000.0; // מנהל: 250 ק"מ
+    }
 
-    // טווח לפי סוג משתמש (במטרים)
     switch (userType) {
       case 'guest':
-        baseRadius = 3000.0; // 3 ק"מ - כמו עסקי מנוי
-        break;
+        return 5000.0; // אורח: 5 ק"מ
       case 'personal':
-        baseRadius = isSubscriptionActive ? 2000.0 : 1000.0; // 2 ק"מ או 1 ק"מ
-        break;
+        return isSubscriptionActive ? 5000.0 : 3000.0; // פרטי מנוי: 5 ק"מ, פרטי חינם: 3 ק"מ
       case 'business':
-        baseRadius = isSubscriptionActive ? 3000.0 : 1000.0; // 3 ק"מ או 1 ק"מ
-        break;
+        return isSubscriptionActive ? 8000.0 : 1000.0; // עסקי מנוי: 8 ק"מ (עסקי ללא מנוי: 1 ק"מ ברירת מחדל)
       case 'admin':
-        baseRadius = 50000.0; // 50 ק"מ
-        break;
+        return 250000.0; // גיבוי
+      default:
+        return 3000.0; // ברירת מחדל: 3 ק"מ
     }
-
-    // בונוס המלצות (200 מטר לכל המלצה)
-    final recommendationsBonus = recommendationsCount * 200.0;
-
-    // בונוס דירוג (במטרים)
-    double ratingBonus = 0.0;
-    if (averageRating >= 4.5) {
-      ratingBonus = 1500.0; // 1.5 ק"מ
-    } else if (averageRating >= 4.0) {
-      ratingBonus = 1000.0; // 1 ק"מ
-    } else if (averageRating >= 3.5) {
-      ratingBonus = 500.0; // 500 מטר
-    }
-
-    return baseRadius + recommendationsBonus + ratingBonus;
   }
 
   /// בדיקה אם טווח חשיפה לא חורג מגבולות ישראל
@@ -328,21 +319,8 @@ double radiusIncrease,
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      // בדיקה אם כבר נשלחה התראה על הגדלת טווח עם אותם פרמטרים
-      final hasBeenSent = await NotificationTrackingService.hasNotificationWithParamsBeenSent(
-        userId: user.uid,
-        notificationType: 'radius_increase',
-        params: {
-          'recommendationsCount': recommendationsCount,
-          'averageRating': averageRating.toStringAsFixed(1),
-          'radiusIncrease': radiusIncrease.toStringAsFixed(1),
-        },
-      );
-
-      if (hasBeenSent) {
-        debugPrint('Radius increase notification already sent for user: ${user.uid} with same parameters');
-        return;
-      }
+      // בדיקה פשוטה
+      debugPrint('Checking radius increase notification');
 
       String message = '';
       String details = '';
@@ -390,20 +368,302 @@ double radiusIncrease,
           .collection('notifications')
           .add(notification);
 
-      // סימון שההתראה נשלחה
-      await NotificationTrackingService.markNotificationWithParamsAsSent(
-        userId: user.uid,
-        notificationType: 'radius_increase',
-        params: {
-          'recommendationsCount': recommendationsCount,
-          'averageRating': averageRating.toStringAsFixed(1),
-          'radiusIncrease': radiusIncrease.toStringAsFixed(1),
-        },
-      );
+      // התראה נשלחה
+      debugPrint('Radius increase notification sent for user: ${user.uid}');
 
       debugPrint('✅ Radius increase notification sent: $message');
     } catch (e) {
       debugPrint('❌ Error sending radius increase notification: $e');
+    }
+  }
+
+  /// עדכון מיקום נייד ברקע - שומר ב-Firestore
+  static Future<void> updateMobileLocationInBackground() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        debugPrint('⚠️ No user logged in, skipping mobile location update');
+        return;
+      }
+
+      // בדיקת הרשאות
+      bool hasPermission = await checkLocationPermission();
+      if (!hasPermission) {
+        debugPrint('⚠️ No location permission, skipping mobile location update');
+        return;
+      }
+
+      // בדיקה אם המיקום מופעל
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        debugPrint('⚠️ Location services disabled, clearing mobile location from Firestore');
+        // אם שירות המיקום מבוטל, נמחק את המיקום הנייד מ-Firestore
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .update({
+          'mobileLatitude': FieldValue.delete(),
+          'mobileLongitude': FieldValue.delete(),
+          'mobileLocationUpdatedAt': FieldValue.delete(),
+        });
+        debugPrint('📍 Mobile location cleared from Firestore (location service disabled)');
+        return;
+      }
+
+      // קבלת מיקום נוכחי
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+
+      // עדכון ב-Firestore
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .update({
+        'mobileLatitude': position.latitude,
+        'mobileLongitude': position.longitude,
+        'mobileLocationUpdatedAt': FieldValue.serverTimestamp(),
+      });
+
+      debugPrint('📍 Background mobile location updated: ${position.latitude}, ${position.longitude}');
+    } catch (e) {
+      debugPrint('❌ Error updating mobile location in background: $e');
+    }
+  }
+
+  /// ✅ בדיקה והצגת דיאלוג אם שירות המיקום מבוטל
+  static Future<void> checkAndShowLocationServiceDialog(BuildContext context, {bool forceShow = false}) async {
+    try {
+      // בדיקה אם שירות המיקום פעיל
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      
+      if (serviceEnabled) {
+        // ✅ אם שירות המיקום פעיל, נאפס את הסטטוס כדי שנוכל לשלוח התראה/דיאלוג שוב אם ייסגר
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setInt('locationServiceDialogLastShown', 0);
+        debugPrint('📍 Location service is enabled - resetting dialog status');
+        return;
+      }
+      
+      // שירות המיקום מבוטל
+      // בדיקה אם כבר הצגנו את הדיאלוג לאחרונה (למניעת הצגה חוזרת)
+      final prefs = await SharedPreferences.getInstance();
+      final lastShown = prefs.getInt('locationServiceDialogLastShown') ?? 0;
+      
+      // אם forceShow = false, נבדוק אם כבר הצגנו את הדיאלוג לאחרונה
+      if (!forceShow) {
+        // אם lastShown = 0, זה אומר ששירות המיקום הופעל לאחרונה, אז נציג את הדיאלוג
+        if (lastShown != 0) {
+          final now = DateTime.now().millisecondsSinceEpoch;
+          const oneHourInMs = 60 * 60 * 1000; // שעה אחת במילישניות
+          
+          // אם הצגנו את הדיאלוג בשעה האחרונה, לא נציג שוב
+          if (now - lastShown < oneHourInMs) {
+            debugPrint('📍 Location service dialog shown recently, skipping');
+            return;
+          }
+        }
+      } else {
+        // אם forceShow = true (בכניסה לאפליקציה), נציג את הדיאלוג רק אם לא הצגנו אותו בשעה האחרונה
+        // זה מונע הצגה חוזרת גם בכניסה לאפליקציה
+        if (lastShown != 0) {
+          final now = DateTime.now().millisecondsSinceEpoch;
+          const oneHourInMs = 60 * 60 * 1000; // שעה אחת במילישניות
+          
+          // אם הצגנו את הדיאלוג בשעה האחרונה, לא נציג שוב (גם עם forceShow: true)
+          if (now - lastShown < oneHourInMs) {
+            debugPrint('📍 Location service dialog shown recently (within 1 hour), skipping even with forceShow');
+            return;
+          }
+        }
+      }
+      
+      // Guard context usage after async gap
+      if (!context.mounted) return;
+      
+      // שמירת זמן הצגת הדיאלוג
+      await prefs.setInt('locationServiceDialogLastShown', DateTime.now().millisecondsSinceEpoch);
+      
+      // Guard context usage after async gap again
+      if (!context.mounted) return;
+      
+      final l10n = AppLocalizations.of(context);
+      
+      showDialog(
+        context: context,
+        barrierDismissible: true,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: Text(l10n.locationServiceDisabledTitle),
+            content: SingleChildScrollView(
+              child: Text(l10n.locationServiceDisabledMessage),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text(l10n.cancel),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  openAppSettings();
+                },
+                child: Text(l10n.openSettings),
+              ),
+            ],
+          );
+        },
+      );
+    } catch (e) {
+      debugPrint('❌ Error checking location service: $e');
+    }
+  }
+
+  /// ✅ פתיחת הגדרות שירות המיקום של המכשיר
+  static Future<void> openLocationSettings() async {
+    try {
+      if (Platform.isAndroid) {
+        // פתיחת הגדרות שירות המיקום של Android באמצעות platform channel
+        const platform = MethodChannel('com.example.flutter1/location_settings');
+        try {
+          await platform.invokeMethod('openLocationSettings');
+          debugPrint('✅ Successfully opened location settings');
+        } on PlatformException catch (e) {
+          debugPrint('❌ Error opening location settings via platform channel: ${e.message}');
+          // Fallback: פתיחת הגדרות האפליקציה
+          await openAppSettings();
+        }
+      } else if (Platform.isIOS) {
+        // ב-iOS, פתיחת הגדרות האפליקציה (iOS לא מאפשר לפתוח הגדרות שירות מיקום ישירות)
+        await openAppSettings();
+      } else {
+        // Fallback: פתיחת הגדרות האפליקציה
+        await openAppSettings();
+      }
+    } catch (e) {
+      debugPrint('❌ Error opening location settings: $e');
+      // Fallback: פתיחת הגדרות האפליקציה
+      try {
+        await openAppSettings();
+      } catch (e2) {
+        debugPrint('❌ Error opening app settings: $e2');
+      }
+    }
+  }
+
+  /// ✅ הצגת דיאלוג "הפעל שירותי מיקום" כאשר המשתמש מסמן את הצ'קבוקס מיקום נייד
+  static Future<bool> showEnableLocationServiceDialog(BuildContext context) async {
+    try {
+      // Guard context usage after async gap
+      if (!context.mounted) return false;
+      
+      final l10n = AppLocalizations.of(context);
+      
+      final result = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: Text(l10n.enableLocationServiceTitle),
+            content: SingleChildScrollView(
+              child: Text(l10n.enableLocationServiceMessage),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(l10n.cancel),
+              ),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.of(context).pop(true);
+                  openLocationSettings();
+                },
+                child: Text(l10n.enableLocationService),
+              ),
+            ],
+          );
+        },
+      );
+      
+      return result ?? false;
+    } catch (e) {
+      debugPrint('❌ Error showing enable location service dialog: $e');
+      return false;
+    }
+  }
+
+  /// ✅ בדיקה והצגת התראה אם שירות המיקום מבוטל (כאשר אין context)
+  /// התראה תישלח רק למשתמשים שסימנו את הצ'יקבוקס "סנן בקשות על פי המיקום הנייד שלי..."
+  static Future<void> checkAndShowLocationServiceNotification() async {
+    try {
+      // ✅ בדיקה אם המשתמש סימן את הצ'יקבוקס "סנן בקשות על פי המיקום הנייד שלי..."
+      // אם לא סימן, לא נשלח התראה
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        debugPrint('📍 No user logged in - skipping location service notification');
+        return;
+      }
+      
+      // בדיקה אם המשתמש סימן את הצ'יקבוקס "סנן בקשות על פי המיקום הנייד שלי..."
+      final notificationPrefs = await NotificationPreferencesService.getNotificationPreferences(user.uid);
+      final useMobileLocation = notificationPrefs?.newRequestsUseMobileLocation ?? false;
+      final useBothLocations = notificationPrefs?.newRequestsUseBothLocations ?? false;
+      
+      if (!useMobileLocation && !useBothLocations) {
+        debugPrint('📍 User has not enabled mobile location filter - skipping location service notification');
+        return;
+      }
+      
+      // בדיקה אם שירות המיקום פעיל
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      
+      if (serviceEnabled) {
+        // ✅ אם שירות המיקום פעיל, נאפס את הסטטוס כדי שנוכל לשלוח התראה שוב אם ייסגר
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setInt('locationServiceNotificationLastShown', 0);
+        debugPrint('📍 Location service is enabled - resetting notification status');
+        return;
+      }
+      
+      // שירות המיקום מבוטל
+      // בדיקה אם כבר הצגנו את ההתראה לאחרונה (למניעת הצגה חוזרת)
+      final prefs = await SharedPreferences.getInstance();
+      final lastShown = prefs.getInt('locationServiceNotificationLastShown') ?? 0;
+      
+      // אם lastShown = 0, זה אומר ששירות המיקום הופעל לאחרונה, אז נציג את ההתראה
+      if (lastShown != 0) {
+        final now = DateTime.now().millisecondsSinceEpoch;
+        const oneHourInMs = 60 * 60 * 1000; // שעה אחת במילישניות
+        
+        // אם הצגנו את ההתראה בשעה האחרונה, לא נציג שוב
+        if (now - lastShown < oneHourInMs) {
+          debugPrint('📍 Location service notification shown recently, skipping');
+          return;
+        }
+      }
+      
+      // שמירת זמן הצגת ההתראה
+      final now = DateTime.now().millisecondsSinceEpoch;
+      await prefs.setInt('locationServiceNotificationLastShown', now);
+      
+      // הצגת התראה מקומית
+      // נשתמש בתרגום בסיסי - נשתמש בעברית כגיבוי
+      // TODO: להוסיף תרגום דינמי לפי שפת האפליקציה
+      const title = 'שירות המיקום כבוי';
+      const message = 'שירות המיקום במכשיר שלך כבוי. אנא הפעל את שירות המיקום בהגדרות המכשיר כדי להשתמש בתכונות מבוססות מיקום.';
+      
+      await NotificationService.showLocalNotification(
+        title: title,
+        body: message,
+        id: 9999, // ID ייחודי להתראות שירות מיקום
+        payload: 'location_service_disabled',
+      );
+      
+      debugPrint('✅ Location service notification shown');
+    } catch (e) {
+      debugPrint('❌ Error checking and showing location service notification: $e');
     }
   }
 }

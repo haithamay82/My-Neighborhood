@@ -5,8 +5,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/push_notification_service.dart';
 import '../services/admin_auth_service.dart';
 import '../services/google_signin_service.dart';
+import '../services/network_service.dart';
 import '../widgets/network_aware_widget.dart';
 import '../services/audio_service.dart';
+import '../l10n/app_localizations.dart';
 
 // enum UserRole { personal, business } - הוסר - כל המשתמשים נרשמים כפרטיים
 
@@ -86,6 +88,7 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
@@ -114,13 +117,13 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
                       borderRadius: BorderRadius.circular(30),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFF1B5E20).withOpacity(0.2),
+                          color: const Color(0xFF1B5E20).withValues(alpha: 0.2),
                           blurRadius: 20,
                           offset: const Offset(0, 8),
                           spreadRadius: 2,
                         ),
                         BoxShadow(
-                          color: Colors.white.withOpacity(0.8),
+                          color: Colors.white.withValues(alpha: 0.8),
                           blurRadius: 5,
                           offset: const Offset(0, -2),
                         ),
@@ -138,7 +141,7 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
                   ),
                 const SizedBox(height: 24),
                 Text(
-                  'שכונתי',
+                  l10n.appTitle,
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                         fontWeight: FontWeight.bold,
@@ -146,7 +149,7 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
                         fontSize: 32,
                         shadows: [
                           Shadow(
-                            color: Colors.black.withOpacity(0.1),
+                            color: Colors.black.withValues(alpha: 0.1),
                             offset: const Offset(0, 2),
                             blurRadius: 4,
                           ),
@@ -155,7 +158,7 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  _isSignUp ? 'הצטרף לקהילה שלנו' : 'ברוך הבא',
+                  _isSignUp ? l10n.joinCommunity : l10n.welcomeBack,
                   textAlign: TextAlign.center,
                   style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                         color: const Color(0xFF4CAF50),
@@ -169,13 +172,13 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
                 if (_isSignUp) ...[
                   TextFormField(
                     controller: _nameController,
-                    decoration: const InputDecoration(
-                      labelText: 'שם מלא',
-                      prefixIcon: Icon(Icons.person),
-                      border: OutlineInputBorder(),
+                    decoration: InputDecoration(
+                      labelText: l10n.fullName,
+                      prefixIcon: const Icon(Icons.person),
+                      border: const OutlineInputBorder(),
                     ),
                     validator: (value) =>
-                        value == null || value.isEmpty ? 'אנא הכנס שם' : null,
+                        value == null || value.isEmpty ? l10n.enterName : null,
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -184,17 +187,17 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
                 TextFormField(
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
-                    labelText: 'אימייל',
-                    prefixIcon: Icon(Icons.email),
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: l10n.email,
+                    prefixIcon: const Icon(Icons.email),
+                    border: const OutlineInputBorder(),
                   ),
                   validator: (value) {
                     if (value == null || value.isEmpty) {
-                      return 'אנא הכנס אימייל';
+                      return l10n.enterEmail;
                     }
                     if (!value.contains('@')) {
-                      return 'אנא הכנס אימייל תקין';
+                      return l10n.invalidEmail;
                     }
                     return null;
                   },
@@ -206,7 +209,7 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
                   controller: _passwordController,
                   obscureText: _obscurePassword,
                   decoration: InputDecoration(
-                    labelText: 'סיסמה',
+                    labelText: l10n.password,
                     prefixIcon: const Icon(Icons.lock),
                     suffixIcon: IconButton(
                       icon: Icon(
@@ -222,10 +225,10 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
                   ),
                   validator: (value) {
                     if (value == null || value.isEmpty) {
-                      return 'אנא הכנס סיסמה';
+                      return l10n.enterPassword;
                     }
                     if (value.length < 6) {
-                      return 'הסיסמה חייבת להכיל לפחות 6 תווים';
+                      return l10n.weakPassword;
                     }
                     return null;
                   },
@@ -244,7 +247,7 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
                           });
                         },
                       ),
-                      const Text('שמור פרטי כניסה'),
+                      Text(l10n.save),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -272,7 +275,7 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
                             valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                           ),
                         )
-                      : Text(_isSignUp ? 'הרשמה' : 'התחברות'),
+                      : Text(_isSignUp ? l10n.register : l10n.login),
                 ),
                 const SizedBox(height: 16),
 
@@ -280,8 +283,8 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
                 TextButton(
                   onPressed: () => setState(() => _isSignUp = !_isSignUp),
                   child: Text(_isSignUp
-                      ? 'יש לך כבר חשבון? התחבר'
-                      : 'אין לך חשבון? הרשם'),
+                      ? l10n.alreadyHaveAccount
+                      : l10n.noAccount),
                 ),
                 const SizedBox(height: 24),
 
@@ -294,7 +297,7 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
                       child: Text(
                         'או',
                         style: TextStyle(
-                          color: Colors.grey[600],
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -310,10 +313,10 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.grey[300]!),
+                    border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
+                        color: Colors.black.withValues(alpha: 0.1),
                         blurRadius: 2,
                         offset: const Offset(0, 1),
                       ),
@@ -359,7 +362,7 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
                             Text(
                               'התחבר עם Google',
                               style: TextStyle(
-                                color: Colors.grey[700],
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
                                 fontWeight: FontWeight.w500,
                                 fontSize: 16,
                               ),
@@ -394,8 +397,10 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
 
     try {
       if (_isSignUp) {
+        // Firebase Auth יכשל אוטומטית אם האימייל כבר קיים
+        final email = _emailController.text.trim();
         final cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
-          email: _emailController.text.trim(),
+          email: email,
           password: _passwordController.text,
         );
 
@@ -421,8 +426,9 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
             ?.updateDisplayName(_nameController.text.trim());
 
         if (!mounted) return; // ✅ בדיקה שהמסך עדיין קיים
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('נרשמת בהצלחה! עכשיו התחבר עם הפרטים שלך'),
+        final l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(l10n.registeredSuccessfully),
             backgroundColor: Colors.green));
         
         await FirebaseAuth.instance.signOut();
@@ -476,8 +482,11 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
         
         debugPrint('🎉 Showing success message and calling callback');
         await playSuccessSound();
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('התחברת בהצלחה!'),
+        // Guard context usage after async gap
+        if (!mounted) return;
+        final l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(l10n.loggedInSuccessfully),
             backgroundColor: Colors.green));
         
         // קריאה ל-callback אם קיים
@@ -498,9 +507,80 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
       
       // הצגת הודעת שגיאה מותאמת
       await playErrorSound();
-      showError(context, e, onRetry: () {
-        _handleSubmit();
-      });
+      // Guard context usage after async gap
+      if (!mounted) return;
+      
+      // טיפול בשגיאות Firebase Auth
+      final l10n = AppLocalizations.of(context);
+      String errorMessage = l10n.loginError;
+      
+      if (e is FirebaseAuthException) {
+        // שימוש בקוד המדויק של Firebase
+        switch (e.code) {
+          case 'email-already-in-use':
+          case 'EMAIL_ALREADY_IN_USE':
+            errorMessage = l10n.emailAlreadyRegistered;
+            break;
+          case 'user-not-found':
+          case 'USER_NOT_FOUND':
+            errorMessage = l10n.emailNotRegistered;
+            break;
+          case 'wrong-password':
+          case 'WRONG_PASSWORD':
+            errorMessage = l10n.wrongPassword;
+            break;
+          case 'invalid-credential':
+          case 'INVALID_CREDENTIAL':
+            // Firebase לא מבדיל בין אימייל לא רשום לסיסמה שגויה מטעמי אבטחה
+            // נציג הודעה כללית
+            errorMessage = l10n.emailOrPasswordWrong;
+            break;
+          default:
+            // בדיקה נוספת למקרה שהקוד לא מזוהה
+            final errorString = e.toString().toLowerCase();
+            if (errorString.contains('user-not-found')) {
+              errorMessage = l10n.emailNotRegistered;
+            } else if (errorString.contains('wrong-password') || 
+                       errorString.contains('invalid-credential')) {
+              errorMessage = l10n.wrongPassword;
+            } else {
+              // שגיאות אחרות - שימוש ב-NetworkService
+              errorMessage = NetworkService.getErrorMessage(e);
+            }
+        }
+      } else {
+        // בדיקה לגביית שגיאות לא מ-FirebaseAuthException
+        final errorString = e.toString().toLowerCase();
+        if (errorString.contains('user-not-found') || 
+            errorString.contains('user_not_found')) {
+          errorMessage = l10n.emailNotRegistered;
+        } else if (errorString.contains('wrong-password') || 
+                   errorString.contains('wrong_password') ||
+                   errorString.contains('invalid-credential') ||
+                   errorString.contains('invalid_credential')) {
+          errorMessage = l10n.wrongPassword;
+        } else {
+          // שגיאות אחרות - שימוש ב-NetworkService
+          errorMessage = NetworkService.getErrorMessage(e);
+        }
+      }
+      
+      if (!mounted) return;
+      final l10n2 = AppLocalizations.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: l10n2.retry,
+            textColor: Colors.white,
+            onPressed: () {
+              _handleSubmit();
+            },
+          ),
+        ),
+      );
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);

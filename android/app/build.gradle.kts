@@ -1,3 +1,5 @@
+import org.gradle.api.tasks.compile.JavaCompile
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -21,6 +23,11 @@ android {
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_17.toString()
     }
+    
+    // Suppress warnings about obsolete Java source/target versions
+    tasks.withType<JavaCompile>().configureEach {
+        options.compilerArgs.add("-Xlint:-options")
+    }
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
@@ -31,6 +38,18 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        
+        // Fix CMake RC compiler issue - only build for specific ABIs if needed
+        // Note: This might not be needed if no native code is used
+        // ndk {
+        //     abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
+        // }
+    }
+    
+    packaging {
+        jniLibs {
+            useLegacyPackaging = false
+        }
     }
 
     buildTypes {
@@ -52,10 +71,15 @@ dependencies {
     implementation("com.google.firebase:firebase-analytics")
     implementation("com.google.firebase:firebase-storage")
     implementation("com.google.firebase:firebase-messaging")
+    implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:firebase-auth")
     
     // Notification dependencies
     implementation("androidx.core:core:1.12.0")
     implementation("androidx.core:core-ktx:1.12.0")
+    
+    // WorkManager for background tasks
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
     
     // Core library desugaring
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")

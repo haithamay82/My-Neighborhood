@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart';
 import 'request.dart';
+import 'week_availability.dart';
 
 enum UserType { guest, personal, business, admin }
 
@@ -19,6 +19,8 @@ class UserProfile {
   final String? village;
   final double? latitude;
   final double? longitude;
+  final double? mobileLatitude; // מיקום נייד - מעודכן כל דקה
+  final double? mobileLongitude; // מיקום נייד - מעודכן כל דקה
   final List<RequestCategory>? businessCategories; // תחומי עיסוק למשתמש עסקי
   final String? profileImageUrl; // תמונת פרופיל
   final int? recommendationsCount; // מספר המלצות של המשתמש
@@ -40,6 +42,9 @@ class UserProfile {
   final DateTime? transitionDate; // תאריך המעבר האחרון
   final bool? guestTrialExtensionReceived; // האם המשתמש כבר קיבל הארכת תקופת ניסיון
   final bool? noPaidServices; // האם המשתמש לא נותן שירותים בתשלום
+  final bool? availableAllWeek; // זמין כל השבוע
+  final WeekAvailability? weekAvailability; // זמינות ימים ושעות בשבוע
+  final bool? isTemporaryGuest; // האם המשתמש הוא אורח זמני (נכנס דרך "המשך ללא הרשמה")
 
   UserProfile({
     required this.userId,
@@ -56,6 +61,8 @@ class UserProfile {
     this.village,
     this.latitude,
     this.longitude,
+    this.mobileLatitude,
+    this.mobileLongitude,
     this.businessCategories,
     this.profileImageUrl,
     this.recommendationsCount,
@@ -75,6 +82,9 @@ class UserProfile {
     this.transitionDate,
     this.guestTrialExtensionReceived = false,
     this.noPaidServices = false,
+    this.availableAllWeek,
+    this.weekAvailability,
+    this.isTemporaryGuest = false,
   });
 
   factory UserProfile.fromFirestore(DocumentSnapshot doc) {
@@ -101,26 +111,39 @@ class UserProfile {
       village: data['village'],
       latitude: data['latitude']?.toDouble(),
       longitude: data['longitude']?.toDouble(),
+      mobileLatitude: data['mobileLatitude']?.toDouble(),
+      mobileLongitude: data['mobileLongitude']?.toDouble(),
       businessCategories: data['businessCategories'] != null
           ? (data['businessCategories'] as List).map((e) {
-              debugPrint('🔄 Converting category: $e (type: ${e.runtimeType})');
               // בדיקה אם זה נתונים עם "RequestCategory." - חילוץ השם
               if (e.toString().startsWith('RequestCategory.')) {
                 final categoryName = e.toString().replaceFirst('RequestCategory.', '');
                 final result = RequestCategory.values.firstWhere(
                   (cat) => cat.name == categoryName,
-                  orElse: () => RequestCategory.officeServices,
+                  orElse: () => RequestCategory.plumbing,
                 );
-                debugPrint('✅ Converted RequestCategory: $categoryName -> $result');
                 return result;
               } else {
-                // נתונים באנגלית - המרה מ-String ל-RequestCategory
-                final result = RequestCategory.values.firstWhere(
+                // נסה למצוא לפי שם באנגלית
+                final resultByName = RequestCategory.values.where(
                   (cat) => cat.name == e,
-                  orElse: () => RequestCategory.officeServices,
-                );
-                debugPrint('✅ Converted String: $e -> $result');
-                return result;
+                ).firstOrNull;
+                
+                if (resultByName != null) {
+                  return resultByName;
+                }
+                
+                // נסה למצוא לפי שם תצוגה בעברית
+                final resultByDisplayName = RequestCategory.values.where(
+                  (cat) => cat.categoryDisplayName == e,
+                ).firstOrNull;
+                
+                if (resultByDisplayName != null) {
+                  return resultByDisplayName;
+                }
+                
+                // אם לא נמצא - ברירת מחדל
+                return RequestCategory.plumbing;
               }
             }).toSet().toList() // הסרת כפילויות
           : null,
@@ -153,6 +176,11 @@ class UserProfile {
           : null,
       guestTrialExtensionReceived: data['guestTrialExtensionReceived'] ?? false,
       noPaidServices: data['noPaidServices'] ?? false,
+      availableAllWeek: data['availableAllWeek'],
+      weekAvailability: data['weekAvailability'] != null
+          ? WeekAvailability.fromFirestore(data['weekAvailability'] as List)
+          : null,
+      isTemporaryGuest: data['isTemporaryGuest'] ?? false,
     );
   }
 
@@ -173,6 +201,8 @@ class UserProfile {
       'village': village,
       'latitude': latitude,
       'longitude': longitude,
+      'mobileLatitude': mobileLatitude,
+      'mobileLongitude': mobileLongitude,
       'businessCategories': businessCategories?.map((e) => e.name).toList(),
       'profileImageUrl': profileImageUrl,
       'recommendationsCount': recommendationsCount,
@@ -198,6 +228,9 @@ class UserProfile {
           : null,
       'guestTrialExtensionReceived': guestTrialExtensionReceived,
       'noPaidServices': noPaidServices,
+      'availableAllWeek': availableAllWeek,
+      'weekAvailability': weekAvailability?.toFirestore(),
+      'isTemporaryGuest': isTemporaryGuest,
     };
   }
 
@@ -213,6 +246,8 @@ class UserProfile {
     String? village,
     double? latitude,
     double? longitude,
+    double? mobileLatitude,
+    double? mobileLongitude,
     List<RequestCategory>? businessCategories,
     String? profileImageUrl,
     int? recommendationsCount,
@@ -232,6 +267,9 @@ class UserProfile {
     DateTime? transitionDate,
     bool? guestTrialExtensionReceived,
     bool? noPaidServices,
+    bool? availableAllWeek,
+    WeekAvailability? weekAvailability,
+    bool? isTemporaryGuest,
   }) {
     return UserProfile(
       userId: userId,
@@ -247,6 +285,8 @@ class UserProfile {
       village: village ?? this.village,
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
+      mobileLatitude: mobileLatitude ?? this.mobileLatitude,
+      mobileLongitude: mobileLongitude ?? this.mobileLongitude,
       businessCategories: businessCategories ?? this.businessCategories,
       profileImageUrl: profileImageUrl ?? this.profileImageUrl,
       recommendationsCount: recommendationsCount ?? this.recommendationsCount,
@@ -266,6 +306,9 @@ class UserProfile {
       transitionDate: transitionDate ?? this.transitionDate,
       guestTrialExtensionReceived: guestTrialExtensionReceived ?? this.guestTrialExtensionReceived,
       noPaidServices: noPaidServices ?? this.noPaidServices,
+      availableAllWeek: availableAllWeek ?? this.availableAllWeek,
+      weekAvailability: weekAvailability ?? this.weekAvailability,
+      isTemporaryGuest: isTemporaryGuest ?? this.isTemporaryGuest,
     );
   }
 }

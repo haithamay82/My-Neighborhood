@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'dart:async';
 import 'dart:convert';
 import '../services/manual_payment_service.dart';
 import '../services/notification_service.dart';
@@ -35,15 +38,15 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
       textDirection: l10n.isRTL ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text(
-            'ניהול תשלומים',
-            style: TextStyle(
+          title: Text(
+            l10n.manageCashPayments,
+            style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
             ),
           ),
           backgroundColor: Theme.of(context).brightness == Brightness.dark 
-              ? const Color(0xFFFF9800) // כתום ענתיק
+              ? const Color(0xFF9C27B0) // סגול יפה
               : Theme.of(context).colorScheme.primary,
           foregroundColor: Colors.white,
           toolbarHeight: 50,
@@ -89,7 +92,7 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.error, size: 64, color: Colors.red[300]),
+                Icon(Icons.error, size: 64, color: Theme.of(context).colorScheme.error),
                 const SizedBox(height: 16),
                 Text(
                   'שגיאה: ${snapshot.error}',
@@ -113,7 +116,7 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
                     borderRadius: BorderRadius.circular(20),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
+                        color: Colors.black.withValues(alpha: 0.1),
                         blurRadius: 10,
                         offset: const Offset(0, 5),
                       ),
@@ -138,7 +141,7 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w500,
-                          color: Colors.grey[700],
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ],
@@ -181,14 +184,14 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
                 Icon(
                   _getStatusIcon(status),
                   size: 64,
-                  color: _getStatusColor(status).withOpacity(0.5),
+                  color: _getStatusColor(status).withValues(alpha: 0.5),
                 ),
                 const SizedBox(height: 16),
                 Text(
                   'אין בקשות $emptyMessage',
                   style: TextStyle(
                     fontSize: 18,
-                    color: Colors.grey[600],
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -197,7 +200,7 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
                   _getStatusDescription(status),
                   style: TextStyle(
                     fontSize: 14,
-                    color: Colors.grey[500],
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                   textAlign: TextAlign.center,
                 ),
@@ -282,7 +285,7 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
           children: [
             Row(
               children: [
-                Icon(Icons.person, color: Colors.blue[700]),
+                Icon(Icons.person, color: Theme.of(context).colorScheme.primary),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -300,10 +303,10 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
                     return Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
-                        color: _getStatusColor(status).withOpacity(0.1),
+                        color: _getStatusColor(status).withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: _getStatusColor(status).withOpacity(0.3),
+                          color: _getStatusColor(status).withValues(alpha: 0.3),
                           width: 1,
                         ),
                       ),
@@ -334,9 +337,14 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
             const SizedBox(height: 12),
             
             _buildInfoRow('אימייל:', data['userEmail'] ?? ''),
+            if (data['phone'] != null && data['phone'].toString().isNotEmpty)
+              _buildInfoRow('טלפון:', data['phone'] ?? ''),
             _buildInfoRow('סכום:', '${data['amount']} ${data['currency'] ?? 'ILS'}'),
             _buildInfoRow('סוג מנוי:', _getSubscriptionTypeText(data['subscriptionType'])),
-            _buildInfoRow('מספר BIT:', '0506505599'),
+            if (data['paymentMethod'] != 'cash')
+              _buildInfoRow('מספר BIT:', '0506505599'),
+            if (data['paymentMethod'] == 'cash')
+              _buildInfoRow('אמצעי תשלום:', 'מזומן'),
             _buildInfoRow('תאריך:', _formatDate(data['createdAt'])),
             
             if (data['note'] != null && data['note'].isNotEmpty) ...[
@@ -372,13 +380,13 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.red[50],
+                  color: Theme.of(context).colorScheme.errorContainer,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red[200]!),
+                  border: Border.all(color: Theme.of(context).colorScheme.error),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.info, color: Colors.red[700], size: 20),
+                    Icon(Icons.info, color: Theme.of(context).colorScheme.error, size: 20),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Column(
@@ -388,7 +396,7 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
                             'סיבת הדחייה:',
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
-                              color: Colors.red[700],
+                              color: Theme.of(context).colorScheme.onErrorContainer,
                               fontSize: 12,
                             ),
                           ),
@@ -396,7 +404,7 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
                           Text(
                             data['rejectionReason'],
                             style: TextStyle(
-                              color: Colors.red[600],
+                              color: Theme.of(context).colorScheme.error,
                               fontSize: 12,
                             ),
                           ),
@@ -442,19 +450,19 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.green[50],
+                  color: Theme.of(context).colorScheme.primaryContainer,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green[200]!),
+                  border: Border.all(color: Theme.of(context).colorScheme.primary),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.check_circle, color: Colors.green[600], size: 20),
+                    Icon(Icons.check_circle, color: Theme.of(context).colorScheme.primary, size: 20),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'בקשה זו אושרה והמנוי הופעל בהצלחה',
                         style: TextStyle(
-                          color: Colors.green[700],
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
                         ),
@@ -468,19 +476,19 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.red[50],
+                  color: Theme.of(context).colorScheme.errorContainer,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red[200]!),
+                  border: Border.all(color: Theme.of(context).colorScheme.error),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.cancel, color: Colors.red[600], size: 20),
+                    Icon(Icons.cancel, color: Theme.of(context).colorScheme.error, size: 20),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'בקשה זו נדחתה ולא ניתן לפעול עליה',
                         style: TextStyle(
-                          color: Colors.red[700],
+                          color: Theme.of(context).colorScheme.onErrorContainer,
                           fontSize: 12,
                           fontWeight: FontWeight.w500,
                         ),
@@ -530,9 +538,9 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
   String _getSubscriptionTypeText(String? subscriptionType) {
     switch (subscriptionType) {
       case 'business':
-        return 'עסקי מנוי (50₪/שנה)';
+        return 'עסקי מנוי (70₪/שנה)';
       case 'personal':
-        return 'פרטי מנוי (10₪/שנה)';
+        return 'פרטי מנוי (30₪/שנה)';
       default:
         return 'לא זמין';
     }
@@ -559,12 +567,10 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
       if (proofString.startsWith('https://firebasestorage.googleapis.com') || 
           proofString.startsWith('http://') || 
           proofString.startsWith('https://')) {
-        return Image.network(
-          proofString,
+        return CachedNetworkImage(
+          imageUrl: proofString,
           fit: BoxFit.cover,
-          loadingBuilder: (context, child, loadingProgress) {
-            if (loadingProgress == null) return child;
-            return Center(
+          placeholder: (context, url) => Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -582,10 +588,8 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
                   const Text('טוען תמונה...'),
                 ],
               ),
-            );
-          },
-          errorBuilder: (context, error, stackTrace) {
-            return Center(
+          ),
+          errorWidget: (context, url, error) => Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -607,9 +611,8 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
                     child: const Text('נסה שוב'),
                   ),
                 ],
+            ),
               ),
-            );
-          },
         );
       }
       
@@ -716,6 +719,9 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
           .doc(paymentId)
           .get();
       
+      // Guard context usage after async gap - check context.mounted for parameter context
+      if (!context.mounted) return;
+      
       if (!paymentDoc.exists) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -729,6 +735,8 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
       final paymentData = paymentDoc.data()!;
       final userId = paymentData['userId'] as String;
       final userName = paymentData['userName'] as String? ?? 'משתמש';
+      final subscriptionType = paymentData['subscriptionType'] as String?;
+      final paymentMethod = paymentData['paymentMethod'] as String?;
       
       final success = await ManualPaymentService.approvePayment(paymentId);
       
@@ -738,7 +746,12 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
           userId: userId,
           approved: true,
           userName: userName,
+          subscriptionType: subscriptionType,
+          paymentMethod: paymentMethod,
         );
+        
+        // Guard context usage after async gap - check context.mounted for parameter context
+        if (!context.mounted) return;
         
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -747,6 +760,8 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
           ),
         );
       } else {
+        // Guard context usage after async gap - check context.mounted for parameter context
+        if (!context.mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('שגיאה באישור התשלום'),
@@ -755,6 +770,8 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
         );
       }
     } catch (e) {
+      // Guard context usage after async gap - check context.mounted for parameter context
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('שגיאה: $e'),
@@ -765,11 +782,17 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
   }
 
   Future<void> _rejectPayment(BuildContext context, String paymentId) async {
+    debugPrint('🚫 _rejectPayment called for paymentId: $paymentId');
+    debugPrint('⏰ _rejectPayment start time: ${DateTime.now()}');
     final TextEditingController reasonController = TextEditingController();
     
+    debugPrint('📋 About to show dialog...');
     final reason = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
+      barrierDismissible: false,
+      builder: (context) {
+        debugPrint('🔨 Dialog builder called');
+        return AlertDialog(
         title: const Text('דחיית תשלום'),
         content: TextField(
           controller: reasonController,
@@ -786,23 +809,84 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
           ),
           ElevatedButton(
             onPressed: () {
-              Navigator.pop(context, reasonController.text);
+              final reasonText = reasonController.text.trim();
+              debugPrint('🔘 Reject button pressed, reason: "$reasonText"');
+              if (reasonText.isEmpty) {
+                debugPrint('⚠️ Rejection reason is empty, showing error');
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('אנא הזן סיבת דחייה'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
+              debugPrint('✅ About to pop dialog with reason: "$reasonText"');
+              Navigator.pop(context, reasonText);
+              debugPrint('✅ Dialog popped');
             },
             child: const Text('דחה'),
           ),
         ],
-      ),
+      );
+      },
     );
-
+    
+    debugPrint('⏰ Dialog closed at: ${DateTime.now()}');
+    debugPrint('🔍 Dialog returned reason: $reason (isNull: ${reason == null}, isEmpty: ${reason?.isEmpty ?? true})');
+    
     if (reason != null && reason.isNotEmpty) {
+      debugPrint('✅ Rejection reason provided: $reason');
       try {
         // קבלת פרטי המשתמש לפני הדחייה
-        final paymentDoc = await FirebaseFirestore.instance
-            .collection('payment_requests')
-            .doc(paymentId)
-            .get();
+        debugPrint('📋 Fetching payment request: $paymentId');
+        debugPrint('⏳ About to call Firestore get()...');
+        debugPrint('⏰ Current time: ${DateTime.now()}');
+        
+        DocumentSnapshot paymentDoc;
+        try {
+          debugPrint('🔄 Starting Firestore get() call...');
+          paymentDoc = await FirebaseFirestore.instance
+              .collection('payment_requests')
+              .doc(paymentId)
+              .get()
+              .timeout(
+                const Duration(seconds: 10),
+                onTimeout: () {
+                  debugPrint('⏱️ Firestore get() timed out after 10 seconds');
+                  throw TimeoutException('Firestore get() timed out', const Duration(seconds: 10));
+                },
+              );
+          debugPrint('✅ Firestore get() completed at ${DateTime.now()}');
+        } catch (firestoreError, stackTrace) {
+          debugPrint('❌ ERROR in Firestore get(): $firestoreError');
+          debugPrint('❌ Error type: ${firestoreError.runtimeType}');
+          debugPrint('❌ Stack trace: $stackTrace');
+          if (!context.mounted) {
+            debugPrint('⚠️ Context not mounted after error, returning');
+            return;
+          }
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('שגיאה בטעינת בקשת התשלום: $firestoreError'),
+              backgroundColor: Colors.red,
+            ),
+          );
+          return;
+        }
+        
+        debugPrint('📄 Payment document fetched: exists=${paymentDoc.exists}');
+        
+        // Guard context usage after async gap
+        if (!context.mounted) {
+          debugPrint('⚠️ Context not mounted, returning');
+          return;
+        }
+        
+        debugPrint('✅ Context is still mounted');
         
         if (!paymentDoc.exists) {
+          debugPrint('❌ Payment request not found: $paymentId');
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('בקשת התשלום לא נמצאה'),
@@ -812,28 +896,78 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
           return;
         }
         
-        final paymentData = paymentDoc.data()!;
-        final userId = paymentData['userId'] as String;
+        debugPrint('✅ Payment document exists, extracting data...');
+        final paymentData = paymentDoc.data()! as Map<String, dynamic>;
+        debugPrint('📊 Payment data keys: ${paymentData.keys.toList()}');
+        
+        final userId = paymentData['userId'] as String?;
         final userName = paymentData['userName'] as String? ?? 'משתמש';
+        final subscriptionType = paymentData['subscriptionType'] as String?;
+        final paymentMethod = paymentData['paymentMethod'] as String?;
         
-        final success = await ManualPaymentService.rejectPayment(paymentId, reason);
+        debugPrint('👤 Payment request data: userId=$userId, userName=$userName, subscriptionType=$subscriptionType, paymentMethod=$paymentMethod');
         
-        if (success) {
-          // שליחת התראה למשתמש עם סיבת הדחייה
-          await NotificationService.sendSubscriptionApprovalNotification(
-            userId: userId,
-            approved: false,
-            userName: userName,
-            rejectionReason: reason,
-          );
-          
+        if (userId == null || userId.isEmpty) {
+          debugPrint('❌ userId is null or empty!');
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('התשלום נדחה'),
+              content: Text('שגיאה: לא נמצא userId בבקשת התשלום'),
+              backgroundColor: Colors.red,
+            ),
+          );
+          return;
+        }
+        
+        debugPrint('🔄 Calling ManualPaymentService.rejectPayment...');
+        final success = await ManualPaymentService.rejectPayment(paymentId, reason);
+        debugPrint('💰 ManualPaymentService.rejectPayment returned: $success');
+        
+        // Guard context usage after async gap
+        debugPrint('🔍 Checking if context is still mounted...');
+        if (!context.mounted) {
+          debugPrint('⚠️ Context not mounted after rejectPayment, returning');
+          return;
+        }
+        debugPrint('✅ Context is still mounted after rejectPayment');
+        
+        debugPrint('🔍 Checking if success is true: $success');
+        if (success) {
+          debugPrint('✅ Success is true, proceeding to send notification');
+          debugPrint('💰 Payment rejected successfully, now sending notification to user: $userId');
+          // שליחת התראה למשתמש עם סיבת הדחייה
+          try {
+            debugPrint('📤 Calling sendSubscriptionApprovalNotification with: userId=$userId, userName=$userName, reason=$reason, subscriptionType=$subscriptionType, paymentMethod=$paymentMethod');
+            await NotificationService.sendSubscriptionApprovalNotification(
+              userId: userId,
+              approved: false,
+              userName: userName,
+              rejectionReason: reason,
+              subscriptionType: subscriptionType,
+              paymentMethod: paymentMethod,
+            );
+            debugPrint('✅ Rejection notification sent successfully to user: $userId');
+          } catch (notificationError, stackTrace) {
+            debugPrint('⚠️ Error sending rejection notification: $notificationError');
+            debugPrint('⚠️ Stack trace: $stackTrace');
+            // המשך גם אם יש שגיאה - התשלום כבר נדחה
+          }
+          
+          // Guard context usage after async gap
+          if (!context.mounted) {
+            debugPrint('⚠️ Context not mounted after sending notification, skipping SnackBar');
+            return;
+          }
+          
+          debugPrint('✅ Showing success SnackBar to admin');
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('התשלום נדחה וההתראה נשלחה למשתמש'),
               backgroundColor: Colors.orange,
             ),
           );
         } else {
+          // Guard context usage after async gap
+          if (!context.mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('שגיאה בדחיית התשלום'),
@@ -841,7 +975,15 @@ class _AdminPaymentsScreenState extends State<AdminPaymentsScreen> with SingleTi
             ),
           );
         }
-      } catch (e) {
+      } catch (e, stackTrace) {
+        debugPrint('❌ ERROR in _rejectPayment: $e');
+        debugPrint('❌ Stack trace: $stackTrace');
+        // Guard context usage after async gap
+        if (!context.mounted) {
+          debugPrint('⚠️ Context not mounted after error, returning');
+          return;
+        }
+        debugPrint('⚠️ Showing error snackbar to user');
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('שגיאה: $e'),

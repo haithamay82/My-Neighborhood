@@ -1,11 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class TermsService {
   static const String _termsAcceptedKey = 'terms_accepted';
   static const String _termsVersionKey = 'terms_version';
-  static const String _currentTermsVersion = '2.0'; // גרסה נוכחית של התנאים
+  static const String _currentTermsVersion = '3.0'; // גרסה נוכחית של התנאים (עודכנה עם פרטי Firebase, מיקום, מיקרופון ומצלמה)
 
   /// בדיקה אם המשתמש כבר אישר את תנאי השימוש
   static Future<bool> hasUserAcceptedTerms() async {
@@ -42,7 +43,7 @@ class TermsService {
 
       return localAccepted && firestoreAccepted;
     } catch (e) {
-      print('Error checking terms acceptance: $e');
+      debugPrint('Error checking terms acceptance: $e');
       return false;
     }
   }
@@ -70,7 +71,7 @@ class TermsService {
 
       return true;
     } catch (e) {
-      print('Error accepting terms: $e');
+      debugPrint('Error accepting terms: $e');
       return false;
     }
   }
@@ -96,7 +97,7 @@ class TermsService {
         'termsAcceptedAt': FieldValue.delete(),
       });
     } catch (e) {
-      print('Error resetting terms acceptance: $e');
+      debugPrint('Error resetting terms acceptance: $e');
     }
   }
 
@@ -107,7 +108,7 @@ class TermsService {
       final localVersion = prefs.getString(_termsVersionKey) ?? '';
       return localVersion != _currentTermsVersion;
     } catch (e) {
-      print('Error checking terms update: $e');
+      debugPrint('Error checking terms update: $e');
       return true; // במקרה של שגיאה, נציג את התנאים
     }
   }

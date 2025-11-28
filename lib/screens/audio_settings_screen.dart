@@ -53,7 +53,7 @@ class _AudioSettingsScreenState extends State<AudioSettingsScreen> with AudioMix
       appBar: AppBar(
         title: const Text('הגדרות צליל'),
         backgroundColor: Theme.of(context).brightness == Brightness.dark 
-            ? const Color(0xFFFF9800) // כתום ענתיק
+            ? const Color(0xFF9C27B0) // סגול יפה
             : Theme.of(context).colorScheme.primary,
         foregroundColor: Colors.white,
       ),
@@ -118,13 +118,13 @@ class _AudioSettingsScreenState extends State<AudioSettingsScreen> with AudioMix
                         Text(
                           'שקט',
                           style: TextStyle(
-                            color: _isEnabled ? Colors.grey[600] : Colors.grey,
+                            color: _isEnabled ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
                         Text(
                           'רועש',
                           style: TextStyle(
-                            color: _isEnabled ? Colors.grey[600] : Colors.grey,
+                            color: _isEnabled ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
                       ],

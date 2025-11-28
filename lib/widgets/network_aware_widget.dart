@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/network_service.dart';
+import '../l10n/app_localizations.dart';
 
 /// Widget שמטפל בקישוריות חלשה ומציג הודעות מתאימות
 class NetworkAwareWidget extends StatefulWidget {
@@ -21,12 +22,6 @@ class NetworkAwareWidget extends StatefulWidget {
 }
 
 class _NetworkAwareWidgetState extends State<NetworkAwareWidget> with NetworkMixin {
-  @override
-  void initState() {
-    super.initState();
-  }
-
-
   @override
   Widget build(BuildContext context) {
     return Stack(
@@ -57,21 +52,22 @@ class _NetworkAwareWidgetState extends State<NetworkAwareWidget> with NetworkMix
                   TextButton(
                     onPressed: () async {
                       final connected = await NetworkService.checkConnection();
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(connected ? 'החיבור שוחזר!' : 'עדיין אין חיבור'),
-                            backgroundColor: connected ? Colors.green : Colors.red,
-                            duration: const Duration(seconds: 2),
-                          ),
-                        );
-                      }
+                      // Guard context usage after async gap
+                      if (!context.mounted) return;
+                      final l10n = AppLocalizations.of(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(connected ? l10n.connectionRestored : l10n.stillNoConnection),
+                          backgroundColor: connected ? Colors.green : Colors.red,
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
                     },
                     style: TextButton.styleFrom(
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(horizontal: 8),
                     ),
-                    child: const Text('נסה שוב', style: TextStyle(fontSize: 12)),
+                    child: Text(AppLocalizations.of(context).tryAgain, style: TextStyle(fontSize: 12)),
                   ),
                 ],
               ),
@@ -109,8 +105,8 @@ mixin NetworkAwareMixin<T extends StatefulWidget> on State<T> {
   }
 
   /// ביצוע פעולה עם טיפול בשגיאות רשת
-  Future<T?> executeWithNetworkHandling<T>(
-    Future<T> Function() operation, {
+  Future<R?> executeWithNetworkHandling<R>(
+    Future<R> Function() operation, {
     String? operationName,
     VoidCallback? onRetry,
     bool showLoading = true,
@@ -152,7 +148,7 @@ mixin NetworkAwareMixin<T extends StatefulWidget> on State<T> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => const Center(
+      builder: (context) => Center(
         child: Card(
           child: Padding(
             padding: EdgeInsets.all(20),
@@ -161,7 +157,7 @@ mixin NetworkAwareMixin<T extends StatefulWidget> on State<T> {
               children: [
                 CircularProgressIndicator(),
                 SizedBox(height: 16),
-                Text('מעבד...'),
+                Text(AppLocalizations.of(context).processing),
               ],
             ),
           ),
@@ -179,25 +175,25 @@ mixin NetworkAwareMixin<T extends StatefulWidget> on State<T> {
             children: [
               const Icon(Icons.wifi_off, color: Colors.white),
               const SizedBox(width: 8),
-              const Text('אין חיבור לאינטרנט'),
+              Text(AppLocalizations.of(context).noInternetConnection),
             ],
           ),
           backgroundColor: Colors.red,
           duration: const Duration(seconds: 3),
           action: SnackBarAction(
-            label: 'נסה שוב',
+            label: AppLocalizations.of(context).tryAgain,
             textColor: Colors.white,
             onPressed: () async {
               final connected = await NetworkService.checkConnection();
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(connected ? 'החיבור שוחזר!' : 'עדיין אין חיבור'),
-                    backgroundColor: connected ? Colors.green : Colors.red,
-                    duration: const Duration(seconds: 2),
-                  ),
-                );
-              }
+              // Guard context usage after async gap
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(connected ? AppLocalizations.of(context).connectionRestored : AppLocalizations.of(context).stillNoConnection),
+                  backgroundColor: connected ? Colors.green : Colors.red,
+                  duration: const Duration(seconds: 2),
+                ),
+              );
             },
           ),
         ),

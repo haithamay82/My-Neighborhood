@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:flutter/foundation.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class AutoLoginService {
   static const String _rememberMeKey = 'remember_me';
@@ -54,13 +55,14 @@ class AutoLoginService {
           }
         }
       } else {
-        // מחיקת פרטי הכניסה
+        // מחיקת כל פרטי הכניסה - המשתמש לא רוצה לשמור
         await prefs.remove(_userEmailKey);
         await prefs.remove(_userPasswordKey);
         await prefs.remove(_googleTokenKey);
         await prefs.remove(_facebookTokenKey);
         await prefs.remove(_instagramTokenKey);
         await prefs.remove(_tiktokTokenKey);
+        await prefs.remove(_loginMethodKey); // גם מוחק את שיטת הכניסה
       }
       
       debugPrint('Remember me preference saved: $rememberMe for $loginMethod');
@@ -148,12 +150,17 @@ class AutoLoginService {
         return null;
       }
 
-      return await FirebaseAuth.instance.signInWithEmailAndPassword(
+      debugPrint('Attempting email auto login for: $email');
+      final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
+      debugPrint('✅ Email auto login successful');
+      return credential;
     } catch (e) {
-      debugPrint('Error in email auto login: $e');
+      debugPrint('❌ Error in email auto login: $e');
+      // אם יש שגיאה, נקה את הפרטים השמורים כדי לא לנסות שוב
+      await clearSavedData();
       return null;
     }
   }
@@ -171,10 +178,11 @@ class AutoLoginService {
         scopes: ['email'],
       );
       
-      // בדיקה אם המשתמש כבר מחובר
-      final googleUser = await googleSignIn.signIn();
+      // ✅ שימוש ב-signInSilently() לכניסה אוטומטית (ללא דיאלוג)
+      // זה ינסה להתחבר עם החשבון השמור, אם יש
+      final googleUser = await googleSignIn.signInSilently();
       if (googleUser == null) {
-        debugPrint('No cached Google user found');
+        debugPrint('No cached Google user found for auto login');
         return null;
       }
 
@@ -191,6 +199,7 @@ class AutoLoginService {
         idToken: googleAuth.idToken,
       );
 
+      debugPrint('✅ Google auto login successful');
       return await FirebaseAuth.instance.signInWithCredential(credential);
     } catch (e) {
       debugPrint('Error in Google auto login: $e');
@@ -262,6 +271,7 @@ class AutoLoginService {
   static Future<void> clearSavedData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      // מחיקת כל פרטי הכניסה השמורים
       await prefs.remove(_rememberMeKey);
       await prefs.remove(_loginMethodKey);
       await prefs.remove(_userEmailKey);
@@ -270,6 +280,7 @@ class AutoLoginService {
       await prefs.remove(_facebookTokenKey);
       await prefs.remove(_instagramTokenKey);
       await prefs.remove(_tiktokTokenKey);
+      await prefs.remove(_userLoggedOutKey); // גם מוחק את דגל ההתנתקות
       
       debugPrint('All saved login data cleared');
     } catch (e) {
@@ -286,6 +297,11 @@ class AutoLoginService {
       debugPrint('Error checking logout status: $e');
       return false;
     }
+  }
+
+  /// בדיקה אם המשתמש התנתק מפורשות (public method)
+  static Future<bool> hasUserLoggedOut() async {
+    return await _hasUserLoggedOut();
   }
 
   /// סימון שהמשתמש התנתק מפורשות
@@ -311,8 +327,37 @@ class AutoLoginService {
   }
 
   /// התנתקות וניקוי נתונים
+  /// מוחקת את כל פרטי הכניסה השמורים - המשתמש יידרש להתחבר שוב בפעם הבאה
   static Future<void> logout() async {
     try {
+      final user = FirebaseAuth.instance.currentUser;
+      final userId = user?.uid;
+      
+      // בדיקה אם המשתמש הוא אורח זמני - אם כן, נמחק אותו לחלוטין
+      if (userId != null) {
+        try {
+          final userDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(userId)
+              .get();
+          
+          if (userDoc.exists) {
+            final userData = userDoc.data();
+            final isTemporaryGuest = userData?['isTemporaryGuest'] ?? false;
+            
+            if (isTemporaryGuest == true) {
+              debugPrint('🗑️ Temporary guest detected - deleting completely');
+              await _deleteTemporaryGuestCompletely(userId);
+              return; // לא נמשיך עם logout רגיל - המשתמש כבר נמחק
+            }
+          }
+        } catch (e) {
+          debugPrint('Error checking temporary guest status: $e');
+          // נמשיך עם logout רגיל גם אם יש שגיאה
+        }
+      }
+      
+      // התנתקות רגילה למשתמשים שאינם אורחים זמניים
       // התנתקות מ-Firebase
       await FirebaseAuth.instance.signOut();
       
@@ -326,12 +371,120 @@ class AutoLoginService {
       // סימון שהמשתמש התנתק מפורשות
       await _markUserLoggedOut();
       
-      // ניקוי נתונים שמורים
+      // ניקוי כל הנתונים השמורים - כולל email, password, tokens, rememberMe flag
+      // המשתמש יידרש להתחבר שוב בפעם הבאה (גוגל או שכונתי)
       await clearSavedData();
       
-      debugPrint('User logged out and data cleared');
+      debugPrint('User logged out and all saved data cleared');
     } catch (e) {
       debugPrint('Error during logout: $e');
+    }
+  }
+
+  /// מחיקת משתמש אורח זמני לחלוטין - מ-Firestore ו-Firebase Authentication
+  static Future<void> _deleteTemporaryGuestCompletely(String userId) async {
+    try {
+      debugPrint('🗑️ Starting complete deletion of temporary guest: $userId');
+      
+      // 1. מחיקת כל הנתונים מ-Firestore
+      await _deleteTemporaryGuestFromFirestore(userId);
+      
+      // 2. מחיקת המשתמש מ-Firebase Authentication
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null && user.uid == userId) {
+        try {
+          await user.delete();
+          debugPrint('✅ User deleted from Firebase Authentication');
+        } catch (e) {
+          debugPrint('⚠️ Error deleting user from Auth (may need re-authentication): $e');
+          // אם יש שגיאה, ננסה להתנתק רגיל
+          await FirebaseAuth.instance.signOut();
+        }
+      }
+      
+      // 3. ניקוי כל הנתונים השמורים
+      await clearSavedData();
+      await _markUserLoggedOut();
+      
+      debugPrint('✅ Temporary guest completely deleted');
+    } catch (e) {
+      debugPrint('❌ Error deleting temporary guest: $e');
+      rethrow;
+    }
+  }
+
+  /// מחיקת כל נתוני האורח הזמני מ-Firestore
+  static Future<void> _deleteTemporaryGuestFromFirestore(String userId) async {
+    try {
+      final batch = FirebaseFirestore.instance.batch();
+      
+      // מחיקת פרופיל המשתמש
+      final userRef = FirebaseFirestore.instance.collection('users').doc(userId);
+      batch.delete(userRef);
+      
+      // מחיקת בקשות שהמשתמש יצר
+      final requestsQuery = await FirebaseFirestore.instance
+          .collection('requests')
+          .where('createdBy', isEqualTo: userId)
+          .get();
+      for (var doc in requestsQuery.docs) {
+        batch.delete(doc.reference);
+      }
+      
+      // מחיקת בקשות שהמשתמש פנה אליהן (helpers)
+      final requestsWithHelpers = await FirebaseFirestore.instance
+          .collection('requests')
+          .where('helpers', arrayContains: userId)
+          .get();
+      for (var doc in requestsWithHelpers.docs) {
+        final data = doc.data();
+        final helpers = List<String>.from(data['helpers'] ?? []);
+        helpers.remove(userId);
+        batch.update(doc.reference, {'helpers': helpers, 'helpersCount': FieldValue.increment(-1)});
+      }
+      
+      // מחיקת user_interests
+      final interestsQuery = await FirebaseFirestore.instance
+          .collection('user_interests')
+          .where('userId', isEqualTo: userId)
+          .get();
+      for (var doc in interestsQuery.docs) {
+        batch.delete(doc.reference);
+      }
+      
+      // מחיקת התראות
+      final notificationsQuery = await FirebaseFirestore.instance
+          .collection('notifications')
+          .where('toUserId', isEqualTo: userId)
+          .get();
+      for (var doc in notificationsQuery.docs) {
+        batch.delete(doc.reference);
+      }
+      
+      // מחיקת צ'אטים
+      final chatsQuery = await FirebaseFirestore.instance
+          .collection('chats')
+          .where('participants', arrayContains: userId)
+          .get();
+      for (var doc in chatsQuery.docs) {
+        batch.delete(doc.reference);
+      }
+      
+      // מחיקת הודעות
+      final messagesQuery = await FirebaseFirestore.instance
+          .collection('messages')
+          .where('senderId', isEqualTo: userId)
+          .get();
+      for (var doc in messagesQuery.docs) {
+        batch.delete(doc.reference);
+      }
+      
+      // ביצוע המחיקה
+      await batch.commit();
+      debugPrint('✅ Temporary guest data deleted from Firestore');
+    } catch (e) {
+      debugPrint('❌ Error deleting temporary guest from Firestore: $e');
+      rethrow;
     }
   }
 

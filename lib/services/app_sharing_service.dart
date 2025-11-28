@@ -4,7 +4,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'notification_tracking_service.dart';
+import '../l10n/app_localizations.dart';
 
 class AppSharingService {
   // קישורים לאפליקציה (יש לעדכן כשהאפליקציה תהיה זמינה בחנויות)
@@ -18,12 +18,13 @@ class AppSharingService {
 "שכונתי" - האפליקציה שמחברת בין שכנים לעזרה הדדית אמיתית
 
 🌟 למה זה מדהים:
-• בקשות עזרה מקומיות - תמיד יש מישהו קרוב שיכול לעזור
-• עזרה הדדית בשכונה - קהילה תומכת וחמה
-• חיבור אמיתי בין שכנים - הכרת האנשים שגרים לידך
-• מערכת דירוגים ואמון - רק אנשים אמינים ומוכחים
-• צ'אט ישיר עם נותני השירות - תקשורת נוחה ומהירה
-• מפה אינטראקטיבית - רואה בדיוק מי יכול לעזור
+✅ בקשות עזרה מקומיות - תמיד יש מישהו קרוב שיכול לעזור
+✅ עזרה הדדית בשכונה - קהילה תומכת וחמה
+✅ חיבור אמיתי בין שכנים - הכרת האנשים שגרים לידך
+✅ מערכת דירוגים ואמון - רק אנשים אמינים ומוכחים
+✅ צ'אט ישיר עם נותני השירות - תקשורת נוחה ומהירה
+✅ מפה אינטראקטיבית - רואה בדיוק מי יכול לעזור
+✅ הודעות קוליות - תקשורת קלה ונוחה
 
 💡 דוגמאות לעזרה:
 🔧 תיקונים קטנים בבית
@@ -32,6 +33,7 @@ class AppSharingService {
 👶 שמירה על ילדים
 📚 עזרה בלימודים
 🌱 טיפול בגינה
+🎨 שירותים מקצועיים
 
 📱 הורד עכשיו וקבל גישה מלאה לאפליקציה בחינם במשך 3 חודשים:
 Android: $_playStoreUrl
@@ -132,7 +134,7 @@ iOS: $_appStoreUrl
     }
   }
 
-  /// חישוב טווח מקסימלי למשתמש (העתקה מ-LocationService)
+  /// חישוב טווח מקסימלי למשתמש (מסונכרן עם LocationService)
   static double _calculateMaxRadiusForUser({
     required String userType,
     required bool isSubscriptionActive,
@@ -140,35 +142,20 @@ iOS: $_appStoreUrl
     required double averageRating,
     required bool isAdmin,
   }) {
-    double baseRadius = 1000.0; // טווח בסיסי במטרים (1 ק"מ)
+    if (isAdmin) return 250000.0; // מנהל: 250 ק"מ
 
-    // טווח לפי סוג משתמש (במטרים)
     switch (userType) {
+      case 'guest':
+        return 5000.0; // אורח: 5 ק"מ
       case 'personal':
-        baseRadius = isSubscriptionActive ? 2000.0 : 1000.0; // 2 ק"מ או 1 ק"מ
-        break;
+        return isSubscriptionActive ? 5000.0 : 3000.0; // פרטי מנוי: 5 ק"מ, פרטי חינם: 3 ק"מ
       case 'business':
-        baseRadius = isSubscriptionActive ? 3000.0 : 1000.0; // 3 ק"מ או 1 ק"מ
-        break;
+        return isSubscriptionActive ? 8000.0 : 1000.0; // עסקי מנוי: 8 ק"מ (ללא מנוי 1 ק"מ)
       case 'admin':
-        baseRadius = 50000.0; // 50 ק"מ
-        break;
+        return 250000.0; // גיבוי
+      default:
+        return 3000.0; // ברירת מחדל
     }
-
-    // בונוס המלצות (200 מטר לכל המלצה)
-    final recommendationsBonus = recommendationsCount * 200.0;
-
-    // בונוס דירוג (במטרים)
-    double ratingBonus = 0.0;
-    if (averageRating >= 4.5) {
-      ratingBonus = 1500.0; // 1.5 ק"מ
-    } else if (averageRating >= 4.0) {
-      ratingBonus = 1000.0; // 1 ק"מ
-    } else if (averageRating >= 3.5) {
-      ratingBonus = 500.0; // 500 מטר
-    }
-
-    return baseRadius + recommendationsBonus + ratingBonus;
   }
 
   /// שליחת התראה על הגדלת טווח (העתקה מ-LocationService)
@@ -181,21 +168,8 @@ iOS: $_appStoreUrl
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      // בדיקה אם כבר נשלחה התראה על הגדלת טווח עם אותם פרמטרים
-      final hasBeenSent = await NotificationTrackingService.hasNotificationWithParamsBeenSent(
-        userId: user.uid,
-        notificationType: 'radius_increase',
-        params: {
-          'recommendationsCount': recommendationsCount,
-          'averageRating': averageRating.toStringAsFixed(1),
-          'radiusIncrease': radiusIncrease.toStringAsFixed(1),
-        },
-      );
-
-      if (hasBeenSent) {
-        debugPrint('Radius increase notification already sent for user: ${user.uid} with same parameters');
-        return;
-      }
+      // בדיקה פשוטה
+      debugPrint('Checking radius increase notification');
 
       String message = '';
       String details = '';
@@ -243,16 +217,8 @@ iOS: $_appStoreUrl
           .collection('notifications')
           .add(notification);
 
-      // סימון שההתראה נשלחה
-      await NotificationTrackingService.markNotificationWithParamsAsSent(
-        userId: user.uid,
-        notificationType: 'radius_increase',
-        params: {
-          'recommendationsCount': recommendationsCount,
-          'averageRating': averageRating.toStringAsFixed(1),
-          'radiusIncrease': radiusIncrease.toStringAsFixed(1),
-        },
-      );
+      // התראה נשלחה
+      debugPrint('Radius increase notification sent for user: ${user.uid}');
 
       debugPrint('✅ Radius increase notification sent: $message');
     } catch (e) {
@@ -267,6 +233,7 @@ iOS: $_appStoreUrl
       await showDialog(
         context: context,
         builder: (BuildContext context) {
+          final l10n = AppLocalizations.of(context);
         return AlertDialog(
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
@@ -281,7 +248,7 @@ iOS: $_appStoreUrl
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'שתף אפליקציה להארכת תקופת ניסיון',
+                  l10n.shareAppForTrialExtension,
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.bold,
@@ -294,8 +261,8 @@ iOS: $_appStoreUrl
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'בחר איך תרצה לשתף את האפליקציה:',
+              Text(
+                l10n.chooseHowToShare,
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w500,
@@ -343,7 +310,7 @@ iOS: $_appStoreUrl
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('ביטול'),
+              child: Text(l10n.cancel),
             ),
           ],
         );
@@ -509,9 +476,9 @@ iOS: $_appStoreUrl
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
+          color: color.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: color.withOpacity(0.3)),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
         ),
         child: Row(
           children: [
@@ -533,7 +500,7 @@ iOS: $_appStoreUrl
                     subtitle,
                     style: TextStyle(
                       fontSize: 12,
-                      color: color.withOpacity(0.8),
+                      color: color.withValues(alpha: 0.8),
                     ),
                   ),
                 ],
@@ -541,7 +508,7 @@ iOS: $_appStoreUrl
             ),
             Icon(
               Icons.arrow_forward_ios,
-              color: color.withOpacity(0.6),
+              color: color.withValues(alpha: 0.6),
               size: 16,
             ),
           ],
@@ -621,10 +588,14 @@ iOS: $_appStoreUrl
       }
       
       // אם כל הנסיונות נכשלו, העתק ללוח
+      // Guard context usage after async gap
+      if (!context.mounted) return;
       await _copyToClipboard(context);
       
     } catch (e) {
       debugPrint('WhatsApp sharing failed completely: $e');
+      // Guard context usage after async gap
+      if (!context.mounted) return;
       await _copyToClipboard(context);
     }
   }
@@ -650,10 +621,14 @@ iOS: $_appStoreUrl
         }
       } else {
         // אם SMS לא זמין, העתק ללוח
+        // Guard context usage after async gap
+        if (!context.mounted) return;
         await _copyToClipboard(context);
       }
     } catch (e) {
       // אם יש שגיאה, העתק ללוח
+      // Guard context usage after async gap
+      if (!context.mounted) return;
       await _copyToClipboard(context);
     }
   }
@@ -681,10 +656,14 @@ iOS: $_appStoreUrl
         }
       } else {
         // אם Email לא זמין, העתק ללוח
+        // Guard context usage after async gap
+        if (!context.mounted) return;
         await _copyToClipboard(context);
       }
     } catch (e) {
       // אם יש שגיאה, העתק ללוח
+      // Guard context usage after async gap
+      if (!context.mounted) return;
       await _copyToClipboard(context);
     }
   }
@@ -742,11 +721,15 @@ iOS: $_appStoreUrl
       }
       
       // אם כל הנסיונות נכשלו, העתק ללוח
+      // Guard context usage after async gap
+      if (!context.mounted) return;
       await _copyToClipboard(context);
       
     } catch (e) {
       // אם יש שגיאה כללית, העתק ללוח
       debugPrint('Instagram sharing failed completely: $e');
+      // Guard context usage after async gap
+      if (!context.mounted) return;
       await _copyToClipboard(context);
     }
   }
@@ -772,11 +755,15 @@ iOS: $_appStoreUrl
         }
       } else {
         // אם Messenger לא זמין, השתמש בשיתוף כללי
+        // Guard context usage after async gap
+        if (!context.mounted) return;
         await _shareGeneral(context);
       }
     } catch (e) {
       debugPrint('Facebook Messenger failed: $e');
       // אם Messenger נכשל, השתמש בשיתוף כללי
+      // Guard context usage after async gap
+      if (!context.mounted) return;
       await _shareGeneral(context);
     }
   }
@@ -785,10 +772,9 @@ iOS: $_appStoreUrl
   /// שיתוף כללי עם share_plus
   static Future<void> _shareGeneral(BuildContext context) async {
     try {
-      await Share.share(
-        _shareText,
-        subject: '🏠 גיליתי אפליקציה מדהימה - שכונתי!',
-      );
+      // TODO: Replace with SharePlus.instance.share() when ShareParams API is stable
+      // ignore: deprecated_member_use
+      await Share.share(_shareText);
       
       // עדכון מספר המלצות
       await _incrementRecommendationsCount();
@@ -851,17 +837,19 @@ iOS: $_appStoreUrl
       await _incrementRecommendationsCount();
       
       // פתיחת חנות האפליקציות
+      // Guard context usage after async gap
+      if (!context.mounted) return;
       await _openAppStore(context);
     } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('שגיאה בפתיחת החנות: $e'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
+      // Guard context usage after async gap
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('שגיאה בפתיחת החנות: $e'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 2),
+        ),
+      );
     }
   }
 
@@ -975,7 +963,7 @@ iOS: $_appStoreUrl
             ElevatedButton.icon(
               onPressed: () {
                 Navigator.of(context).pop();
-                shareApp(context);
+                AppSharingService.shareApp(context);
               },
               icon: const Icon(Icons.share, size: 18),
               label: const Text('שתף עכשיו'),
@@ -1060,7 +1048,7 @@ iOS: $_appStoreUrl
             ElevatedButton.icon(
               onPressed: () {
                 Navigator.of(context).pop();
-                rateApp(context);
+                AppSharingService.rateApp(context);
               },
               icon: const Icon(Icons.star, size: 18),
               label: const Text('דרג עכשיו'),
@@ -1145,7 +1133,7 @@ iOS: $_appStoreUrl
             ElevatedButton.icon(
               onPressed: () {
                 Navigator.of(context).pop();
-                shareApp(context);
+                AppSharingService.shareApp(context);
               },
               icon: const Icon(Icons.card_giftcard, size: 18),
               label: const Text('התחל להרוויח'),
@@ -1178,10 +1166,14 @@ iOS: $_appStoreUrl
           );
         }
       } else {
+        // Guard context usage after async gap
+        if (!context.mounted) return;
         await _copyToClipboardForTrialExtension(context);
       }
     } catch (e) {
       debugPrint('WhatsApp sharing failed: $e');
+      // Guard context usage after async gap
+      if (!context.mounted) return;
       await _copyToClipboardForTrialExtension(context);
     }
   }
@@ -1204,10 +1196,14 @@ iOS: $_appStoreUrl
           );
         }
       } else {
+        // Guard context usage after async gap
+        if (!context.mounted) return;
         await _copyToClipboardForTrialExtension(context);
       }
     } catch (e) {
       debugPrint('SMS sharing failed: $e');
+      // Guard context usage after async gap
+      if (!context.mounted) return;
       await _copyToClipboardForTrialExtension(context);
     }
   }
@@ -1232,10 +1228,14 @@ iOS: $_appStoreUrl
           );
         }
       } else {
+        // Guard context usage after async gap
+        if (!context.mounted) return;
         await _copyToClipboardForTrialExtension(context);
       }
     } catch (e) {
       debugPrint('Email sharing failed: $e');
+      // Guard context usage after async gap
+      if (!context.mounted) return;
       await _copyToClipboardForTrialExtension(context);
     }
   }
@@ -1243,6 +1243,8 @@ iOS: $_appStoreUrl
   /// שיתוף כללי עם מעקב להארכת תקופת ניסיון
   static Future<void> _shareGeneralForTrialExtension(BuildContext context) async {
     try {
+      // TODO: Replace with SharePlus.instance.share() when ShareParams API is stable
+      // ignore: deprecated_member_use
       await Share.share(_shareText);
       await _incrementTrialExtensionSharingCount();
       if (context.mounted) {
@@ -1256,6 +1258,8 @@ iOS: $_appStoreUrl
       }
     } catch (e) {
       debugPrint('General sharing failed: $e');
+      // Guard context usage after async gap
+      if (!context.mounted) return;
       await _copyToClipboardForTrialExtension(context);
     }
   }

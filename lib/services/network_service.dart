@@ -157,6 +157,19 @@ class NetworkService {
       return 'שגיאת רשת - בדוק את החיבור לאינטרנט';
     }
     
+    // טיפול בשגיאות Firebase Auth
+    if (error.toString().contains('user-not-found') || 
+        error.toString().contains('USER_NOT_FOUND')) {
+      return 'אימייל זה אינו רשום במערכת';
+    }
+    
+    if (error.toString().contains('wrong-password') || 
+        error.toString().contains('WRONG_PASSWORD') ||
+        error.toString().contains('invalid-credential') ||
+        error.toString().contains('INVALID_CREDENTIAL')) {
+      return 'הסיסמה שגויה';
+    }
+    
     if (error.toString().contains('timeout')) {
       return 'פסק זמן - החיבור איטי מדי';
     }
@@ -245,15 +258,15 @@ mixin NetworkMixin<T extends StatefulWidget> on State<T> {
             textColor: Colors.white,
             onPressed: () async {
               final connected = await NetworkService.checkConnection();
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(connected ? 'החיבור שוחזר!' : 'עדיין אין חיבור'),
-                    backgroundColor: connected ? Colors.green : Colors.red,
-                    duration: const Duration(seconds: 2),
-                  ),
-                );
-              }
+              // Guard context usage after async gap
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(connected ? 'החיבור שוחזר!' : 'עדיין אין חיבור'),
+                  backgroundColor: connected ? Colors.green : Colors.red,
+                  duration: const Duration(seconds: 2),
+                ),
+              );
             },
           ),
         ),
@@ -284,15 +297,15 @@ mixin NetworkMixin<T extends StatefulWidget> on State<T> {
               onRetry();
             } else {
               final connected = await NetworkService.checkConnection();
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(connected ? 'החיבור שוחזר!' : 'עדיין אין חיבור'),
-                    backgroundColor: connected ? Colors.green : Colors.red,
-                    duration: const Duration(seconds: 2),
-                  ),
-                );
-              }
+              // Guard context usage after async gap
+              if (!context.mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(connected ? 'החיבור שוחזר!' : 'עדיין אין חיבור'),
+                  backgroundColor: connected ? Colors.green : Colors.red,
+                  duration: const Duration(seconds: 2),
+                ),
+              );
             }
           },
         ),

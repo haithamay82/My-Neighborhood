@@ -36,11 +36,136 @@
   <meta name="google-signin-client_id" content="725875446445-jlfrijsk12skri7j948on9c1jflksee4.apps.googleusercontent.com">
     <meta name="google-signin-redirect_uri" content="https://nearme-970f3.firebaseapp.com">
   
-  <!-- Google Maps API - Temporarily disabled due to invalid key -->
+  <!-- Google Maps JavaScript API -->
+  <!-- Load synchronously in head to ensure it's available before Flutter -->
+  <!-- Using Browser key (auto created by Firebase) -->
+  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAGALOMmVVNl1f_xYDRXoFrgX_Z0B5HjQQ&libraries=places&callback=initGoogleMaps"></script>
   <script>
-    // Initialize Google Maps placeholder
+    // Global flag to track Google Maps API loading
+    window.googleMapsReady = false;
+    window.googleMapsError = null;
+    
+    // Alternative loading method (if script tag above doesn't work)
+    (function() {
+      console.log('🗺️ Setting up Google Maps API...');
+      
+      // Check if already loaded
+      if (typeof google !== 'undefined' && google.maps) {
+        console.log('✅ Google Maps API already loaded');
+        window.googleMapsReady = true;
+        return;
+      }
+      
+      // Fallback: Load dynamically if not already loaded
+      setTimeout(function() {
+        if (typeof google === 'undefined' || !google.maps) {
+          console.log('🔄 Google Maps API not loaded yet, trying dynamic load...');
+          const script = document.createElement('script');
+          script.src = 'https://maps.googleapis.com/maps/api/js?key=AIzaSyAGALOMmVVNl1f_xYDRXoFrgX_Z0B5HjQQ&libraries=places&callback=initGoogleMaps';
+          script.async = true;
+          script.defer = true;
+          script.onerror = function(e) {
+            console.error('❌ Failed to load Google Maps API script:', e);
+            window.googleMapsError = 'Failed to load Google Maps API script. Please check: 1) API key is valid, 2) API key is enabled for Web applications, 3) Maps JavaScript API is enabled in Google Cloud Console';
+            // Still try to load Flutter after delay
+            setTimeout(function() {
+              if (!window.googleMapsReady) {
+                console.warn('⚠️ Google Maps API failed to load, but continuing with Flutter');
+              }
+            }, 3000);
+          };
+          script.onload = function() {
+            console.log('📦 Google Maps API script loaded (but callback may not have fired yet)');
+          };
+          document.head.appendChild(script);
+        }
+      }, 500);
+    })();
+    
+    // Initialize Google Maps when API is loaded
+    window.initGoogleMaps = function() {
+      console.log('✅ Google Maps API callback called');
+      try {
+        // Small delay to ensure everything is initialized
+        setTimeout(function() {
+          try {
+            // Ensure google.maps is available
+            if (typeof google !== 'undefined' && google.maps) {
+              console.log('✅ google.maps object is available');
+              
+              // Check for Google Maps authentication errors
+              if (google.maps.Error) {
+                console.log('✅ Google Maps Error handler is available');
+              }
+              
+              // Try to create a test map to verify API key works
+              try {
+                const testDiv = document.createElement('div');
+                testDiv.style.display = 'none';
+                document.body.appendChild(testDiv);
+                
+                const testMap = new google.maps.Map(testDiv, {
+                  center: { lat: 31.7683, lng: 35.2137 },
+                  zoom: 10,
+                  disableDefaultUI: true
+                });
+                
+                // Check if map was created successfully
+                if (testMap) {
+                  console.log('✅ Test map created successfully - API key is valid');
+                  document.body.removeChild(testDiv);
+                }
+              } catch (mapError) {
+                console.error('❌ Failed to create test map:', mapError);
+                console.error('   This usually means: 1) API key is invalid, 2) Maps JavaScript API is not enabled, 3) API key restrictions are blocking this domain');
+                window.googleMapsError = 'Failed to create test map: ' + mapError.toString();
+              }
+              
+              // Polyfill for MapTypeId if needed
+              if (!google.maps.MapTypeId) {
+                console.warn('⚠️ MapTypeId not found, creating polyfill');
+                google.maps.MapTypeId = {
+                  ROADMAP: 'roadmap',
+                  SATELLITE: 'satellite',
+                  HYBRID: 'hybrid',
+                  TERRAIN: 'terrain'
+                };
+              } else {
+                console.log('✅ MapTypeId is available:', Object.keys(google.maps.MapTypeId));
+              }
+              
+              window.googleMapsReady = true;
+              console.log('✅ Google Maps API is fully ready');
+              
+              // Trigger any waiting callbacks
+              if (window.onGoogleMapsReady) {
+                window.onGoogleMapsReady();
+              }
+            } else {
+              console.error('❌ google.maps is not available after API load');
+              console.error('   typeof google:', typeof google);
+              console.error('   google.maps:', typeof google !== 'undefined' ? google.maps : 'N/A');
+              console.error('   Current URL:', window.location.href);
+              console.error('   API Key used: AIzaSyAGALOMmVVNl1f_xYDRXoFrgX_Z0B5HjQQ');
+              window.googleMapsError = 'google.maps object not available. This usually means: 1) API key is invalid, 2) API key restrictions are too strict, 3) Maps JavaScript API is not enabled';
+            }
+          } catch (e) {
+            console.error('❌ Error checking google.maps:', e);
+            console.error('   Error stack:', e.stack);
+            window.googleMapsError = e.toString();
+          }
+        }, 100);
+      } catch (e) {
+        console.error('❌ Error in initGoogleMaps:', e);
+        console.error('   Error stack:', e.stack);
+        window.googleMapsError = e.toString();
+      }
+    };
+    
+    // Fallback initialization
     window.initMap = function() {
-      console.log('Google Maps placeholder loaded - API key needs to be configured');
+      console.log('📍 initMap callback called (fallback)');
+      window.initGoogleMaps();
     };
     
     // Polyfill for Intl.Segmenter to fix deprecation warning
@@ -112,15 +237,150 @@
       console.warn('Flutter error:', e.detail);
     });
     
+    // Listen for Google Maps specific errors
+    window.addEventListener('gm_authFailure', function() {
+      console.error('❌ Google Maps Authentication Error!');
+      console.error('   This means the API key is invalid or not authorized for this domain.');
+      console.error('   Please check:');
+      console.error('   1. API key is correct: AIzaSyAGALOMmVVNl1f_xYDRXoFrgX_Z0B5HjQQ');
+      console.error('   2. Maps JavaScript API is enabled in Google Cloud Console');
+      console.error('   3. API key restrictions allow this domain: ' + window.location.hostname);
+      console.error('   4. For localhost, add "localhost" or "localhost:*" to allowed referrers');
+      console.error('   5. For Firebase hosting, add "*.web.app" and "*.firebaseapp.com" to allowed referrers');
+      window.googleMapsError = 'Google Maps Authentication Error - API key is invalid or not authorized';
+    });
+    
     // Initialize app with error handling
     window.addEventListener('DOMContentLoaded', function() {
       console.log('DOM loaded, initializing app...');
+      
+      // Handle payment success callback - CHECK FIRST
+      if (window.location.pathname === '/payment/success' || window.location.pathname.includes('payment/success')) {
+        console.log('Payment success callback detected - opening app');
+        
+        // Show custom message
+        document.body.innerHTML = '';
+        document.body.style.margin = '0';
+        document.body.style.padding = '0';
+        document.body.innerHTML = `
+          <div style="display: flex; justify-content: center; align-items: center; min-height: 100vh; background-color: #f5f5f5; font-family: Arial, sans-serif; direction: rtl;">
+            <div style="background-color: white; padding: 40px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 500px; text-align: center;">
+              <h1 style="color: #2c3e50; margin-bottom: 20px; font-size: 24px;">✅ תשלום אושר</h1>
+              <p style="color: #666; font-size: 16px; line-height: 1.6; margin-bottom: 30px;">התשלום שלך אושר בהצלחה! המנוי שלך הופעל.</p>
+              <p style="color: #999; font-size: 12px; margin-top: 30px;">פתיחת האפליקציה...</p>
+            </div>
+          </div>
+        `;
+        
+        // Try to open app if on mobile
+        if (/Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+          // Try multiple deep link schemes
+          setTimeout(function() {
+            window.location.href = 'shchunati://payment/success';
+          }, 500);
+          setTimeout(function() {
+            window.location.href = 'com.example.flutter1://payment/success';
+          }, 1500);
+        }
+        return; // Don't continue to email verification check
+      }
+      
+      // Handle email verification callback
+      if (window.location.pathname === '/email-verified' || window.location.pathname.includes('email-verified') || window.location.search.includes('email-verified')) {
+        console.log('Email verification callback detected - showing custom page');
+        // Extract message from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const message = urlParams.get('message') || 'האימייל שלך אומת. התחבר שוב לשכונתי עם הפרטים שנרשמת בהם.';
+        const email = urlParams.get('email');
+        
+        // Show custom message IMMEDIATELY - replace entire page
+        document.body.innerHTML = '';
+        document.body.style.margin = '0';
+        document.body.style.padding = '0';
+        document.body.innerHTML = `
+          <div style="display: flex; justify-content: center; align-items: center; min-height: 100vh; background-color: #f5f5f5; font-family: Arial, sans-serif; direction: rtl;">
+            <div style="background-color: white; padding: 40px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); max-width: 500px; text-align: center;">
+              <h1 style="color: #2c3e50; margin-bottom: 20px; font-size: 24px;">✅ האימייל שלך אומת</h1>
+              <p style="color: #666; font-size: 16px; line-height: 1.6; margin-bottom: 30px;">${message}</p>
+              ${email ? `<p style="color: #999; font-size: 14px; margin-top: 20px;">אימייל: ${email}</p>` : ''}
+              <p style="color: #999; font-size: 12px; margin-top: 30px;">תוכל לסגור את החלון הזה ולחזור לאפליקציה.</p>
+            </div>
+          </div>
+        `;
+        
+        // Try to open app if on mobile
+        if (/Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)) {
+          setTimeout(function() {
+            window.location.href = 'com.example.flutter1://email-verified';
+          }, 2000);
+        }
+        
+        // Stop here - don't load Flutter
+        return;
+      }
+      
+      // Wait for Google Maps API to be ready before Flutter bootstrap
+      function waitForGoogleMaps(callback, maxAttempts = 100) {
+        let attempts = 0;
+        const checkInterval = setInterval(function() {
+          attempts++;
+          if (window.googleMapsReady && typeof google !== 'undefined' && google.maps && google.maps.MapTypeId) {
+            console.log('✅ Google Maps API is ready (attempt ' + attempts + ')');
+            clearInterval(checkInterval);
+            callback();
+          } else if (attempts >= maxAttempts) {
+            console.warn('⚠️ Google Maps API not loaded after ' + maxAttempts + ' attempts (' + (maxAttempts * 0.1) + ' seconds), proceeding anyway');
+            console.warn('   googleMapsReady:', window.googleMapsReady);
+            console.warn('   google defined:', typeof google !== 'undefined');
+            console.warn('   google.maps defined:', typeof google !== 'undefined' && google.maps);
+            console.warn('   MapTypeId defined:', typeof google !== 'undefined' && google.maps && google.maps.MapTypeId);
+            if (window.googleMapsError) {
+              console.warn('   Error:', window.googleMapsError);
+            }
+            clearInterval(checkInterval);
+            callback();
+          }
+        }, 100);
+      }
+      
+      // Set up callback for when Google Maps is ready
+      window.onGoogleMapsReady = function() {
+        console.log('📞 onGoogleMapsReady callback triggered');
+      };
+      
+      // Flag to prevent double loading
+      let flutterLoaded = false;
+      
+      function loadFlutterBootstrap() {
+        if (flutterLoaded) return;
+        flutterLoaded = true;
+        console.log('🚀 Loading Flutter bootstrap');
+        const flutterScript = document.createElement('script');
+        flutterScript.src = 'flutter_bootstrap.js';
+        flutterScript.async = true;
+        document.body.appendChild(flutterScript);
+      }
+      
+      // Wait for Google Maps before loading Flutter bootstrap
+      waitForGoogleMaps(function() {
+        console.log('✅ Google Maps API ready, loading Flutter bootstrap');
+        loadFlutterBootstrap();
+      });
+      
+      // Fallback: Load Flutter after 5 seconds even if Google Maps isn't ready
+      setTimeout(function() {
+        if (!flutterLoaded) {
+          console.warn('⚠️ Google Maps API not ready after 5 seconds, loading Flutter anyway');
+          loadFlutterBootstrap();
+        }
+      }, 5000);
       
       // Handle Google Sign-In redirect
       if (window.location.hash.includes('access_token') || window.location.search.includes('code')) {
         console.log('Google Sign-In redirect detected');
         // The Flutter app will handle the redirect
       }
+      
       
       // Wait for Flutter to be ready
       window.addEventListener('flutter-first-frame', function() {
@@ -178,6 +438,6 @@
   </script>
 </head>
 <body>
-  <script src="flutter_bootstrap.js" async></script>
+  <!-- Flutter bootstrap will be loaded after Google Maps API is ready -->
 </body>
 </html>

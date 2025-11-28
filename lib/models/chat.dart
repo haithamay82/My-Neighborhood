@@ -42,6 +42,12 @@ class Chat {
   }
 }
 
+enum MessageType {
+  text,
+  voice,
+  image,
+}
+
 class Message {
   final String messageId;
   final String from;
@@ -53,6 +59,11 @@ class Message {
   final List<String> readBy; // מי קרא את ההודעה
   final DateTime? editedAt; // מתי נערכה ההודעה
   final bool isSystemMessage; // האם זו הודעת מערכת
+  
+  // Voice message fields
+  final MessageType type; // text, voice, or image
+  final String? data; // Base64 string or URL for voice/image
+  final int? duration; // Duration in seconds for voice messages
 
   Message({
     required this.messageId,
@@ -65,10 +76,30 @@ class Message {
     this.readBy = const [],
     this.editedAt,
     this.isSystemMessage = false,
+    this.type = MessageType.text,
+    this.data,
+    this.duration,
   });
 
   factory Message.fromFirestore(DocumentSnapshot doc) {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+    
+    // Parse message type
+    MessageType messageType = MessageType.text;
+    final typeString = data['type'] as String?;
+    if (typeString != null) {
+      switch (typeString) {
+        case 'voice':
+          messageType = MessageType.voice;
+          break;
+        case 'image':
+          messageType = MessageType.image;
+          break;
+        default:
+          messageType = MessageType.text;
+      }
+    }
+    
     return Message(
       messageId: doc.id,
       from: data['from'] ?? '',
@@ -86,6 +117,9 @@ class Message {
           ? (data['editedAt'] as Timestamp).toDate()
           : null,
       isSystemMessage: data['isSystemMessage'] ?? false,
+      type: messageType,
+      data: data['data'] as String?,
+      duration: data['duration'] as int?,
     );
   }
 
@@ -100,6 +134,9 @@ class Message {
       'readBy': readBy,
       'editedAt': editedAt != null ? Timestamp.fromDate(editedAt!) : null,
       'isSystemMessage': isSystemMessage,
+      'type': type.name, // 'text', 'voice', or 'image'
+      'data': data,
+      'duration': duration,
     };
   }
 }

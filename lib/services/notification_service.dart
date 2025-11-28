@@ -119,9 +119,9 @@ class NotificationService {
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
-      print('User profile updated successfully for user: $userId');
+      debugPrint('User profile updated successfully for user: $userId');
     } catch (e) {
-      print('Error updating user profile: $e');
+      debugPrint('Error updating user profile: $e');
     }
   }
 
@@ -170,9 +170,9 @@ class NotificationService {
           .doc(notificationId)
           .update({'read': true});
 
-      print('Subscription notification handled successfully');
+      debugPrint('Subscription notification handled successfully');
     } catch (e) {
-      print('Error handling subscription notification: $e');
+      debugPrint('Error handling subscription notification: $e');
     }
   }
 
@@ -199,9 +199,9 @@ class NotificationService {
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      print('Subscription notification sent to user: $userId');
+      debugPrint('Subscription notification sent to user: $userId');
     } catch (e) {
-      print('Error sending subscription notification: $e');
+      debugPrint('Error sending subscription notification: $e');
     }
   }
 
@@ -233,9 +233,9 @@ class NotificationService {
         'read': false,
       });
 
-      print('Help offer notification sent to user: $requestCreatorId');
+      debugPrint('Help offer notification sent to user: $requestCreatorId');
     } catch (e) {
-      print('Error sending help offer notification: $e');
+      debugPrint('Error sending help offer notification: $e');
     }
   }
 
@@ -245,14 +245,85 @@ class NotificationService {
     required bool approved,
     required String userName,
     String? rejectionReason,
+    String? subscriptionType, // business או personal
+    String? paymentMethod, // cash, payme, etc.
   }) async {
+    debugPrint('🔔 sendSubscriptionApprovalNotification called: userId=$userId, approved=$approved, userName=$userName, rejectionReason=$rejectionReason, subscriptionType=$subscriptionType, paymentMethod=$paymentMethod');
     try {
+      // קביעת סוג המנוי - קודם מהפרמטר, אחר כך מבקשת התשלום, אחר כך מהפרופיל
+      String requestedType = 'personal';
+      
+      // אם סופק subscriptionType בפרמטר - השתמש בו
+      if (subscriptionType != null) {
+        requestedType = subscriptionType.toLowerCase();
+        debugPrint('🎯 Using provided subscriptionType: $requestedType');
+      } else {
+        try {
+          // קודם מנסה מתוך בקשת התשלום האחרונה
+          final paymentQuery = await FirebaseFirestore.instance
+              .collection('payment_requests')
+              .where('userId', isEqualTo: userId)
+              .orderBy('createdAt', descending: true)
+              .limit(1)
+              .get();
+          
+          if (paymentQuery.docs.isNotEmpty) {
+            final paymentData = paymentQuery.docs.first.data();
+            final subType = (paymentData['subscriptionType'] as String?)?.toLowerCase();
+            debugPrint('🔍 Found payment request with subscriptionType: $subType');
+            
+            if (subType == 'business') {
+              requestedType = 'business';
+            } else {
+              requestedType = 'personal';
+            }
+          } else {
+            // גיבוי: מתוך פרופיל המשתמש
+            final userDoc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
+            if (userDoc.exists) {
+              final data = userDoc.data()!;
+              final req = (data['requestedSubscriptionType'] as String?)?.toLowerCase();
+              final currentUserType = (data['userType'] as String?)?.toLowerCase();
+              debugPrint('🔍 Found user requestedSubscriptionType: $req, currentUserType: $currentUserType');
+              
+              if (req == 'business') {
+                requestedType = 'business';
+              } else if (req == 'personal') {
+                requestedType = 'personal';
+              } else {
+                // אם אין requestedSubscriptionType, נבדוק את ה-userType הנוכחי
+                if (currentUserType == 'business') {
+                  requestedType = 'business';
+                } else {
+                  requestedType = 'personal'; // ברירת מחדל לפרטי מנוי
+                }
+              }
+            }
+          }
+          
+          debugPrint('🎯 Final requestedType determined: $requestedType');
+        } catch (e) {
+          debugPrint('⚠️ Failed determining requested subscription type, defaulting to personal: $e');
+        }
+      }
+
+      final isBusiness = requestedType == 'business';
+      final isCashPayment = paymentMethod == 'cash';
+      final subscriptionTypeName = isBusiness ? 'עסקי' : 'פרטי';
+      final paymentMethodText = isCashPayment ? 'תמורת תשלום במזומן' : '';
+      
       final title = approved ? 'מנוי אושר! ✅' : 'מנוי נדחה ❌';
-      final message = approved 
-          ? 'המנוי העסקי שלך אושר בהצלחה!'
+      final message = approved
+          ? (isBusiness
+              ? 'המנוי העסקי שלך אושר בהצלחה. כעת תוכל לראות בקשות בתשלום.'
+              : 'המנוי הפרטי שלך אושר בהצלחה.')
           : rejectionReason != null && rejectionReason.isNotEmpty
-              ? 'המנוי העסקי שלך נדחה.\nסיבת הדחייה: $rejectionReason'
-              : 'המנוי העסקי שלך נדחה. אנא פנה לתמיכה לפרטים נוספים.';
+              ? (paymentMethodText.isNotEmpty
+                  ? 'בקשתך למנוי $subscriptionTypeName $paymentMethodText נדחתה.\nסיבת הדחייה: $rejectionReason'
+                  : 'בקשתך למנוי $subscriptionTypeName נדחתה.\nסיבת הדחייה: $rejectionReason')
+              : (paymentMethodText.isNotEmpty
+                  ? 'בקשתך למנוי $subscriptionTypeName $paymentMethodText נדחתה. אנא פנה לתמיכה לפרטים נוספים.'
+                  : 'בקשתך למנוי $subscriptionTypeName נדחתה. אנא פנה לתמיכה לפרטים נוספים.');
 
       final notification = AppNotification(
         notificationId: '',
@@ -264,26 +335,48 @@ class NotificationService {
           'userName': userName,
           'approved': approved,
           if (rejectionReason != null) 'rejectionReason': rejectionReason,
+          if (paymentMethod != null) 'paymentMethod': paymentMethod,
         },
         createdAt: DateTime.now(),
+        read: false, // וידוא שההתראה מסומנת כלא נקראה
       );
 
       // שמירה ב-Firestore
-      await FirebaseFirestore.instance
+      final notificationData = notification.toFirestore();
+      debugPrint('📝 Saving notification to Firestore: $notificationData');
+      
+      final notificationRef = await FirebaseFirestore.instance
           .collection('notifications')
-          .add(notification.toFirestore());
+          .add(notificationData);
+      
+      debugPrint('✅ Notification saved to Firestore with ID: ${notificationRef.id}');
+      debugPrint('📧 Notification details: title="$title", message="$message", userId=$userId, approved=$approved');
 
       // שליחת push notification
-      await PushNotificationService.sendPushNotification(
-        userId: userId,
-        title: title,
-        body: message,
-        payload: 'subscription_approved',
-      );
+      try {
+        await PushNotificationService.sendPushNotification(
+          userId: userId,
+          title: title,
+          body: message,
+          payload: approved ? 'subscription_approved' : 'subscription_rejected',
+          data: {
+            'type': approved ? 'subscription_approved' : 'subscription_rejected',
+            'screen': 'profile',
+            if (rejectionReason != null) 'rejectionReason': rejectionReason,
+            if (subscriptionType != null) 'subscriptionType': subscriptionType,
+            if (paymentMethod != null) 'paymentMethod': paymentMethod,
+          },
+        );
+        debugPrint('✅ Push notification queued for user: $userId');
+      } catch (pushError) {
+        debugPrint('⚠️ Error sending push notification (notification still saved): $pushError');
+        // המשך גם אם push notification נכשל - ההתראה נשמרה ב-Firestore
+      }
 
-      print('Subscription notification sent to user: $userId');
+      debugPrint('✅ Subscription notification sent to user: $userId');
     } catch (e) {
-      print('Error sending subscription notification: $e');
+      debugPrint('❌ Error sending subscription notification: $e');
+      // לא זורקים שגיאה - ההתראה יכולה להישמר גם אם push notification נכשל
     }
   }
 
@@ -298,7 +391,7 @@ class NotificationService {
     try {
       // בדיקה אם המשתמש נמצא בתוך הצ'אט הזה
       if (AppStateService.isInChat(chatId)) {
-        print('User is in chat $chatId - not sending notification');
+        debugPrint('User is in chat $chatId - not sending notification');
         return;
       }
 
@@ -334,9 +427,9 @@ class NotificationService {
         data: {'chatId': chatId},
       );
 
-      print('Chat notification sent to user: $toUserId');
+      debugPrint('Chat notification sent to user: $toUserId');
     } catch (e) {
-      print('Error sending chat notification: $e');
+      debugPrint('Error sending chat notification: $e');
     }
   }
 
@@ -347,10 +440,15 @@ class NotificationService {
     required String requestCategory,
     required String requestId,
     required String creatorName,
+    double? distanceKm,
+    String? distanceSourceHeb, // 'מהמיקום הנייד' | 'מהמיקום הקבוע' | 'מהמיקום שלך'
   }) async {
     try {
       final title = 'בקשה חדשה בתחום שלך! 🆕';
-      final message = '$creatorName פרסם בקשה חדשה ב$requestCategory: "$requestTitle"';
+      final String distanceLine = (distanceKm != null)
+          ? '\nמרחק: ${distanceKm.toStringAsFixed(1)} ק"מ ${distanceSourceHeb ?? 'מהמיקום שלך'}'
+          : '';
+      final message = '$creatorName פרסם בקשה חדשה ב$requestCategory: "$requestTitle"$distanceLine';
 
       final notification = AppNotification(
         notificationId: '',
@@ -363,6 +461,8 @@ class NotificationService {
           'requestTitle': requestTitle,
           'requestCategory': requestCategory,
           'creatorName': creatorName,
+          if (distanceKm != null) 'distanceKm': distanceKm,
+          if (distanceSourceHeb != null) 'distanceSource': distanceSourceHeb,
         },
         createdAt: DateTime.now(),
       );
@@ -383,12 +483,14 @@ class NotificationService {
           'requestTitle': requestTitle,
           'requestCategory': requestCategory,
           'creatorName': creatorName,
+          if (distanceKm != null) 'distanceKm': distanceKm,
+          if (distanceSourceHeb != null) 'distanceSource': distanceSourceHeb,
         },
       );
 
-      print('New request notification sent to user: $toUserId');
+      debugPrint('New request notification sent to user: $toUserId');
     } catch (e) {
-      print('Error sending new request notification: $e');
+      debugPrint('Error sending new request notification: $e');
     }
   }
 
@@ -397,11 +499,15 @@ class NotificationService {
     return FirebaseFirestore.instance
         .collection('notifications')
         .where('toUserId', isEqualTo: userId)
-        .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snapshot) => snapshot.docs
-            .map((doc) => AppNotification.fromFirestore(doc))
-            .toList());
+        .map((snapshot) {
+          final notifications = snapshot.docs
+              .map((doc) => AppNotification.fromFirestore(doc))
+              .toList();
+          // מיון ב-client לפי תאריך (חדש לישן)
+          notifications.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+          return notifications;
+        });
   }
 
   /// סימון התראה כנקראה
@@ -412,9 +518,9 @@ class NotificationService {
           .doc(notificationId)
           .update({'read': true});
       
-      print('Notification marked as read: $notificationId');
+      debugPrint('Notification marked as read: $notificationId');
     } catch (e) {
-      print('Error marking notification as read: $e');
+      debugPrint('Error marking notification as read: $e');
     }
   }
 
@@ -433,9 +539,9 @@ class NotificationService {
       }
 
       await batch.commit();
-      print('All notifications marked as read for user: $userId');
+      debugPrint('All notifications marked as read for user: $userId');
     } catch (e) {
-      print('Error marking all notifications as read: $e');
+      debugPrint('Error marking all notifications as read: $e');
     }
   }
 

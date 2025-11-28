@@ -87,16 +87,18 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> with AudioMixin {
             borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.1),
+                color: Colors.black.withValues(alpha: 0.1),
                 blurRadius: 20,
                 offset: const Offset(0, 10),
               ),
             ],
           ),
-          child: const Icon(
-            Icons.favorite,
-            size: 40,
-            color: Color(0xFF6C5CE7),
+          child: Padding(
+            padding: const EdgeInsets.all(15.0),
+            child: Image.asset(
+              'assets/images/logolarge.png',
+              fit: BoxFit.contain,
+            ),
           ),
         ),
         
@@ -111,7 +113,7 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> with AudioMixin {
             color: Colors.white,
             shadows: [
               Shadow(
-                color: Colors.black.withOpacity(0.3),
+                color: Colors.black.withValues(alpha: 0.3),
                 blurRadius: 10,
                 offset: const Offset(0, 2),
               ),
@@ -125,7 +127,7 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> with AudioMixin {
           'קהילה מקומית • עזרה הדדית',
           style: TextStyle(
             fontSize: 16,
-            color: Colors.white.withOpacity(0.8),
+            color: Colors.white.withValues(alpha: 0.8),
             fontStyle: FontStyle.italic,
           ),
         ),
@@ -217,7 +219,7 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> with AudioMixin {
           backgroundColor: color,
           foregroundColor: textColor,
           elevation: 8,
-          shadowColor: Colors.black.withOpacity(0.3),
+          shadowColor: Colors.black.withValues(alpha: 0.3),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
@@ -232,7 +234,7 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> with AudioMixin {
         Expanded(
           child: Container(
             height: 1,
-            color: Colors.white.withOpacity(0.3),
+            color: Colors.white.withValues(alpha: 0.3),
           ),
         ),
         Padding(
@@ -240,7 +242,7 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> with AudioMixin {
           child: Text(
             'או',
             style: TextStyle(
-              color: Colors.white.withOpacity(0.7),
+              color: Colors.white.withValues(alpha: 0.7),
               fontSize: 14,
             ),
           ),
@@ -248,7 +250,7 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> with AudioMixin {
         Expanded(
           child: Container(
             height: 1,
-            color: Colors.white.withOpacity(0.3),
+            color: Colors.white.withValues(alpha: 0.3),
           ),
         ),
       ],
@@ -268,7 +270,7 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> with AudioMixin {
         shape: BoxShape.circle,
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF6C5CE7).withOpacity(0.4),
+            color: const Color(0xFF6C5CE7).withValues(alpha: 0.4),
             blurRadius: 20,
             spreadRadius: 2,
             offset: const Offset(0, 8),
@@ -298,7 +300,7 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> with AudioMixin {
       child: Text(
         'התחבר עם אימייל',
         style: TextStyle(
-          color: Colors.white.withOpacity(0.9),
+          color: Colors.white.withValues(alpha: 0.9),
           fontSize: 16,
           decoration: TextDecoration.underline,
         ),
@@ -313,7 +315,7 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> with AudioMixin {
         'התחברות משמעה הסכמה לתנאי השימוש, מדיניות פרטיות ומדיניות בטיחות ילדים',
         textAlign: TextAlign.center,
         style: TextStyle(
-          color: Colors.white.withOpacity(0.7),
+          color: Colors.white.withValues(alpha: 0.7),
           fontSize: 12,
         ),
       ),
@@ -434,6 +436,8 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> with AudioMixin {
       }
     } catch (e) {
       await playErrorSound();
+      // Guard context usage after async gap
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('שגיאה בהתחברות: $e')),
       );
@@ -448,6 +452,8 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> with AudioMixin {
       // אינסטגרם לא תומך ישירות ב-Firebase Auth
       // נציג הודעה למשתמש
       await playErrorSound();
+      // Guard context usage after async gap
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('כניסה דרך אינסטגרם תהיה זמינה בקרוב!'),
@@ -477,6 +483,8 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> with AudioMixin {
       }
     } catch (e) {
       await playErrorSound();
+      // Guard context usage after async gap
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('שגיאה בהתחברות: $e')),
       );
@@ -500,9 +508,13 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> with AudioMixin {
       );
       await FirebaseAuth.instance.signInWithCredential(oauthCredential);
       await playSuccessSound();
+      // Guard context usage after async gap
+      if (!mounted) return;
       widget.onLoginSuccess?.call();
     } catch (e) {
       await playErrorSound();
+      // Guard context usage after async gap
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('שגיאה בהתחברות: $e')),
       );
@@ -517,8 +529,10 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> with AudioMixin {
     setState(() => _isLoading = true);
     try {
       if (_isSignUp) {
+        // Firebase Auth יכשל אוטומטית אם האימייל כבר קיים
+        final email = _emailController.text.trim();
         await FirebaseAuth.instance.createUserWithEmailAndPassword(
-          email: _emailController.text,
+          email: email,
           password: _passwordController.text,
         );
         await FirebaseAuth.instance.currentUser?.updateDisplayName(_nameController.text);
@@ -532,8 +546,65 @@ class _ModernAuthScreenState extends State<ModernAuthScreen> with AudioMixin {
       widget.onLoginSuccess?.call();
     } catch (e) {
       await playErrorSound();
+      // Guard context usage after async gap
+      if (!mounted) return;
+      
+      // טיפול בשגיאות Firebase Auth
+      String errorMessage = 'שגיאה בהתחברות';
+      
+      if (e is FirebaseAuthException) {
+        // שימוש בקוד המדויק של Firebase
+        switch (e.code) {
+          case 'user-not-found':
+          case 'USER_NOT_FOUND':
+            errorMessage = 'אימייל זה אינו רשום במערכת';
+            break;
+          case 'wrong-password':
+          case 'WRONG_PASSWORD':
+            errorMessage = 'הסיסמה שגויה';
+            break;
+          case 'invalid-credential':
+          case 'INVALID_CREDENTIAL':
+            // Firebase לא מבדיל בין אימייל לא רשום לסיסמה שגויה מטעמי אבטחה
+            // נציג הודעה כללית
+            errorMessage = 'הסיסמה שגויה';
+            break;
+          case 'email-already-in-use':
+          case 'EMAIL_ALREADY_IN_USE':
+            errorMessage = 'אימייל זה כבר רשום במערכת';
+            break;
+          default:
+            // בדיקה נוספת למקרה שהקוד לא מזוהה
+            final errorString = e.toString().toLowerCase();
+            if (errorString.contains('user-not-found')) {
+              errorMessage = 'אימייל זה אינו רשום במערכת';
+            } else if (errorString.contains('wrong-password') || 
+                       errorString.contains('invalid-credential')) {
+              errorMessage = 'הסיסמה שגויה';
+            }
+        }
+      } else {
+        // בדיקה לגביית שגיאות לא מ-FirebaseAuthException
+        final errorString = e.toString().toLowerCase();
+        if (errorString.contains('user-not-found') || 
+            errorString.contains('user_not_found')) {
+          errorMessage = 'אימייל זה אינו רשום במערכת';
+        } else if (errorString.contains('wrong-password') || 
+                   errorString.contains('wrong_password')) {
+          errorMessage = 'הסיסמה שגויה';
+        } else if (errorString.contains('invalid-credential') ||
+                   errorString.contains('invalid_credential')) {
+          errorMessage = 'הסיסמה שגויה';
+        } else if (errorString.contains('email-already-in-use')) {
+          errorMessage = 'אימייל זה כבר רשום במערכת';
+        }
+      }
+      
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('שגיאה: $e')),
+        SnackBar(
+          content: Text(errorMessage),
+          backgroundColor: Colors.red,
+        ),
       );
     } finally {
       setState(() => _isLoading = false);

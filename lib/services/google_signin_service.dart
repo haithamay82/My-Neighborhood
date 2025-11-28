@@ -106,6 +106,9 @@ class GoogleSignInService {
       
       if (!userDoc.exists) {
         // יצירת משתמש חדש
+        final now = DateTime.now();
+        final guestTrialEndDate = now.add(const Duration(days: 60)); // 60 יום תקופת ניסיון
+        
         final userData = {
           'uid': user.uid,
           'email': user.email,
@@ -133,6 +136,22 @@ class GoogleSignInService {
             'latitude': 32.0853,
             'longitude': 34.7818,
             'village': 'תל אביב, ישראל',
+          });
+        } else {
+          // משתמש רגיל - הגדר כאורח
+          userData.addAll({
+            'userType': 'guest', // כל המשתמשים החדשים נרשמים כאורחים
+            'isSubscriptionActive': true, // תקופת אורח פעילה
+            'subscriptionStatus': 'active',
+            'emailVerified': user.emailVerified,
+            'accountStatus': 'active',
+            'guestTrialStartDate': Timestamp.fromDate(now),
+            'guestTrialEndDate': Timestamp.fromDate(guestTrialEndDate),
+            'maxRequestsPerMonth': 10, // גבוה יותר לאורחים
+            'maxRadius': 3.0, // 3 ק"מ לאורחים
+            'canCreatePaidRequests': true, // אורחים יכולים ליצור בקשות בתשלום
+            'businessCategories': [], // יבחרו במסך הבא
+            'hasAcceptedTerms': true,
           });
         }
         

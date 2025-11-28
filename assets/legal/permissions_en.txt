@@ -1,0 +1,48 @@
+Permissions Explanation - "Shchunati" App
+
+Last Updated: 2025
+
+The app requires certain permissions to provide you with services. Below is an explanation of each permission and why it is required:
+
+1. Location
+Why required: The app uses your location to connect you with nearby neighbors and display relevant help requests in your area.
+How we use it: Location is used only when the app is active and used only for app purposes. Location is stored encrypted and not transferred to third parties.
+Can be revoked: Yes, at any time from device settings.
+
+2. Microphone
+Why required: The app allows you to create voice messages to communicate with other users.
+How we use it: The microphone is used only when you choose to record a voice message. Recordings are stored on encrypted Firebase servers.
+Can be revoked: Yes, at any time from device settings.
+
+3. Camera
+Why required: The app allows you to take photos directly from the app to upload images for help requests.
+How we use it: The camera is used only when you choose to take a photo. Images are stored on encrypted Firebase Storage servers.
+Can be revoked: Yes, at any time from device settings.
+
+4. Photos/Media
+Why required: The app allows you to select images from your gallery to upload images for help requests.
+How we use it: Gallery access is used only when you choose to upload an image. Images are stored on encrypted Firebase Storage servers.
+Can be revoked: Yes, at any time from device settings.
+
+5. Notifications
+Why required: The app sends you notifications about new help requests, messages from other users, and important updates.
+How we use it: Notifications are sent only for relevant activities in the app. You can configure notification types in app settings.
+Can be revoked: Yes, at any time from device settings or app settings.
+
+6. Internet
+Why required: The app requires an internet connection to sync data, send messages, and receive updates.
+How we use it: Internet connection is used only for app activities. Some functions are also available in offline mode.
+
+7. Storage
+Why required: The app stores local data on your device to improve performance and offline use.
+How we use it: Data is stored on your device only and not transferred to external servers.
+Can be deleted: Yes, by deleting app data from device settings.
+
+Important Notes:
+• All permissions are optional - you can use the app even without some permissions, but some functions will not be available.
+• You can revoke any permission at any time from device settings.
+• We do not use permissions for purposes other than those listed above.
+• All data collected through permissions is encrypted and stored securely.
+
+For additional questions, contact support through the app.
+

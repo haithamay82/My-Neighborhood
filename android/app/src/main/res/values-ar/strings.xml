@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">שכונתי</string>
+    
+    <!-- Facebook App Configuration -->
+    <!-- Replace these with your actual Facebook App ID and Client Token -->
+    <string name="facebook_app_id">1234567890123456</string>
+    <string name="facebook_client_token">abcdef1234567890abcdef1234567890</string>
+</resources>
+

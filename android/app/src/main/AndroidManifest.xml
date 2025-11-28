@@ -45,7 +45,7 @@
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
     
     <application
-        android:label="שכונתי"
+        android:label="@string/app_name"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
@@ -81,6 +81,13 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="shchunati" android:host="auth" />
             </intent-filter>
+            <!-- Deep Link for Payment Success -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="shchunati" android:host="payment" android:pathPrefix="/success" />
+            </intent-filter>
         </activity>
         
         <!-- Facebook Activity -->
@@ -95,7 +102,7 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="@string/fb_login_protocol_scheme" />
+                <data android:scheme="fb1234567890123456" />
             </intent-filter>
         </activity>
         
@@ -136,6 +143,20 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                 <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </receiver>
+        
+        <!-- Location Service Checker Receiver -->
+        <!-- ✅ BroadcastReceiver לזיהוי מיידי של שינויים בשירות המיקום -->
+        <receiver 
+            android:name=".LocationServiceChecker"
+            android:exported="true"
+            android:enabled="true"
+            android:permission="android.permission.ACCESS_FINE_LOCATION">
+            <intent-filter android:priority="1000">
+                <action android:name="android.location.PROVIDERS_CHANGED" />
+                <action android:name="android.location.MODE_CHANGED" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
         

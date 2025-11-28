@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 class ImageGalleryScreen extends StatefulWidget {
   final List<String> images;
@@ -56,45 +57,37 @@ class _ImageGalleryScreenState extends State<ImageGalleryScreen> {
         itemCount: widget.images.length,
         itemBuilder: (context, index) {
           return Center(
-            child: InteractiveViewer(
+              child: InteractiveViewer(
               minScale: 0.5,
               maxScale: 3.0,
-              child: Image.network(
-                widget.images[index],
+              child: CachedNetworkImage(
+                imageUrl: widget.images[index],
                 fit: BoxFit.contain,
-                loadingBuilder: (context, child, loadingProgress) {
-                  if (loadingProgress == null) return child;
-                  return Center(
-                    child: CircularProgressIndicator(
-                      value: loadingProgress.expectedTotalBytes != null
-                          ? loadingProgress.cumulativeBytesLoaded /
-                              loadingProgress.expectedTotalBytes!
-                          : null,
-                    ),
-                  );
-                },
-                errorBuilder: (context, error, stackTrace) {
-                  return const Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(
-                          Icons.error,
-                          color: Colors.red,
-                          size: 48,
+                placeholder: (context, url) => const Center(
+                  child: CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                ),
+                errorWidget: (context, url, error) => const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.error,
+                        color: Colors.red,
+                        size: 48,
+                      ),
+                      SizedBox(height: 16),
+                      Text(
+                        'שגיאה בטעינת התמונה',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
                         ),
-                        SizedBox(height: 16),
-                        Text(
-                          'שגיאה בטעינת התמונה',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
           );
@@ -103,7 +96,7 @@ class _ImageGalleryScreenState extends State<ImageGalleryScreen> {
       bottomNavigationBar: widget.images.length > 1
           ? Container(
               height: 100,
-              color: Colors.black.withOpacity(0.8),
+              color: Colors.black.withValues(alpha: 0.8),
               child: ListView.builder(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -132,18 +125,22 @@ class _ImageGalleryScreenState extends State<ImageGalleryScreen> {
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(6),
-                        child: Image.network(
-                          widget.images[index],
+                        child: CachedNetworkImage(
+                          imageUrl: widget.images[index],
                           fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) {
-                            return Container(
-                              color: Colors.grey[800],
-                              child: const Icon(
-                                Icons.error,
-                                color: Colors.red,
-                              ),
-                            );
-                          },
+                          placeholder: (context, url) => Container(
+                            color: Colors.grey[800],
+                            child: const Center(
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          ),
+                          errorWidget: (context, url, error) => Container(
+                            color: Colors.grey[800],
+                            child: const Icon(
+                              Icons.error,
+                              color: Colors.red,
+                            ),
+                          ),
                         ),
                       ),
                     ),

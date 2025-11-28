@@ -1,0 +1,95 @@
+Privacy Policy - "Shchunati" App
+
+Last Updated: 2025
+
+This Privacy Policy describes how we collect, use, store, and protect your personal information in the "Shchunati" app (hereinafter: "the App"). Please read this policy carefully.
+
+The "Shchunati" app is operated by "Extreme Technologies" – a legally registered business in Israel (hereinafter: "the Company").
+
+1. Respect for Privacy
+We respect user privacy and are committed to protecting your personal information in accordance with the Israeli Privacy Protection Law and European data protection rules (GDPR).
+
+2. Types of Information We Collect
+We collect the following information:
+• Personal information: Name, email address, phone number, date of birth
+• Geographic location: GPS coordinates to connect with nearby neighbors
+• User content: Text messages, voice messages, images published in the app
+• Technical information: IP address, device type, operating system, device identifier
+• Usage information: Activity logs, user preferences, app settings
+
+3. Purposes of Information Collection
+We use the collected information for the following purposes:
+• Providing services in the app and connecting users
+• Displaying relevant help requests based on location
+• Securing the app and preventing fraud
+• Improving services and user experience
+• Sending notifications and important messages
+• Compliance with laws and regulations
+
+4. Google Firebase Services
+The app uses Google Firebase services:
+• Firebase Authentication: For user authentication and account management
+• Cloud Firestore: For data storage and user information
+• Firebase Cloud Messaging: For sending push notifications
+• Firebase Storage: For storing images published in the app
+
+Information is transferred to Firebase servers protected by advanced encryption and under Google's privacy policy. You can view Google's privacy policy at: https://policies.google.com/privacy
+
+5. Local Storage (Hive)
+The app uses Hive for local storage on your device for:
+• Saving user preferences
+• Caching data for offline use
+• Improving app performance
+
+Information is stored on your device only and is not transferred to external servers.
+
+6. Device Permissions and Content Storage
+The app requires the following permissions:
+• Location: To connect with nearby neighbors and display relevant requests. Location is stored encrypted and used only for app purposes.
+• Microphone: To create voice messages. Short voice messages are stored in Base64 format, while long voice messages are stored as links to the file.io service. Recordings are stored encrypted and used only for app purposes.
+• Camera/Gallery: To upload images for help requests. Images are stored on encrypted Firebase Storage servers and used only for app purposes.
+
+You can revoke any permission at any time from device settings.
+
+7. Sharing Information with Third Parties
+We will not sell or share your personal information with third parties for marketing or commercial purposes, except:
+• Service providers (such as Firebase) required for app operation, under appropriate security protections
+• In cases required by law or court order
+• In case of business transfer (merger, acquisition, etc.), with prior notice to users
+
+8. Information Security
+We take reasonable technical and organizational security measures to protect your information from unauthorized access, use, modification, or disclosure, including:
+• Encryption of sensitive data
+• Limited access to information only to employees who need it
+• Advanced security systems
+• Regular backups
+
+9. Information Retention
+We retain your information as long as your account is active and thereafter for the period required by law or for legitimate business purposes. Information deleted by the user will be removed from servers within 30 days, except information required to be retained by law.
+
+10. Your Rights
+Under the Privacy Protection Law and GDPR, you have the following rights:
+• Right of access: To receive a copy of your personal information
+• Right of rectification: To correct inaccurate or outdated information
+• Right of erasure: To delete your personal information (right to be forgotten)
+• Right to object: To object to processing of your information for certain purposes
+• Right to restriction: To restrict processing of your information
+• Right to data portability: To receive your information in a structured format
+
+To exercise your rights, you can contact support through the app.
+
+11. Account Deletion
+You may delete your account at any time through the settings menu in the app. After requesting account deletion, we will delete all your personal information from servers within 30 days, except information required to be retained by law (such as transaction records). Account deletion is irreversible, and after deletion you will not be able to recover your information or account.
+
+12. Cookies and Similar Technologies
+The app uses cookies and similar technologies to improve user experience, analyze app usage, and for security purposes.
+
+13. Children
+The app is not intended for children under 18 years of age. We do not knowingly collect information from children. If you are a parent or guardian and discover that your child has provided us with information, please contact us immediately.
+
+14. Changes to Policy
+We may update the Privacy Policy from time to time. Updates will be published in the app with the update date. Continued use of the app after publication of updates constitutes agreement to the updated policy.
+
+15. Contact
+For questions, requests, or complaints regarding the Privacy Policy or exercising your rights, you can contact support through the app or to the email address published in the app.
+

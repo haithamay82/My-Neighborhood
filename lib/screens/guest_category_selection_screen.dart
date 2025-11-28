@@ -24,84 +24,117 @@ class _GuestCategorySelectionScreenState extends State<GuestCategorySelectionScr
 
   // קבוצות קטגוריות לארגון טוב יותר
   final Map<String, List<RequestCategory>> _categoryGroups = {
-    '🏠 בית וגן': [
-      RequestCategory.cleaningServices,
-      RequestCategory.gardening,
+    '🏠 בנייה, תיקונים ותחזוקה': [
       RequestCategory.plumbing,
       RequestCategory.electrical,
+      RequestCategory.renovations,
+      RequestCategory.airConditioning,
       RequestCategory.carpentry,
-      RequestCategory.paintingAndPlaster,
-      RequestCategory.flooringAndCeramics,
-      RequestCategory.roofsAndWalls,
-      RequestCategory.elevatorsAndStairs,
+      RequestCategory.drywall,
+      RequestCategory.painting,
+      RequestCategory.flooring,
+      RequestCategory.frames,
+      RequestCategory.waterproofing,
+      RequestCategory.doorsAndWindows,
     ],
-    '🚗 רכב ותחבורה': [
-      RequestCategory.carRepair,
-      RequestCategory.carServices,
-      RequestCategory.movingAndTransport,
-      RequestCategory.ridesAndShuttles,
-      RequestCategory.bicyclesAndScooters,
-      RequestCategory.heavyVehicles,
+    '🚚 שליחויות, הובלות ושירותים מהירים': [
+      RequestCategory.foodDelivery,
+      RequestCategory.groceryDelivery,
+      RequestCategory.smallMoving,
+      RequestCategory.largeMoving,
     ],
-    '👶 ילדים ומשפחה': [
-      RequestCategory.babysitting,
-      RequestCategory.privateLessons,
-      RequestCategory.childrenActivities,
-      RequestCategory.childrenHealth,
-      RequestCategory.birthAndParenting,
-      RequestCategory.specialEducation,
+    '🧖‍♀️ יופי, טיפוח וקוסמטיקה': [
+      RequestCategory.manicurePedicure,
+      RequestCategory.nailExtension,
+      RequestCategory.hairstyling,
+      RequestCategory.makeup,
+      RequestCategory.eyebrowDesign,
+      RequestCategory.facialTreatments,
+      RequestCategory.massages,
+      RequestCategory.hairRemoval,
+      RequestCategory.beautyTreatments,
     ],
-    '💼 עסקים ושירותים': [
-      RequestCategory.officeServices,
-      RequestCategory.marketingAndAdvertising,
-      RequestCategory.consulting,
-      RequestCategory.businessEvents,
-      RequestCategory.security,
+    '🛒 שיווק ומכירות': [
+      // אוכל מהיר
+      RequestCategory.shawarma,
+      RequestCategory.falafel,
+      RequestCategory.hamburger,
+      RequestCategory.pizza,
+      RequestCategory.toast,
+      RequestCategory.sandwiches,
+      // אוכל ביתי
+      RequestCategory.homeFood,
+      // מאפים וקינוחים
+      RequestCategory.pastriesAndDesserts,
+      // אלקטרוניקה
+      RequestCategory.electronicsSales,
+      // כלי תחבורה (מכירה)
+      RequestCategory.vehiclesSales,
+      // ריהוט
+      RequestCategory.furniture,
+      // אופנה
+      RequestCategory.fashion,
+      // גיימינג
+      RequestCategory.gaming,
+      // ילדים ותינוקות
+      RequestCategory.kidsAndBabies,
+      // ציוד לבית ולגן
+      RequestCategory.homeAndGardenEquipment,
+      // חיות מחמד (מכירה)
+      RequestCategory.petsSales,
+      // מוצרים מיוחדים
+      RequestCategory.specialProducts,
     ],
-    '🎨 יצירה ואמנות': [
-      RequestCategory.paintingAndSculpture,
-      RequestCategory.handicrafts,
-      RequestCategory.music,
-      RequestCategory.photography,
-      RequestCategory.design,
-      RequestCategory.performingArts,
+    '🛠️ טכנולוגיה, מחשבים ואפליקציות': [
+      RequestCategory.computerPhoneRepair,
+      RequestCategory.networksAndInternet,
+      RequestCategory.smartHomeInstallation,
+      RequestCategory.camerasAndAlarms,
+      RequestCategory.webAppDevelopment,
     ],
-    '💪 בריאות וכושר': [
-      RequestCategory.physiotherapy,
-      RequestCategory.yogaAndPilates,
-      RequestCategory.nutrition,
-      RequestCategory.mentalHealth,
-      RequestCategory.alternativeMedicine,
-      RequestCategory.beautyAndCosmetics,
+    '🚗 כלי תחבורה': [
+      RequestCategory.carMechanic,
+      RequestCategory.carElectrician,
+      RequestCategory.motorcycles,
+      RequestCategory.bicycles,
+      RequestCategory.scooters,
+      RequestCategory.towingServices,
     ],
-    '💻 טכנולוגיה': [
-      RequestCategory.computersAndTechnology,
-      RequestCategory.electricalAndElectronics,
-      RequestCategory.internetAndCommunication,
-      RequestCategory.appsAndDevelopment,
-      RequestCategory.smartSystems,
-      RequestCategory.medicalEquipment,
+    '🌱 גינון, ניקיון וסביבה': [
+      RequestCategory.homeGardening,
+      RequestCategory.yardCleaning,
+      RequestCategory.postRenovationCleaning,
+      RequestCategory.plantsAndPets,
     ],
-    '📚 חינוך והכשרה': [
-      RequestCategory.privateLessonsEducation,
-      RequestCategory.languages,
-      RequestCategory.professionalTraining,
-      RequestCategory.lifeSkills,
-      RequestCategory.higherEducation,
-      RequestCategory.vocationalTraining,
+    '🎓 חינוך, לימודים והדרכה': [
+      RequestCategory.privateTutoring,
+      RequestCategory.coursesAndAssignments,
+      RequestCategory.translation,
+      RequestCategory.languageLearning,
     ],
-    '🎉 אירועים ופנאי': [
-      RequestCategory.events,
-      RequestCategory.entertainment,
-      RequestCategory.sports,
-      RequestCategory.tourism,
-      RequestCategory.partiesAndEvents,
-      RequestCategory.photographyAndVideo,
+    '🧭 ייעוץ והכוונה מקצועית': [
+      RequestCategory.nutritionConsulting,
+      RequestCategory.careerConsulting,
+      RequestCategory.travelConsulting,
+      RequestCategory.financialConsulting,
+      RequestCategory.educationConsulting,
+      RequestCategory.personalTrainer,
+      RequestCategory.familyCoupleCounseling,
     ],
-    '🌱 איכות הסביבה': [
-      RequestCategory.environmentalCleaning,
-      RequestCategory.cleaningServicesEnv,
-      RequestCategory.environmentalQuality,
+    '🎨 יצירה, אומנות ומדיה': [
+      RequestCategory.eventPhotography,
+      RequestCategory.graphics,
+      RequestCategory.video,
+      RequestCategory.logoDesign,
+      RequestCategory.smallEventProduction,
+    ],
+    '💡 שירותים מיוחדים ופתוחים': [
+      RequestCategory.elderlyAssistance,
+      RequestCategory.youthMentoring,
+      RequestCategory.formFillingHelp,
+      RequestCategory.donations,
+      RequestCategory.volunteering,
+      RequestCategory.petsCare,
     ],
   };
 
@@ -314,19 +347,19 @@ class _GuestCategorySelectionScreenState extends State<GuestCategorySelectionScr
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.blue[50],
+                    color: Theme.of(context).colorScheme.primaryContainer,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.blue[200]!),
+                    border: Border.all(color: Theme.of(context).colorScheme.primary),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.location_on, color: Colors.blue[700], size: 16),
+                      Icon(Icons.location_on, color: Theme.of(context).colorScheme.primary, size: 16),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           '💡 טיפ: הגדר מיקום קבוע בפרופיל כדי להופיע במפות של בקשות גם כששירות המיקום כובה',
                           style: TextStyle(
-                            color: Colors.blue[700],
+                            color: Theme.of(context).colorScheme.primary,
                             fontSize: 11,
                             fontWeight: FontWeight.w500,
                           ),

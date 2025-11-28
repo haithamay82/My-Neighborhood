@@ -1,12 +1,36 @@
 package com.example.flutter1
 
 import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
 import android.os.Build
 import android.os.Bundle
+import android.content.Intent
+import android.provider.Settings
 import androidx.core.app.NotificationChannelCompat
 import androidx.core.app.NotificationManagerCompat
 
 class MainActivity : FlutterActivity() {
+    private val CHANNEL = "com.example.flutter1/location_settings"
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+            if (call.method == "openLocationSettings") {
+                try {
+                    val intent = Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+                    startActivity(intent)
+                    result.success(true)
+                } catch (e: Exception) {
+                    result.error("ERROR", "Failed to open location settings: ${e.message}", null)
+                }
+            } else {
+                result.notImplemented()
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
@@ -25,5 +49,9 @@ class MainActivity : FlutterActivity() {
             val notificationManager = NotificationManagerCompat.from(this)
             notificationManager.createNotificationChannel(channel)
         }
+        
+        // ✅ תזמון בדיקת שירות המיקום גם כאשר האפליקציה סגורה
+        LocationServiceWorker.schedulePeriodicCheck(this)
     }
+
 }

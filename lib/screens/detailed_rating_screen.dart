@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/request.dart';
 import '../models/detailed_rating.dart';
 import '../l10n/app_localizations.dart';
-import '../services/notification_tracking_service.dart';
 
 class DetailedRatingScreen extends StatefulWidget {
   final Request request;
@@ -59,7 +57,7 @@ class _DetailedRatingScreenState extends State<DetailedRatingScreen> {
         appBar: AppBar(
           title: const Text('דרג את השירות שקיבלת'),
           backgroundColor: Theme.of(context).brightness == Brightness.dark 
-              ? const Color(0xFFFF9800) // כתום ענתיק
+              ? const Color(0xFF9C27B0) // סגול יפה
               : Theme.of(context).colorScheme.primary,
           foregroundColor: Colors.white,
         ),
@@ -72,7 +70,7 @@ class _DetailedRatingScreenState extends State<DetailedRatingScreen> {
 
   Widget _buildContent(AppLocalizations l10n) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100), // padding תחתון נוסף
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -131,7 +129,7 @@ class _DetailedRatingScreenState extends State<DetailedRatingScreen> {
                         Text(
                           widget.helper['email'],
                           style: TextStyle(
-                            color: Colors.grey[600],
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
                             fontSize: 14,
                           ),
                         ),
@@ -200,19 +198,19 @@ class _DetailedRatingScreenState extends State<DetailedRatingScreen> {
           // דירוג כולל
           if (_getOverallRating() > 0) ...[
             Card(
-              color: Colors.blue[50],
+              color: Theme.of(context).colorScheme.primaryContainer,
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Row(
                   children: [
-                    Icon(Icons.star, color: Colors.blue[700], size: 24),
+                    Icon(Icons.star, color: Theme.of(context).colorScheme.primary, size: 24),
                     const SizedBox(width: 12),
                     Text(
                       'דירוג כולל: ${_getOverallRating().toStringAsFixed(1)}/5',
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
-                        color: Colors.blue[700],
+                        color: Theme.of(context).colorScheme.primary,
                       ),
                     ),
                   ],
@@ -321,18 +319,18 @@ class _DetailedRatingScreenState extends State<DetailedRatingScreen> {
                         subtitle,
                         style: TextStyle(
                           fontSize: 14,
-                          color: Colors.grey[600],
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ],
                   ),
                 ),
                 Text(
-                  '${rating}/5',
+                  '$rating/5',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
-                    color: rating > 0 ? color : Colors.grey[400],
+                    color: rating > 0 ? color : Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
               ],
@@ -348,7 +346,7 @@ class _DetailedRatingScreenState extends State<DetailedRatingScreen> {
                     child: Icon(
                       index < rating ? Icons.star : Icons.star_border,
                       size: 32,
-                      color: index < rating ? color : Colors.grey[400],
+                      color: index < rating ? color : Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
                   ),
                 );
@@ -642,21 +640,8 @@ class _DetailedRatingScreenState extends State<DetailedRatingScreen> {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
-      // בדיקה אם כבר נשלחה התראה על הגדלת טווח עם אותם פרמטרים
-      final hasBeenSent = await NotificationTrackingService.hasNotificationWithParamsBeenSent(
-        userId: user.uid,
-        notificationType: 'radius_increase',
-        params: {
-          'recommendationsCount': recommendationsCount,
-          'averageRating': averageRating.toStringAsFixed(1),
-          'radiusIncrease': radiusIncrease.toStringAsFixed(1),
-        },
-      );
-
-      if (hasBeenSent) {
-        debugPrint('Radius increase notification already sent for user: ${user.uid} with same parameters');
-        return;
-      }
+      // בדיקה פשוטה
+      debugPrint('Checking radius increase notification');
 
       String message = '';
       String details = '';
@@ -704,16 +689,8 @@ class _DetailedRatingScreenState extends State<DetailedRatingScreen> {
           .collection('notifications')
           .add(notification);
 
-      // סימון שההתראה נשלחה
-      await NotificationTrackingService.markNotificationWithParamsAsSent(
-        userId: user.uid,
-        notificationType: 'radius_increase',
-        params: {
-          'recommendationsCount': recommendationsCount,
-          'averageRating': averageRating.toStringAsFixed(1),
-          'radiusIncrease': radiusIncrease.toStringAsFixed(1),
-        },
-      );
+      // התראה נשלחה
+      debugPrint('Radius increase notification sent for user: ${user.uid}');
 
       debugPrint('✅ Radius increase notification sent: $message');
     } catch (e) {

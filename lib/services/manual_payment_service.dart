@@ -6,13 +6,14 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import '../models/request.dart';
+import 'notification_service.dart';
 
 class ManualPaymentService {
   static const String _bitPhoneNumber = '0506505599'; // מספר BIT של שכונתי
   static const String _bitAccountName = 'שכונתי - מנוי שנתי';
   // סכומי מנוי לפי סוג
-  static const double _personalSubscriptionAmount = 10.0;
-  static const double _businessSubscriptionAmount = 50.0;
+  static const double _personalSubscriptionAmount = 30.0;
+  static const double _businessSubscriptionAmount = 70.0;
   
   /// קבלת סכום המנוי לפי סוג
   static double _getSubscriptionAmount(String? subscriptionType) {
@@ -54,7 +55,7 @@ class ManualPaymentService {
         'instructions': _getPaymentInstructions(subscriptionType),
       };
     } catch (e) {
-      print('Error creating payment request: $e');
+      debugPrint('Error creating payment request: $e');
       rethrow;
     }
   }
@@ -95,7 +96,7 @@ class ManualPaymentService {
           .get();
       
       if (!paymentDoc.exists) {
-        print('Payment request not found: $paymentId');
+        debugPrint('Payment request not found: $paymentId');
         return false;
       }
       
@@ -118,7 +119,7 @@ class ManualPaymentService {
       
       return true;
     } catch (e) {
-      print('Error uploading payment proof: $e');
+      debugPrint('Error uploading payment proof: $e');
       return false;
     }
   }
@@ -170,6 +171,13 @@ class ManualPaymentService {
         currentBusinessCategories = List<String>.from(userData['businessCategories'] ?? []);
       }
       
+      // קבלת הקטגוריות מבקשת התשלום (אם יש)
+      List<String> paymentRequestCategories = [];
+      if (paymentData['businessCategories'] != null) {
+        paymentRequestCategories = List<String>.from(paymentData['businessCategories']);
+        debugPrint('📋 Found business categories in payment request: $paymentRequestCategories');
+      }
+      
       // עדכון לפי סוג המנוי שביקש
       Map<String, dynamic> updateData = {
         'isSubscriptionActive': true,
@@ -182,8 +190,14 @@ class ManualPaymentService {
       if (requestedSubscriptionType == 'business') {
         // עסקי מנוי - צריך תחומי עיסוק
         debugPrint('✅ Setting user as BUSINESS subscription');
-        if (currentBusinessCategories.isEmpty) {
+        // אם יש קטגוריות בבקשת התשלום - השתמש בהן
+        if (paymentRequestCategories.isNotEmpty) {
+          currentBusinessCategories = paymentRequestCategories;
+          debugPrint('✅ Using categories from payment request: $currentBusinessCategories');
+        } else if (currentBusinessCategories.isEmpty) {
+          // רק אם אין קטגוריות בבקשת התשלום ואין קטגוריות קיימות - הוסף את כל הקטגוריות
           currentBusinessCategories = RequestCategory.values.map((e) => e.name).toList();
+          debugPrint('⚠️ No categories in payment request, using all categories: $currentBusinessCategories');
         }
         updateData['userType'] = 'business';
         updateData['businessCategories'] = currentBusinessCategories;
@@ -222,7 +236,7 @@ class ManualPaymentService {
           });
         }
       } catch (e) {
-        print('Warning: Could not update user_profiles collection: $e');
+        debugPrint('Warning: Could not update user_profiles collection: $e');
       }
       
       // עדכון סטטוס התשלום
@@ -234,43 +248,52 @@ class ManualPaymentService {
         'approvedAt': Timestamp.now(),
       });
 
-      // שליחת התראה למשתמש דרך Firestore
-      await FirebaseFirestore.instance
-          .collection('notifications')
-          .add({
-        'toUserId': userId,
-        'title': 'מנוי אושר! 🎉',
-        'message': 'המנוי העסקי שלך אושר בהצלחה. כעת תוכל לראות בקשות בתשלום.',
-        'type': 'subscription_approved',
-        'createdAt': FieldValue.serverTimestamp(),
-        'read': false,
-      });
+      // לא שולחים התראה כאן - ההתראה תשלח מ-admin_payments_screen
+      // כדי לשלוט על התוכן הנכון (פרטי/עסקי) על בסיס ה-subscriptionType
       
       return true;
     } catch (e) {
-      print('Error approving payment: $e');
+      debugPrint('Error approving payment: $e');
       return false;
     }
   }
   
   /// דחיית תשלום (למנהל)
   static Future<bool> rejectPayment(String paymentId, String reason) async {
+    debugPrint('🚫 ManualPaymentService.rejectPayment called: paymentId=$paymentId, reason=$reason');
     try {
       // קבלת פרטי המשתמש לפני הדחייה
+      debugPrint('📋 Fetching payment request: $paymentId');
+      debugPrint('⏳ About to call Firestore get() in rejectPayment...');
       final paymentDoc = await FirebaseFirestore.instance
           .collection('payment_requests')
           .doc(paymentId)
           .get();
       
+      debugPrint('✅ Firestore get() completed in rejectPayment');
+      debugPrint('📄 Payment document exists: ${paymentDoc.exists}');
+      
       if (!paymentDoc.exists) {
-        print('Payment request not found: $paymentId');
+        debugPrint('❌ Payment request not found: $paymentId');
         return false;
       }
       
-      final paymentData = paymentDoc.data()!;
-      final userId = paymentData['userId'] as String;
+      debugPrint('✅ Payment document exists, extracting data...');
+      final paymentData = Map<String, dynamic>.from(paymentDoc.data()!);
+      debugPrint('📊 Payment data keys: ${paymentData.keys.toList()}');
+      final userId = paymentData['userId'] as String?;
+      final userName = paymentData['userName'] as String? ?? 'משתמש';
+      final subscriptionType = paymentData['subscriptionType'] as String?;
+      final paymentMethod = paymentData['paymentMethod'] as String?;
+      debugPrint('👤 Found payment request for userId: $userId, userName: $userName, subscriptionType: $subscriptionType, paymentMethod: $paymentMethod');
+      
+      if (userId == null || userId.isEmpty) {
+        debugPrint('❌ userId is null or empty in payment request!');
+        return false;
+      }
       
       // עדכון סטטוס בקשת התשלום
+      debugPrint('🔄 Updating payment request status to rejected...');
       await FirebaseFirestore.instance
           .collection('payment_requests')
           .doc(paymentId)
@@ -279,13 +302,48 @@ class ManualPaymentService {
         'rejectionReason': reason,
         'rejectedAt': Timestamp.now(),
       });
+      debugPrint('✅ Payment request status updated to rejected');
       
       // עדכון סטטוס המנוי של המשתמש ל"פרטי חינם" כדי שיוכל שוב ללחוץ "הפעל מנוי"
-      await _updateUserSubscriptionStatus(userId, 'private_free');
+      debugPrint('🔄 Updating user subscription status to private_free...');
+      try {
+        await _updateUserSubscriptionStatus(userId, 'private_free');
+        debugPrint('✅ User subscription status updated to private_free');
+      } catch (updateError, stackTrace) {
+        debugPrint('❌ Error updating user subscription status: $updateError');
+        debugPrint('❌ Stack trace: $stackTrace');
+        // המשך גם אם יש שגיאה בעדכון הסטטוס - התשלום כבר נדחה
+      }
       
+      // שליחת התראה למשתמש עם סיבת הדחייה
+      debugPrint('📤 ========== STARTING NOTIFICATION SEND ==========');
+      debugPrint('📤 Sending rejection notification to user: $userId');
+      debugPrint('📤 Notification params: userName=$userName, reason=$reason, subscriptionType=$subscriptionType, paymentMethod=$paymentMethod');
+      try {
+        debugPrint('📤 About to call NotificationService.sendSubscriptionApprovalNotification...');
+        await NotificationService.sendSubscriptionApprovalNotification(
+          userId: userId,
+          approved: false,
+          userName: userName,
+          rejectionReason: reason,
+          subscriptionType: subscriptionType,
+          paymentMethod: paymentMethod,
+        );
+        debugPrint('✅ Rejection notification sent successfully to user: $userId');
+        debugPrint('📤 ========== NOTIFICATION SEND COMPLETED ==========');
+      } catch (notificationError, stackTrace) {
+        debugPrint('⚠️ ========== NOTIFICATION SEND ERROR ==========');
+        debugPrint('⚠️ Error sending rejection notification: $notificationError');
+        debugPrint('⚠️ Stack trace: $stackTrace');
+        debugPrint('⚠️ ========== END NOTIFICATION SEND ERROR ==========');
+        // המשך גם אם יש שגיאה בשליחת ההתראה - התשלום כבר נדחה
+      }
+      
+      debugPrint('✅ ManualPaymentService.rejectPayment completed successfully');
       return true;
-    } catch (e) {
-      print('Error rejecting payment: $e');
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error rejecting payment: $e');
+      debugPrint('❌ Stack trace: $stackTrace');
       return false;
     }
   }
@@ -303,7 +361,7 @@ class ManualPaymentService {
       }
       return null;
     } catch (e) {
-      print('Error getting payment status: $e');
+      debugPrint('Error getting payment status: $e');
       return null;
     }
   }
@@ -341,12 +399,12 @@ class ManualPaymentService {
         // שליחת push notification ישירה למנהל
         await _sendDirectPushNotification(adminId, 'בקשת מנוי חדשה! 🔔', 'משתמש $userName ($userEmail) הגיש בקשת מנוי חדשה לאישור.');
         
-        print('Admin notification sent for payment request: $paymentId');
+        debugPrint('Admin notification sent for payment request: $paymentId');
       } else {
-        print('No admin found to notify');
+        debugPrint('No admin found to notify');
       }
     } catch (e) {
-      print('Error notifying admin: $e');
+      debugPrint('Error notifying admin: $e');
     }
   }
 
@@ -360,7 +418,7 @@ class ManualPaymentService {
           .get();
       
       if (!adminDoc.exists) {
-        print('Admin document not found: $adminId');
+        debugPrint('Admin document not found: $adminId');
         return;
       }
       
@@ -368,7 +426,7 @@ class ManualPaymentService {
       final fcmToken = adminData['fcmToken'] as String?;
       
       if (fcmToken == null) {
-        print('No FCM token found for admin: $adminId');
+        debugPrint('No FCM token found for admin: $adminId');
         return;
       }
       
@@ -383,9 +441,9 @@ class ManualPaymentService {
         'createdAt': FieldValue.serverTimestamp(),
       });
       
-      print('Direct push notification sent to admin: $adminId');
+      debugPrint('Direct push notification sent to admin: $adminId');
     } catch (e) {
-      print('Error sending direct push notification: $e');
+      debugPrint('Error sending direct push notification: $e');
     }
   }
 
@@ -395,6 +453,7 @@ class ManualPaymentService {
     String status,
     [DateTime? expiryDate]
   ) async {
+    debugPrint('🔄 _updateUserSubscriptionStatus called: userId=$userId, status=$status');
     try {
       final updateData = <String, dynamic>{
         'subscriptionStatus': status,
@@ -412,12 +471,15 @@ class ManualPaymentService {
         updateData['requestedSubscriptionType'] = null; // איפוס סוג המנוי המבוקש
       }
       
+      debugPrint('📝 Updating user document with data: $updateData');
       await FirebaseFirestore.instance
           .collection('users')
           .doc(userId)
           .update(updateData);
-    } catch (e) {
-      print('Error updating user subscription status: $e');
+      debugPrint('✅ User subscription status updated successfully');
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error updating user subscription status: $e');
+      debugPrint('❌ Stack trace: $stackTrace');
     }
   }
   
@@ -436,9 +498,15 @@ class ManualPaymentService {
           .get();
       
       String requestedSubscriptionType = 'personal'; // ברירת מחדל
+      List<String> paymentRequestCategories = [];
       if (paymentQuery.docs.isNotEmpty) {
         final paymentData = paymentQuery.docs.first.data();
         requestedSubscriptionType = paymentData['subscriptionType'] ?? 'personal';
+        // קבלת הקטגוריות מבקשת התשלום (אם יש)
+        if (paymentData['businessCategories'] != null) {
+          paymentRequestCategories = List<String>.from(paymentData['businessCategories']);
+          debugPrint('📋 Found business categories in payment request: $paymentRequestCategories');
+        }
         debugPrint('🔍 Payment request subscription type: $requestedSubscriptionType');
       } else {
         debugPrint('⚠️ No payment request found for user: $userId');
@@ -468,8 +536,14 @@ class ManualPaymentService {
       if (requestedSubscriptionType == 'business') {
         // עסקי מנוי - צריך תחומי עיסוק
         debugPrint('✅ Setting user as BUSINESS subscription');
-        if (currentBusinessCategories.isEmpty) {
+        // אם יש קטגוריות בבקשת התשלום - השתמש בהן
+        if (paymentRequestCategories.isNotEmpty) {
+          currentBusinessCategories = paymentRequestCategories;
+          debugPrint('✅ Using categories from payment request: $currentBusinessCategories');
+        } else if (currentBusinessCategories.isEmpty) {
+          // רק אם אין קטגוריות בבקשת התשלום ואין קטגוריות קיימות - הוסף את כל הקטגוריות
           currentBusinessCategories = RequestCategory.values.map((e) => e.name).toList();
+          debugPrint('⚠️ No categories in payment request, using all categories: $currentBusinessCategories');
         }
         updateData['userType'] = 'business';
         updateData['businessCategories'] = currentBusinessCategories;
@@ -485,22 +559,12 @@ class ManualPaymentService {
           .doc(userId)
           .update(updateData);
 
-      // שליחת התראה למשתמש דרך Firestore
-      String subscriptionTypeName = requestedSubscriptionType == 'business' ? 'עסקי' : 'פרטי';
-      await FirebaseFirestore.instance
-          .collection('notifications')
-          .add({
-        'toUserId': userId,
-        'title': 'מנוי הופעל! 🎉',
-        'message': 'המנוי $subscriptionTypeName שלך הופעל בהצלחה! כעת תוכל ליהנות מכל התכונות.',
-        'type': 'subscription_activated',
-        'createdAt': FieldValue.serverTimestamp(),
-        'read': false,
-      });
+      // לא שולחים התראה כאן - ה-NotificationService תשלח את ההתראה הנכונה
+      // (ההתראה נשלחת מ-admin_payments_screen כשהמנהל מאשר את התשלום)
       
       return true;
     } catch (e) {
-      print('Error manually activating user: $e');
+      debugPrint('Error manually activating user: $e');
       return false;
     }
   }
@@ -513,14 +577,14 @@ class ManualPaymentService {
     required String note,
   }) async {
     try {
-      print('🚀 Starting subscription request submission...');
+      debugPrint('🚀 Starting subscription request submission...');
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
-        print('❌ No current user');
+        debugPrint('❌ No current user');
         return false;
       }
       
-      print('👤 Current user: ${user.email} (${user.uid})');
+      debugPrint('👤 Current user: ${user.email} (${user.uid})');
 
       // קבלת פרטי המשתמש
       final userDoc = await FirebaseFirestore.instance
@@ -579,7 +643,7 @@ class ManualPaymentService {
       });
       
       // שליחת התראה לכל המנהלים
-      print('🔍 Looking for admin users...');
+      debugPrint('🔍 Looking for admin users...');
       
       // קודם נבדוק אם יש מנהלים עם isAdmin: true
       var adminUsers = await FirebaseFirestore.instance
@@ -587,11 +651,11 @@ class ManualPaymentService {
           .where('isAdmin', isEqualTo: true)
           .get();
       
-      print('📊 Found ${adminUsers.docs.length} admin users with isAdmin: true');
+      debugPrint('📊 Found ${adminUsers.docs.length} admin users with isAdmin: true');
       
       // אם אין מנהלים, נחפש לפי email
       if (adminUsers.docs.isEmpty) {
-        print('🔍 No admins found with isAdmin: true, searching by email...');
+        debugPrint('🔍 No admins found with isAdmin: true, searching by email...');
         final adminEmails = ['admin@gmail.com', 'haitham.ay82@gmail.com'];
         
         for (String email in adminEmails) {
@@ -601,7 +665,7 @@ class ManualPaymentService {
               .get();
           
           if (emailQuery.docs.isNotEmpty) {
-            print('👤 Found admin by email: $email');
+            debugPrint('👤 Found admin by email: $email');
             // נוסיף את isAdmin: true למנהל
             await FirebaseFirestore.instance
                 .collection('users')
@@ -620,11 +684,11 @@ class ManualPaymentService {
         }
       }
       
-      print('📊 Final admin count: ${adminUsers.docs.length}');
+      debugPrint('📊 Final admin count: ${adminUsers.docs.length}');
       
       for (final adminDoc in adminUsers.docs) {
         final adminData = adminDoc.data();
-        print('👤 Admin: ${adminData['email']} (${adminDoc.id})');
+        debugPrint('👤 Admin: ${adminData['email']} (${adminDoc.id})');
         
         await FirebaseFirestore.instance
             .collection('notifications')
@@ -638,12 +702,141 @@ class ManualPaymentService {
           'read': false,
         });
         
-        print('✅ Notification sent to admin: ${adminData['email']}');
+        debugPrint('✅ Notification sent to admin: ${adminData['email']}');
       }
       
       return true;
     } catch (e) {
-      print('Error submitting subscription request: $e');
+      debugPrint('Error submitting subscription request: $e');
+      return false;
+    }
+  }
+
+  /// שליחת בקשת תשלום במזומן למנהל
+  static Future<bool> submitCashPaymentRequest({
+    required String userId,
+    required String userEmail,
+    required String userName,
+    required String phone,
+    required String subscriptionType,
+    required double amount,
+    List<String>? businessCategories,
+  }) async {
+    try {
+      debugPrint('💰 Starting cash payment request submission...');
+      debugPrint('📋 Business categories: $businessCategories');
+      
+      // יצירת בקשה חדשה ב-payment_requests
+      final paymentRequestData = {
+        'userId': userId,
+        'userEmail': userEmail,
+        'userName': userName,
+        'phone': phone,
+        'subscriptionType': subscriptionType,
+        'amount': amount,
+        'currency': 'ILS',
+        'paymentMethod': 'cash',
+        'status': 'pending',
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+      
+      // הוספת קטגוריות עסקיות אם יש
+      if (subscriptionType == 'business' && businessCategories != null && businessCategories.isNotEmpty) {
+        paymentRequestData['businessCategories'] = businessCategories;
+        debugPrint('✅ Added business categories to payment request: $businessCategories');
+      }
+      
+      final paymentRequestRef = await FirebaseFirestore.instance
+          .collection('payment_requests')
+          .add(paymentRequestData);
+      
+      // עדכון סטטוס המשתמש ל-pending_approval
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .update({
+        'subscriptionStatus': 'pending_approval',
+        'requestedSubscriptionType': subscriptionType,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      
+      // שליחת התראה לכל המנהלים
+      debugPrint('🔍 Looking for admin users...');
+      
+      // קודם נבדוק אם יש מנהלים עם isAdmin: true
+      var adminUsers = await FirebaseFirestore.instance
+          .collection('users')
+          .where('isAdmin', isEqualTo: true)
+          .get();
+      
+      debugPrint('📊 Found ${adminUsers.docs.length} admin users with isAdmin: true');
+      
+      // אם אין מנהלים, נחפש לפי email
+      if (adminUsers.docs.isEmpty) {
+        debugPrint('🔍 No admins found with isAdmin: true, searching by email...');
+        final adminEmails = ['admin@gmail.com', 'haitham.ay82@gmail.com'];
+        
+        for (String email in adminEmails) {
+          final emailQuery = await FirebaseFirestore.instance
+              .collection('users')
+              .where('email', isEqualTo: email)
+              .get();
+          
+          if (emailQuery.docs.isNotEmpty) {
+            debugPrint('👤 Found admin by email: $email');
+            // נוסיף את isAdmin: true למנהל
+            await FirebaseFirestore.instance
+                .collection('users')
+                .doc(emailQuery.docs.first.id)
+                .update({
+              'isAdmin': true,
+              'userType': 'business',
+              'isSubscriptionActive': true,
+              'subscriptionStatus': 'active',
+            });
+            
+            // נוסיף למשתמשים שמצאנו
+            adminUsers = emailQuery;
+            break;
+          }
+        }
+      }
+      
+      debugPrint('📊 Final admin count: ${adminUsers.docs.length}');
+      
+      final subscriptionTypeName = subscriptionType == 'business' ? 'עסקי מנוי' : 'פרטי מנוי';
+      
+      for (final adminDoc in adminUsers.docs) {
+        final adminData = adminDoc.data();
+        debugPrint('👤 Admin: ${adminData['email']} (${adminDoc.id})');
+        
+        // שליחת התראה מפורטת למנהל
+        await FirebaseFirestore.instance
+            .collection('notifications')
+            .add({
+          'toUserId': adminDoc.id,
+          'title': 'בקשת תשלום במזומן חדשה! 💰',
+          'message': 'משתמש $userName ($userEmail) הגיש בקשת תשלום במזומן עבור $subscriptionTypeName (₪$amount). טלפון: $phone',
+          'type': 'cash_payment_request',
+          'paymentRequestId': paymentRequestRef.id,
+          'createdAt': FieldValue.serverTimestamp(),
+          'read': false,
+        });
+        
+        // שליחת push notification ישירה למנהל
+        await _sendDirectPushNotification(
+          adminDoc.id,
+          'בקשת תשלום במזומן חדשה! 💰',
+          'משתמש $userName ($userEmail) הגיש בקשת תשלום במזומן עבור $subscriptionTypeName (₪$amount). טלפון: $phone',
+        );
+        
+        debugPrint('✅ Notification sent to admin: ${adminData['email']}');
+      }
+      
+      return true;
+    } catch (e) {
+      debugPrint('Error submitting cash payment request: $e');
       return false;
     }
   }

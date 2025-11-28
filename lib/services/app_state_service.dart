@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -7,6 +6,8 @@ class AppStateService {
   static String? _currentChatId;
   static bool _isInChat = false;
   static BuildContext? _currentContext;
+  static bool _fromNotification = false; // סמן שמגיע בית מהתראות
+  static String? _pendingRequestIdToOpen; // בקשה לפתיחה במסך הבית
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   /// עדכון המצב הנוכחי - האם המשתמש נמצא בצ'אט
@@ -86,14 +87,76 @@ class AppStateService {
 
   /// עדכון context נוכחי
   static void setCurrentContext(BuildContext context) {
+    // ניקוי context ישן אם הוא לא פעיל
+    if (_currentContext != null && !_currentContext!.mounted) {
+      _currentContext = null;
+    }
     _currentContext = context;
   }
 
   /// קבלת context נוכחי
-  static BuildContext? get currentContext => _currentContext;
+  static BuildContext? get currentContext {
+    if (_currentContext != null && _currentContext!.mounted) {
+      return _currentContext;
+    }
+    return null;
+  }
 
   /// ניקוי context
   static void clearContext() {
     _currentContext = null;
+  }
+
+  /// הגדרת סמן שמגיעים מהתראות
+  static void setFromNotification(bool value) {
+    _fromNotification = value;
+    debugPrint('From notification flag set to: $value');
+  }
+
+  /// בדיקה אם מגיעים מהתראות
+  static bool isFromNotification() {
+    return _fromNotification;
+  }
+
+  /// איפוס הסמן שמגיעים מהתראות
+  static void clearFromNotification() {
+    _fromNotification = false;
+  }
+
+  /// קביעת בקשה לפתיחה במסך הבית
+  static void setPendingRequestToOpen(String requestId) {
+    _pendingRequestIdToOpen = requestId;
+    debugPrint('Pending request to open set: $requestId');
+  }
+
+  /// קבלת ובזבוז (consume) של ה-requestId לפתיחה
+  static String? consumePendingRequestToOpen() {
+    final id = _pendingRequestIdToOpen;
+    _pendingRequestIdToOpen = null;
+    return id;
+  }
+
+  /// סמן לפתיחת פרופיל אחרי תשלום
+  static bool _shouldOpenProfileAfterPayment = false;
+
+  /// הגדרת סמן שצריך לפתוח פרופיל אחרי תשלום
+  static void setShouldOpenProfileAfterPayment(bool value) {
+    _shouldOpenProfileAfterPayment = value;
+    debugPrint('Should open profile after payment set to: $value');
+  }
+
+  /// בדיקה אם צריך לפתוח פרופיל אחרי תשלום
+  static bool shouldOpenProfileAfterPayment() {
+    return _shouldOpenProfileAfterPayment;
+  }
+
+  /// איפוס הסמן לפתיחת פרופיל אחרי תשלום
+  static void clearShouldOpenProfileAfterPayment() {
+    _shouldOpenProfileAfterPayment = false;
+  }
+
+  /// קבלת context נוכחי (getter)
+  static BuildContext? getCurrentContext() {
+    return currentContext;
   }
 }

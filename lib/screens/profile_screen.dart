@@ -1,18 +1,23 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
-import '../services/payme_service.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import '../services/payme_payment_service.dart';
+import '../services/manual_payment_service.dart';
 import 'dart:io';
 import '../models/user_profile.dart';
 import '../models/request.dart';
+import '../models/week_availability.dart';
 import '../l10n/app_localizations.dart';
 import '../services/admin_auth_service.dart';
 import '../services/location_service.dart';
@@ -24,11 +29,13 @@ import '../services/monthly_requests_tracker.dart';
 import '../widgets/tutorial_dialog.dart';
 import '../widgets/two_level_category_selector.dart';
 import '../widgets/trial_extension_process_dialog.dart';
-import 'manual_payment_screen.dart';
 import 'location_picker_screen.dart';
 import 'contact_screen.dart';
+import 'terms_and_privacy_screen.dart';
+import 'about_app_screen.dart';
 import 'admin_contact_inquiries_screen.dart';
 import 'admin_guest_management_screen.dart';
+import 'admin_requests_statistics_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -47,6 +54,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
   // שדות טלפון
   final TextEditingController _phoneController = TextEditingController();
   bool _allowPhoneDisplay = false;
+  
+  // מעקב אחרי הצגת הדיאלוג במהלך הפעלה זו
+  bool _profileTutorialShown = false;
   String? _phoneError;
   String _selectedEditPrefix = '';
   
@@ -56,6 +66,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
   
   // שדה לא נותן שירותים בתשלום
   bool _noPaidServices = false;
+  
+  // מעקב אחרי עדכון נתוני קטגוריות - למניעת הופעה חוזרת של ההודעה
+  bool _categoryDataUpdated = false;
 
   @override
   void initState() {
@@ -65,7 +78,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     
     // התראה למשתמש אורח בכניסה הראשונה
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
       _checkGuestCategories();
+      }
     });
   }
   
@@ -111,25 +126,25 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
   
   // הצגת התראה למשתמש אורח להגדרת תחומי עיסוק
   void _showGuestCategoriesNotification() {
+    final l10n = AppLocalizations.of(context);
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
         title: Row(
           children: [
-            Icon(Icons.work, color: Colors.amber[700]),
+            Icon(Icons.work, color: Theme.of(context).colorScheme.tertiary),
             const SizedBox(width: 8),
-            const Text('הגדר תחומי עיסוק'),
+            Text(l10n.setBusinessFields),
           ],
         ),
-        content: const Text(
-          'כדי לקבל בקשות רלוונטיות, עליך לבחור עד שני תחומי עיסוק.\n\n'
-          'תוכל לשנות את הבחירה בכל עת בפרופיל שלך.',
+        content: Text(
+          l10n.ifYouProvideService,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('מאוחר יותר'),
+            child: Text(l10n.later),
           ),
           ElevatedButton(
             onPressed: () {
@@ -138,10 +153,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               _showGuestCategoriesDialogFromNotification();
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.amber[700],
-              foregroundColor: Colors.white,
+              backgroundColor: Theme.of(context).colorScheme.tertiary,
+              foregroundColor: Theme.of(context).colorScheme.onTertiary,
             ),
-            child: const Text('בחר עכשיו'),
+            child: Text(l10n.chooseNow),
           ),
         ],
       ),
@@ -184,7 +199,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w600,
-            color: Colors.grey[800],
+            color: Theme.of(context).colorScheme.onSurface,
           ),
         ),
         const Spacer(),
@@ -206,7 +221,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             } else {
               return Icon(
                 Icons.star_border,
-                color: Colors.grey[400],
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
                 size: 16,
               );
             }
@@ -217,9 +232,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
           decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
+            color: color.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: color.withOpacity(0.3)),
+            border: Border.all(color: color.withValues(alpha: 0.3)),
           ),
           child: Text(
             rating > 0 ? rating.toStringAsFixed(1) : '0.0',
@@ -237,19 +252,99 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
   
   // איפוס הודעות הדרכה
   Future<void> _resetTutorials() async {
+    final l10n = AppLocalizations.of(context);
     await TutorialService.resetAllTutorials();
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('הודעות ההדרכה אופסו בהצלחה'),
+          SnackBar(
+            content: Text(l10n.tutorialsResetSuccess),
           backgroundColor: Colors.green,
         ),
       );
     }
   }
 
+  // DEBUG: שינוי סוג מנוי (לא בשימוש - שמור לעתיד)
+  // ignore: unused_element
+  Future<void> _switchToSubscriptionType(String type, UserProfile userProfile) async {
+    final l10n = AppLocalizations.of(context);
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      Map<String, dynamic> updateData = {};
+      
+      switch (type) {
+        case 'private_free':
+          updateData = {
+            'userType': 'personal',
+            'isSubscriptionActive': false,
+            'subscriptionStatus': 'private_free',
+            'requestedSubscriptionType': null,
+          };
+          break;
+        case 'personal':
+          updateData = {
+            'userType': 'personal',
+            'isSubscriptionActive': true,
+            'subscriptionStatus': 'active',
+            'subscriptionExpiry': Timestamp.fromDate(DateTime.now().add(const Duration(days: 365))),
+          };
+          break;
+        case 'business':
+          updateData = {
+            'userType': 'business',
+            'isSubscriptionActive': true,
+            'subscriptionStatus': 'active',
+            'subscriptionExpiry': Timestamp.fromDate(DateTime.now().add(const Duration(days: 365))),
+          };
+          break;
+        case 'guest':
+          updateData = {
+            'userType': 'guest',
+            'isSubscriptionActive': true,
+            'subscriptionStatus': 'guest_trial',
+            'guestTrialStartDate': Timestamp.fromDate(DateTime.now()),
+            'guestTrialEndDate': Timestamp.fromDate(DateTime.now().add(const Duration(days: 60))),
+            'maxRequestsPerMonth': 5,
+            'maxRadius': 1.0,
+          };
+          break;
+      }
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .update(updateData);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.subscriptionTypeChanged(type)),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+
+      // עדכון הפרופיל במסך
+      setState(() {});
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.errorChangingSubscriptionType(e.toString())),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   // עדכון נתונים ישנים של קטגוריות
   Future<void> _updateOldCategoryData(UserProfile userProfile) async {
+    // אם כבר עדכנו בפעם זו - אל תעדכן שוב
+    if (_categoryDataUpdated) return;
+    
     if (userProfile.businessCategories == null) return;
     
     bool needsUpdate = false;
@@ -311,14 +406,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
           'businessCategories': updatedCategories,
         });
         
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('נתוני הקטגוריות עודכנו בהצלחה'),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
+        // סמן שכבר עדכנו בפעם זו
+        _categoryDataUpdated = true;
+        
+        // הודעה הוסרה - אין צורך להציג אותה
       } catch (e) {
         debugPrint('Error updating category data: $e');
       }
@@ -327,6 +418,12 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
 
   // הודעת הדרכה ספציפית לפרופיל - רק כשצריך
   Future<void> _showProfileSpecificTutorial() async {
+    // בדיקה אם כבר הוצג הדיאלוג במהלך הפעלה זו
+    if (_profileTutorialShown) {
+      debugPrint('🏠 PROFILE SCREEN - Profile tutorial already shown in this session, returning');
+      return;
+    }
+    
     // רק אם המשתמש לא ראה את ההדרכה הזו קודם
     final hasSeenTutorial = await TutorialService.hasSeenTutorial('profile_specific_tutorial');
     if (hasSeenTutorial) return;
@@ -355,20 +452,25 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     
     if (!mounted) return;
     
+    final l10n = AppLocalizations.of(context);
     showDialog(
       context: context,
       barrierDismissible: true,
       builder: (context) => TutorialDialog(
         tutorialKey: 'profile_specific_tutorial',
-        title: 'השלם את הפרופיל שלך',
-        message: 'כדי לקבל עזרה טובה יותר, מומלץ להשלים את הפרטים בפרופיל שלך: תמונה, תיאור קצר ואזור מגורים.',
+        title: l10n.completeYourProfile,
+        message: l10n.completeProfileMessage,
         features: [
-          '📸 העלאת תמונת פרופיל',
-          '✏️ עדכון פרטים אישיים',
-          '📍 עדכון מיקום',
+          '📸 ${l10n.uploadProfilePicture}',
+          '✏️ ${l10n.updatePersonalDetails}',
+          '📍 ${l10n.updateLocationAndExposureRange}',
+          '👤 ${l10n.selectSubscriptionTypeIfRelevant}',
         ],
       ),
     );
+    
+    // סימון שהדיאלוג הוצג
+    _profileTutorialShown = true;
   }
 
   // Helper function to compare lists
@@ -408,34 +510,40 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       }
 
       if (permission != PermissionStatus.granted) {
+        // Guard context usage after async gap
+        if (!mounted) return;
         // נסה לפתוח הגדרות אפליקציה
         if (permission == PermissionStatus.permanentlyDenied) {
+          final l10n = AppLocalizations.of(context);
           showDialog(
       context: context,
       builder: (BuildContext context) {
               return AlertDialog(
-                title: const Text('הרשאות נדרשות'),
-                content: const Text('נדרשת הרשאת גישה לתמונות. אנא עבור להגדרות האפליקציה והפעל את ההרשאה.'),
+                title: Text(l10n.permissionsRequired),
+                content: Text(l10n.imagePermissionRequired),
                 actions: [
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    child: const Text('ביטול'),
+                    child: Text(l10n.cancel),
                   ),
                   TextButton(
                     onPressed: () {
                       Navigator.of(context).pop();
                       openAppSettings();
                     },
-                    child: const Text('פתח הגדרות'),
+                    child: Text(l10n.openSettings),
                   ),
                 ],
               );
             },
           );
                           } else {
+                            // Guard context usage after async gap
+                            if (!mounted) return;
+                            final l10n = AppLocalizations.of(context);
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-              content: Text('נדרשת הרשאת גישה לתמונות. אנא נסה שוב.'),
+                              SnackBar(
+              content: Text(l10n.imagePermissionRequiredTryAgain),
               backgroundColor: Colors.red,
                               ),
                             );
@@ -443,32 +551,64 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         return;
       }
 
-      // בחירת מקור התמונה
-      final ImageSource? source = await showDialog<ImageSource>(
+      // קבלת פרופיל המשתמש הנוכחי
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      
+      final profileDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
+      
+      if (!profileDoc.exists) return;
+      
+      final userData = profileDoc.data()!;
+      final hasProfileImage = userData['profileImageUrl'] != null && userData['profileImageUrl'].toString().isNotEmpty;
+      
+      // Guard context usage after async gap
+      if (!mounted) return;
+      
+      // בחירת מקור התמונה או מחיקה
+      dynamic result = await showDialog<dynamic>(
         context: context,
         builder: (BuildContext context) {
+          final l10n = AppLocalizations.of(context);
           return AlertDialog(
-            title: const Text('בחר מקור תמונה'),
+            title: Text(l10n.chooseAction),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 ListTile(
                   leading: const Icon(Icons.photo_library),
-                  title: const Text('בחר מהגלריה'),
+                  title: Text(l10n.chooseFromGallery),
                   onTap: () => Navigator.of(context).pop(ImageSource.gallery),
                 ),
                 ListTile(
                   leading: const Icon(Icons.camera_alt),
-                  title: const Text('צלם תמונה'),
+                  title: Text(l10n.takePhoto),
                   onTap: () => Navigator.of(context).pop(ImageSource.camera),
-              ),
-            ],
-          ),
-        );
-      },
-    );
+                ),
+                if (hasProfileImage)
+                  ListTile(
+                    leading: const Icon(Icons.delete, color: Colors.red),
+                    title: Text(l10n.deletePhoto, style: const TextStyle(color: Colors.red)),
+                    onTap: () => Navigator.of(context).pop('delete'),
+                  ),
+              ],
+            ),
+          );
+        },
+      );
 
-      if (source == null) return;
+      if (result == null) return;
+      
+      // אם בחר למחוק
+      if (result == 'delete') {
+        _deleteProfileImage();
+        return;
+      }
+      
+      final ImageSource source = result;
 
       // בחירת תמונה
       final XFile? image = await _imagePicker.pickImage(
@@ -485,9 +625,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       });
 
       // העלאה ל-Firebase Storage
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
-
       final ref = FirebaseStorage.instance
           .ref()
           .child('profile_images')
@@ -512,9 +649,12 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         _isUploadingImage = false;
       });
 
+      // Guard context usage after async gap
+      if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('תמונת הפרופיל עודכנה בהצלחה'),
+        SnackBar(
+          content: Text(l10n.profileImageUpdatedSuccess),
           backgroundColor: Colors.green,
         ),
       );
@@ -522,6 +662,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       setState(() {
         _isUploadingImage = false;
       });
+      
+      // Guard context usage after async gap
+      if (!mounted) return;
       
       String errorMessage = 'שגיאה בהעלאת תמונה';
       if (e.toString().contains('Permission denied') || e.toString().contains('403')) {
@@ -542,6 +685,69 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     }
   }
 
+  // מחיקת תמונת פרופיל
+  Future<void> _deleteProfileImage() async {
+    try {
+      setState(() {
+        _isUploadingImage = true;
+      });
+
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      // מחיקה מ-Firebase Storage
+      final ref = FirebaseStorage.instance
+          .ref()
+          .child('profile_images')
+          .child(user.uid);
+      
+      try {
+        await ref.delete();
+        debugPrint('Profile image deleted from Storage');
+      } catch (e) {
+        debugPrint('Error deleting image from Storage: $e');
+        // המשך גם אם יש שגיאה בסטורג' - נעדכן את Firestore
+      }
+
+      // עדכון Firestore
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .update({'profileImageUrl': null});
+      
+      debugPrint('Profile image deleted from Firestore successfully');
+
+      setState(() {
+        _isUploadingImage = false;
+      });
+
+      // Guard context usage after async gap
+      if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(l10n.profileImageDeletedSuccess),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      setState(() {
+        _isUploadingImage = false;
+      });
+      
+      debugPrint('Error deleting profile image: $e');
+      
+      // Guard context usage after async gap
+      if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(l10n.errorDeletingProfileImage),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
 
   Future<void> _createUserProfileWithType(UserType userType) async {
     try {
@@ -564,9 +770,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       debugPrint('User profile created successfully with type: $userType');
       
       if (mounted) {
+        final l10n = AppLocalizations.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('פרופיל נוצר בהצלחה כ-${userType.displayName}'),
+            content: Text(l10n.profileCreatedSuccess(userType.displayName)),
             backgroundColor: Colors.green,
           ),
         );
@@ -574,9 +781,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     } catch (e) {
       debugPrint('Error creating user profile: $e');
       if (mounted) {
+        final l10n = AppLocalizations.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('שגיאה ביצירת פרופיל: $e'),
+            content: Text(l10n.errorCreatingProfile(e.toString())),
             backgroundColor: Colors.red,
           ),
         );
@@ -618,9 +826,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     } catch (e) {
       debugPrint('Error creating user profile: $e');
       if (mounted) {
+        final l10n = AppLocalizations.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('שגיאה ביצירת הפרופיל: $e'),
+            content: Text(l10n.errorCreatingProfileAlt(e.toString())),
             backgroundColor: Colors.red,
           ),
         );
@@ -643,9 +852,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
         if (mounted) {
+          final l10n = AppLocalizations.of(context);
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('משתמש לא מחובר'),
+            SnackBar(
+              content: Text(l10n.userNotConnected),
               backgroundColor: Colors.red,
             ),
           );
@@ -653,13 +863,43 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         return;
       }
 
+      // בדיקה אם המשתמש הוא אורח זמני
+      try {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        
+        if (userDoc.exists) {
+          final userData = userDoc.data()!;
+          final isTemporaryGuest = userData['isTemporaryGuest'] ?? false;
+          
+          if (isTemporaryGuest) {
+            if (mounted) {
+              final l10n = AppLocalizations.of(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(l10n.pleaseRegisterFirst),
+                  backgroundColor: Colors.orange,
+                  duration: const Duration(seconds: 3),
+                ),
+              );
+            }
+            return;
+          }
+        }
+      } catch (e) {
+        debugPrint('Error checking temporary guest status: $e');
+      }
+
       // הצגת הודעת טעינה
       if (mounted) {
+        final l10n = AppLocalizations.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('בודק הרשאות מיקום...'),
+          SnackBar(
+            content: Text(l10n.checkingLocationPermissions),
             backgroundColor: Colors.blue,
-            duration: Duration(seconds: 2),
+            duration: const Duration(seconds: 2),
           ),
         );
       }
@@ -674,11 +914,12 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         
         if (!hasPermission) {
           if (mounted) {
+            final l10n = AppLocalizations.of(context);
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('נדרשות הרשאות מיקום כדי לעדכן מיקום. אנא הפעל הרשאות מיקום בהגדרות המכשיר'),
+              SnackBar(
+                content: Text(l10n.locationPermissionsRequired),
                 backgroundColor: Colors.orange,
-                duration: Duration(seconds: 2),
+                duration: const Duration(seconds: 2),
               ),
             );
           }
@@ -690,11 +931,12 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         if (mounted) {
+          final l10n = AppLocalizations.of(context);
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('שירותי המיקום כבויים. אנא הפעל אותם בהגדרות המכשיר'),
+            SnackBar(
+              content: Text(l10n.locationServicesDisabled),
               backgroundColor: Colors.orange,
-              duration: Duration(seconds: 5),
+              duration: const Duration(seconds: 5),
             ),
           );
         }
@@ -703,11 +945,12 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
 
       // קבלת מיקום נוכחי אם אפשר
       if (mounted) {
+        final l10n = AppLocalizations.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('מקבל מיקום נוכחי...'),
+          SnackBar(
+            content: Text(l10n.gettingCurrentLocation),
             backgroundColor: Colors.blue,
-            duration: Duration(seconds: 2),
+            duration: const Duration(seconds: 2),
           ),
         );
       }
@@ -715,13 +958,46 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       Position? currentPosition = await LocationService.getCurrentPosition();
       debugPrint('Current position: $currentPosition');
       
+      // קבלת מקסימום טווח חשיפה לפי סוג המשתמש
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      
+      double? maxExposureRadius;
+      if (userDoc.exists) {
+        final userData = userDoc.data()!;
+        final userType = userData['userType'] as String? ?? 'personal';
+        final isSubscriptionActive = userData['isSubscriptionActive'] as bool? ?? false;
+        final recommendationsCount = userData['recommendationsCount'] as int? ?? 0;
+        final averageRating = userData['averageRating'] as double? ?? 0.0;
+        final isAdmin = userData['isAdmin'] as bool? ?? false;
+        
+        // חישוב הטווח המקסימלי לפי סוג המנוי (במטרים)
+        final maxRadiusMeters = LocationService.calculateMaxRadiusForUser(
+          userType: userType,
+          isSubscriptionActive: isSubscriptionActive,
+          recommendationsCount: recommendationsCount,
+          averageRating: averageRating,
+          isAdmin: isAdmin,
+        );
+        
+        // המרה לקילומטרים
+        maxExposureRadius = maxRadiusMeters / 1000;
+      }
+      
+      // Guard context usage after async gap
+      if (!mounted) return;
+      
       final result = await Navigator.push<Map<String, dynamic>>(
         context,
         MaterialPageRoute(
           builder: (context) => LocationPickerScreen(
             initialLatitude: currentPosition?.latitude,
             initialLongitude: currentPosition?.longitude,
-            showExposureCircle: false, // לא להציג מעגל חשיפה במסך פרופיל
+            initialExposureRadius: userDoc.data()?['exposureRadius']?.toDouble(),
+            maxExposureRadius: maxExposureRadius,
+            showExposureCircle: true, // להציג מעגל חשיפה במסך פרופיל
           ),
         ),
       );
@@ -729,40 +1005,50 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       if (result != null) {
         // הצגת הודעת שמירה
         if (mounted) {
+          final l10n = AppLocalizations.of(context);
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('שומר מיקום...'),
+            SnackBar(
+              content: Text(l10n.savingLocationAndRadius),
               backgroundColor: Colors.blue,
-              duration: Duration(seconds: 2),
+              duration: const Duration(seconds: 2),
             ),
           );
         }
 
-        // עדכון המיקום ב-Firestore
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .update({
+        // עדכון המיקום וטווח החשיפה ב-Firestore
+        final updateData = {
           'latitude': result['latitude'],
           'longitude': result['longitude'],
           'village': result['address'],
           'updatedAt': FieldValue.serverTimestamp(),
-        });
+        };
+        
+        // הוספת טווח חשיפה אם נבחר
+        if (result.containsKey('exposureRadius')) {
+          updateData['exposureRadius'] = result['exposureRadius'];
+        }
+        
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .update(updateData);
 
         if (mounted) {
+          final l10n = AppLocalizations.of(context);
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('המיקום עודכן בהצלחה!'),
+            SnackBar(
+              content: Text(l10n.fixedLocationAndRadiusUpdated),
               backgroundColor: Colors.green,
-              duration: Duration(seconds: 2),
+              duration: const Duration(seconds: 2),
             ),
           );
         }
       } else {
         if (mounted) {
+          final l10n = AppLocalizations.of(context);
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('לא נבחר מיקום'),
+            SnackBar(
+              content: Text(l10n.noLocationSelected),
               backgroundColor: Colors.orange,
             ),
           );
@@ -792,8 +1078,98 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     }
   }
 
+  /// מחיקת מיקום קבוע
+  Future<void> _deleteLocation() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        if (mounted) {
+          final l10n = AppLocalizations.of(context);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(l10n.userNotConnected),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
 
+      // הצגת דיאלוג אישור
+      final bool? shouldDelete = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('מחיקת מיקום קבוע'),
+          content: const Text(
+            'האם אתה בטוח שברצונך למחוק את המיקום הקבוע?\n\n'
+            'לאחר המחיקה, תופיע במפות רק כששירות המיקום פעיל בטלפון.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('ביטול'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.error,
+                foregroundColor: Theme.of(context).colorScheme.onError,
+              ),
+              child: const Text('מחק'),
+            ),
+          ],
+        ),
+      );
 
+      if (shouldDelete != true) return;
+
+      if (!context.mounted) return;
+      final l10n = AppLocalizations.of(context);
+
+      // הצגת הודעת טעינה
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.deletingLocation),
+            backgroundColor: Colors.blue,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+
+      // מחיקת המיקום מ-Firestore
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .update({
+        'latitude': FieldValue.delete(),
+        'longitude': FieldValue.delete(),
+        'village': FieldValue.delete(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.fixedLocationDeletedSuccess),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error deleting location: $e');
+      if (mounted) {
+        final l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.errorDeletingLocation(e.toString())),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
 
 
 
@@ -806,7 +1182,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     
     // הצגת הודעת הדרכה רק כשהמשתמש נכנס למסך הפרופיל
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
       _showProfileSpecificTutorial();
+      }
     });
 
     if (user == null) {
@@ -814,9 +1192,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       appBar: AppBar(
           title: Text(l10n.profile),
           backgroundColor: Theme.of(context).brightness == Brightness.dark 
-              ? const Color(0xFFFF9800) // כתום ענתיק
+              ? const Color(0xFF9C27B0) // סגול יפה
               : Theme.of(context).colorScheme.primary,
-          foregroundColor: Colors.white,
+          foregroundColor: Theme.of(context).colorScheme.onPrimary,
       ),
         body: Center(
         child: Column(
@@ -825,13 +1203,13 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               const Icon(Icons.person_off, size: 80, color: Colors.grey),
               const SizedBox(height: 16),
               Text(
-                'לא מחובר למערכת',
+                l10n.notConnectedToSystem,
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const SizedBox(height: 8),
-              const Text(
-                'אנא התחבר כדי לראות את הפרופיל שלך',
-                style: TextStyle(color: Colors.grey),
+              Text(
+                l10n.pleaseLoginToSeeProfile,
+                style: const TextStyle(color: Colors.grey),
               ),
             ],
           ),
@@ -853,9 +1231,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             appBar: AppBar(
               title: Text(l10n.profile),
               backgroundColor: Theme.of(context).brightness == Brightness.dark 
-              ? const Color(0xFFFF9800) // כתום ענתיק
+              ? const Color(0xFF9C27B0) // סגול יפה
               : Theme.of(context).colorScheme.primary,
-              foregroundColor: Colors.white,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
             ),
             body: Center(
               child: Column(
@@ -864,11 +1242,11 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                   Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                                      color: Theme.of(context).colorScheme.onPrimary,
                       borderRadius: BorderRadius.circular(20),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.1),
+                          color: Theme.of(context).colorScheme.shadow.withValues(alpha: 0.1),
                           blurRadius: 10,
                           offset: const Offset(0, 5),
                         ),
@@ -889,11 +1267,11 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'טוען פרופיל...',
+                          l10n.loadingProfile,
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w500,
-                            color: Colors.grey[700],
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
                           ),
                         ),
                       ],
@@ -911,9 +1289,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             appBar: AppBar(
               title: Text(l10n.profile),
               backgroundColor: Theme.of(context).brightness == Brightness.dark 
-              ? const Color(0xFFFF9800) // כתום ענתיק
+              ? const Color(0xFF9C27B0) // סגול יפה
               : Theme.of(context).colorScheme.primary,
-              foregroundColor: Colors.white,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
             ),
             body: Center(
               child: Column(
@@ -922,7 +1300,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                   const Icon(Icons.error, size: 80, color: Colors.red),
                   const SizedBox(height: 16),
                   Text(
-                    'שגיאה בטעינת הפרופיל',
+                    l10n.errorLoadingProfile,
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
                   const SizedBox(height: 8),
@@ -934,7 +1312,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                   const SizedBox(height: 16),
                   ElevatedButton(
                     onPressed: () => setState(() {}),
-                    child: const Text('נסה שוב'),
+                    child: Text(l10n.tryAgain),
                   ),
                 ],
               ),
@@ -947,9 +1325,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             appBar: AppBar(
               title: Text(l10n.profile),
               backgroundColor: Theme.of(context).brightness == Brightness.dark 
-              ? const Color(0xFFFF9800) // כתום ענתיק
+              ? const Color(0xFF9C27B0) // סגול יפה
               : Theme.of(context).colorScheme.primary,
-              foregroundColor: Colors.white,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
             ),
             body: Center(
               child: Column(
@@ -958,7 +1336,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                   const Icon(Icons.person_off, size: 80, color: Colors.grey),
                   const SizedBox(height: 16),
             Text(
-                    'לא נמצא פרופיל משתמש',
+                    l10n.userProfileNotFound,
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
                   const SizedBox(height: 8),
@@ -968,19 +1346,19 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                       _createUserProfileIfNeeded();
                     },
                     child: _isCreatingProfile 
-                        ? const Row(
+                        ? Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              SizedBox(
+                              const SizedBox(
                                 width: 16,
                                 height: 16,
                                 child: CircularProgressIndicator(strokeWidth: 2),
                               ),
-                              SizedBox(width: 8),
-                              Text('יוצר פרופיל...'),
+                              const SizedBox(width: 8),
+                              Text(l10n.creatingProfile),
                             ],
                           )
-                        : const Text('צור פרופיל'),
+                        : Text(l10n.createProfile),
                   ),
                 ],
               ),
@@ -1062,123 +1440,249 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             ),
           ),
           backgroundColor: Theme.of(context).brightness == Brightness.dark 
-              ? const Color(0xFFFF9800) // כתום ענתיק
+              ? const Color(0xFF9C27B0) // סגול יפה
               : Theme.of(context).colorScheme.primary,
-          foregroundColor: Colors.white,
+          foregroundColor: Theme.of(context).colorScheme.onPrimary,
           toolbarHeight: 50,
           actions: [
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert),
-              onSelected: (value) {
-                if (!mounted) return;
-                
-                if (value == 'share') {
-                  AppSharingService.shareApp(context);
-                } else if (value == 'rate') {
-                  AppSharingService.rateApp(context);
-                } else if (value == 'recommend') {
-                  AppSharingService.showRecommendationDialog(context);
-                } else if (value == 'rewards') {
-                  AppSharingService.showRewardsDialog(context);
-                } else if (value == 'reset_tutorials') {
-                  _resetTutorials();
-                } else if (value == 'contact') {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const ContactScreen(),
-                    ),
-                  );
-                } else if (value == 'delete_account') {
-                  _showDeleteAccountDialog(l10n);
-                } else if (value == 'logout') {
-                  _showLogoutDialog(l10n);
-                }
+            Builder(
+              builder: (builderContext) {
+                // שמירת l10n ב-closure כדי למנוע בעיות עם deactivated widget
+                final currentL10n = l10n;
+                return PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert),
+                  onSelected: (value) {
+                    if (!mounted) return;
+                    
+                    if (value == 'share') {
+                      AppSharingService.shareApp(context);
+                    } else if (value == 'rate') {
+                      AppSharingService.rateApp(context);
+                    } else if (value == 'recommend') {
+                      AppSharingService.showRecommendationDialog(context);
+                    } else if (value == 'rewards') {
+                      AppSharingService.showRewardsDialog(context);
+                    } else if (value == 'reset_tutorials') {
+                      _resetTutorials();
+                    } else if (value == 'contact') {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const ContactScreen(),
+                        ),
+                      );
+                    } else if (value == 'terms') {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => TermsAndPrivacyScreen(
+                            onAccept: () {},
+                            onDecline: () {},
+                            readOnly: true, // קריאה בלבד - לא להציג לחצנים
+                          ),
+                        ),
+                      );
+                    } else if (value == 'privacy') {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => TermsAndPrivacyScreen(
+                            onAccept: () {},
+                            onDecline: () {},
+                            readOnly: true, // קריאה בלבד - לא להציג לחצנים
+                          ),
+                        ),
+                      );
+                    } else if (value == 'about') {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const AboutAppScreen(),
+                        ),
+                      );
+                    } else if (value == 'delete_account') {
+                      _showDeleteAccountDialog(currentL10n);
+                    } else if (value == 'logout') {
+                      _showLogoutDialog(currentL10n);
+                    }
+                    // DEBUG: שינוי סוג מנוי - מוסתר זמנית
+                    // else if (value == 'debug_free') {
+                    //   final userProfile = UserProfile.fromFirestore(snapshot.data!);
+                    //   _switchToSubscriptionType('private_free', userProfile);
+                    // } else if (value == 'debug_personal') {
+                    //   final userProfile = UserProfile.fromFirestore(snapshot.data!);
+                    //   _switchToSubscriptionType('personal', userProfile);
+                    // } else if (value == 'debug_business') {
+                    //   final userProfile = UserProfile.fromFirestore(snapshot.data!);
+                    //   _switchToSubscriptionType('business', userProfile);
+                    // } else if (value == 'debug_guest') {
+                    //   final userProfile = UserProfile.fromFirestore(snapshot.data!);
+                    //   _switchToSubscriptionType('guest', userProfile);
+                    // }
+                  },
+                  itemBuilder: (context) {
+                    // Guard: בדיקה אם ה-context עדיין valid
+                    if (!mounted) return [];
+                    // שימוש ב-l10n שכבר נשמר מחוץ ל-itemBuilder
+                    return [
+                      PopupMenuItem(
+                        value: 'share',
+                        child: Row(
+                          children: [
+                            const Icon(Icons.share, color: Colors.blue),
+                            const SizedBox(width: 8),
+                            Text(currentL10n.shareAppTitle),
+                          ],
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'rate',
+                        child: Row(
+                          children: [
+                            const Icon(Icons.star, color: Colors.amber),
+                            const SizedBox(width: 8),
+                            Text(currentL10n.rateAppTitle),
+                          ],
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'recommend',
+                        child: Row(
+                          children: [
+                            const Icon(Icons.favorite, color: Colors.red),
+                            const SizedBox(width: 8),
+                            Text(currentL10n.recommendToFriendsTitle),
+                          ],
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'rewards',
+                        child: Row(
+                          children: [
+                            const Icon(Icons.card_giftcard, color: Colors.purple),
+                            const SizedBox(width: 8),
+                            Text(currentL10n.rewardsForRecommenders),
+                          ],
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'reset_tutorials',
+                        child: Row(
+                          children: [
+                            const Icon(Icons.refresh, color: Colors.orange),
+                            const SizedBox(width: 8),
+                            Text(currentL10n.resetTutorialMessages),
+                          ],
+                        ),
+                      ),
+                  // DEBUG: שינוי סוג מנוי - מוסתר זמנית
+                  // const PopupMenuDivider(),
+                  // const PopupMenuItem(
+                  //   value: 'debug_free',
+                  //   child: Row(
+                  //     children: [
+                  //       Icon(Icons.person, color: Colors.blue),
+                  //       SizedBox(width: 8),
+                  //       Text('🔧 עבור לפרטי חינם'),
+                  //     ],
+                  //   ),
+                  // ),
+                  // const PopupMenuItem(
+                  //   value: 'debug_personal',
+                  //   child: Row(
+                  //     children: [
+                  //       Icon(Icons.person_outline, color: Colors.green),
+                  //       SizedBox(width: 8),
+                  //       Text('🔧 עבור לפרטי מנוי'),
+                  //     ],
+                  //   ),
+                  // ),
+                  // const PopupMenuItem(
+                  //   value: 'debug_business',
+                  //   child: Row(
+                  //     children: [
+                  //       Icon(Icons.business, color: Colors.purple),
+                  //       SizedBox(width: 8),
+                  //       Text('🔧 עבור לעסקי מנוי'),
+                  //     ],
+                  //   ),
+                  // ),
+                  // const PopupMenuItem(
+                  //   value: 'debug_guest',
+                  //   child: Row(
+                  //     children: [
+                  //       Icon(Icons.person_add, color: Colors.orange),
+                  //       SizedBox(width: 8),
+                  //       Text('🔧 עבור לאורח'),
+                  //     ],
+                  //   ),
+                  // ),
+                      PopupMenuItem(
+                        value: 'contact',
+                        child: Row(
+                          children: [
+                            const Icon(Icons.contact_support, color: Color(0xFF03A9F4)),
+                            const SizedBox(width: 8),
+                            Text(currentL10n.contact),
+                          ],
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'logout',
+                        child: Row(
+                          children: [
+                            const Icon(Icons.logout, color: Colors.orange),
+                            const SizedBox(width: 8),
+                            Text(currentL10n.logoutTitle),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuDivider(),
+                      PopupMenuItem(
+                        value: 'terms',
+                        child: Row(
+                          children: [
+                            const Icon(Icons.description, color: Colors.blue),
+                            const SizedBox(width: 8),
+                            Text(currentL10n.termsButton),
+                          ],
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'privacy',
+                        child: Row(
+                          children: [
+                            const Icon(Icons.privacy_tip, color: Colors.green),
+                            const SizedBox(width: 8),
+                            Text(currentL10n.privacyButton),
+                          ],
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'about',
+                        child: Row(
+                          children: [
+                            const Icon(Icons.info_outline, color: Colors.orange),
+                            const SizedBox(width: 8),
+                            Text(currentL10n.aboutButton),
+                          ],
+                        ),
+                      ),
+                      const PopupMenuDivider(),
+                      PopupMenuItem(
+                        value: 'delete_account',
+                        child: Row(
+                          children: [
+                            const Icon(Icons.delete_forever, color: Colors.red),
+                            const SizedBox(width: 8),
+                            Text(currentL10n.deleteAccount),
+                          ],
+                        ),
+                      ),
+                    ];
+                  },
+                );
               },
-              itemBuilder: (context) => [
-                const PopupMenuItem(
-                  value: 'share',
-                  child: Row(
-                    children: [
-                      Icon(Icons.share, color: Colors.blue),
-                      SizedBox(width: 8),
-                      Text('שתף אפליקציה'),
-                    ],
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: 'rate',
-                  child: Row(
-                    children: [
-                      Icon(Icons.star, color: Colors.amber),
-                      SizedBox(width: 8),
-                      Text('דרג אפליקציה'),
-                    ],
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: 'recommend',
-                  child: Row(
-                    children: [
-                      Icon(Icons.favorite, color: Colors.red),
-                      SizedBox(width: 8),
-                      Text('המלץ לחברים'),
-                    ],
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: 'rewards',
-                  child: Row(
-                    children: [
-                      Icon(Icons.card_giftcard, color: Colors.purple),
-                      SizedBox(width: 8),
-                      Text('תגמולים'),
-                    ],
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: 'reset_tutorials',
-                  child: Row(
-                    children: [
-                      Icon(Icons.refresh, color: Colors.orange),
-                      SizedBox(width: 8),
-                      Text('איפוס הודעות הדרכה'),
-                    ],
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: 'contact',
-                  child: Row(
-                    children: [
-                      Icon(Icons.contact_support, color: Color(0xFF03A9F4)),
-                      SizedBox(width: 8),
-                      Text('צור קשר'),
-                    ],
-                  ),
-                ),
-                const PopupMenuDivider(),
-                const PopupMenuItem(
-                  value: 'delete_account',
-                  child: Row(
-                    children: [
-                      Icon(Icons.delete_forever, color: Colors.red),
-                      SizedBox(width: 8),
-                      Text('מחק חשבון'),
-                    ],
-                  ),
-                ),
-                const PopupMenuDivider(),
-                const PopupMenuItem(
-                  value: 'logout',
-                  child: Row(
-                    children: [
-                      Icon(Icons.logout, color: Colors.orange),
-                      SizedBox(width: 8),
-                      Text('התנתקות'),
-                    ],
-                  ),
-                ),
-              ],
             ),
           ],
         ),
@@ -1203,37 +1707,69 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                           CircleAvatar(
                             radius: 30,
                             backgroundColor: Theme.of(context).brightness == Brightness.dark 
-              ? const Color(0xFFFF9800) // כתום ענתיק
+              ? const Color(0xFF9C27B0) // סגול יפה
               : Theme.of(context).colorScheme.primary,
                                   child: userProfile.profileImageUrl != null
                                       ? ClipOval(
-                                          child: Image.network(
-                                            userProfile.profileImageUrl!,
+                                          child: CachedNetworkImage(
+                                            imageUrl: userProfile.profileImageUrl!,
                                             width: 60,
                                             height: 60,
                                             fit: BoxFit.cover,
-                                            errorBuilder: (context, error, stackTrace) {
-                                              return Text(
+                                            placeholder: (context, url) => Container(
+                                              width: 60,
+                                              height: 60,
+                                              color: Theme.of(context).colorScheme.primary,
+                                              child: Center(
+                                                child: Text(
                               userProfile.displayName.isNotEmpty 
                                   ? userProfile.displayName[0].toUpperCase()
                                   : '?',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
-                                color: Colors.white,
+                                color: Theme.of(context).colorScheme.onPrimary,
                               ),
-                                              );
-                                            },
+                                                ),
+                                              ),
+                                          ),
+                                            errorWidget: (context, url, error) => Container(
+                                              width: 60,
+                                              height: 60,
+                                              color: Theme.of(context).colorScheme.primary,
+                                              child: Center(
+                                                child: Text(
+                                                  userProfile.displayName.isNotEmpty 
+                                                      ? userProfile.displayName[0].toUpperCase()
+                                                      : '?',
+                                                  style: TextStyle(
+                                                    fontSize: 24,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Theme.of(context).colorScheme.onPrimary,
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
                                           ),
                                         )
-                                      : Text(
+                                      : Container(
+                                          width: 60,
+                                          height: 60,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: Theme.of(context).colorScheme.primary,
+                                          ),
+                                          child: Center(
+                                            child: Text(
                                           userProfile.displayName.isNotEmpty 
                                               ? userProfile.displayName[0].toUpperCase()
                                               : '?',
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontSize: 24,
                                             fontWeight: FontWeight.bold,
-                                            color: Colors.white,
+                                            color: Theme.of(context).colorScheme.onPrimary,
+                                              ),
+                                            ),
                                           ),
                                         ),
                                 ),
@@ -1244,13 +1780,13 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                                         color: Colors.black54,
                                         borderRadius: BorderRadius.circular(30),
                                       ),
-                                      child: const Center(
+                                      child: Center(
                                         child: SizedBox(
                                           width: 20,
                                           height: 20,
                                           child: CircularProgressIndicator(
                                             strokeWidth: 2,
-                                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                            valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.onPrimary),
                                           ),
                                         ),
                                       ),
@@ -1264,14 +1800,14 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                                       decoration: BoxDecoration(
                                         color: Theme.of(context).colorScheme.primary,
                                         borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(color: Colors.white, width: 2),
-                                      ),
-                                      child: const Icon(
-                                        Icons.camera_alt,
-                                        size: 16,
-                                        color: Colors.white,
+                                        border: Border.all(color: Theme.of(context).colorScheme.onPrimary, width: 2),
                                       ),
                                       padding: const EdgeInsets.all(4),
+                                      child: Icon(
+                                        Icons.camera_alt,
+                                        size: 16,
+                                        color: Theme.of(context).colorScheme.onPrimary,
+                                      ),
                                     ),
                                   ),
                               ],
@@ -1286,15 +1822,20 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                                   userProfile.displayName.isNotEmpty 
                                       ? userProfile.displayName 
                                       : userProfile.email.split('@')[0],
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 20,
                                     fontWeight: FontWeight.bold,
+                                    color: Theme.of(context).brightness == Brightness.dark
+                                        ? Colors.white
+                                        : Colors.grey[900], // כהה מאוד (כמעט שחור) בערכה כהה
                                   ),
                                 ),
                                 Text(
                                   userProfile.email,
                                   style: TextStyle(
-                                    color: Colors.grey[600],
+                                    color: Theme.of(context).brightness == Brightness.dark
+                                        ? Theme.of(context).colorScheme.onSurface
+                                        : Colors.black,
                                     fontSize: 14,
                                   ),
                                 ),
@@ -1328,29 +1869,65 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                                         decoration: BoxDecoration(
                                           color: _getSubscriptionTypeColor(userProfile),
                                           borderRadius: BorderRadius.circular(12),
-                                          border: Border.all(color: Colors.white, width: 1),
+                                          border: Border.all(color: Theme.of(context).colorScheme.onPrimary, width: 1),
                                         ),
                                         child: Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
                                             Text(
                                               _getSubscriptionTypeDisplayName(userProfile),
-                                              style: const TextStyle(
-                                                color: Colors.white,
+                                              style: TextStyle(
+                                                color: Theme.of(context).colorScheme.onPrimary,
                                                 fontSize: 12,
                                                 fontWeight: FontWeight.bold,
                                               ),
                                             ),
                                             const SizedBox(width: 4),
-                                            const Icon(
+                                            Icon(
                                               Icons.edit,
-                                              color: Colors.white,
+                                              color: Theme.of(context).colorScheme.onPrimary,
                                               size: 12,
                                             ),
                                           ],
                                         ),
                                       ),
                                     ),
+                                    // כפתור שדרג מנוי למשתמשי אורח ומשתמשי פרטי מנוי - ליד הלחצן
+                                    if ((userProfile.userType == UserType.guest && userProfile.isTemporaryGuest != true) ||
+                                        (userProfile.isSubscriptionActive && 
+                                         (userProfile.businessCategories == null || userProfile.businessCategories!.isEmpty))) ...[
+                                      const SizedBox(width: 8),
+                                      GestureDetector(
+                                        onTap: () => _showSubscriptionTypeDialog(userProfile),
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: Colors.blue[600],
+                                            borderRadius: BorderRadius.circular(12),
+                                            border: Border.all(color: Colors.blue[700]!, width: 1),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                Icons.upgrade,
+                                                color: Colors.white,
+                                                size: 14,
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                'שדרג מנוי',
+                                                style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ],
                                 ),
                               ],
@@ -1360,322 +1937,50 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                       ),
                       
                       // כפתור הארכת תקופת ניסיון למשתמשי אורח
-                      if (userProfile.userType == UserType.guest) ...[
+                      if (userProfile.userType == UserType.guest && userProfile.isTemporaryGuest != true) ...[
                         const SizedBox(height: 12),
                         _buildTrialExtensionButton(userProfile),
                       ],
                       
-                      // הודעה מיוחדת למשתמשי אורח
-                      if (userProfile.userType == UserType.guest) ...[
-                        const SizedBox(height: 16),
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Colors.blue[50],
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.blue[200]!),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(Icons.info, color: Colors.blue[700], size: 20),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'מידע על תקופת הניסיון שלך',
-                                    style: TextStyle(
-                                      color: Colors.blue[700],
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                _getGuestStatusMessage(userProfile),
-                                style: TextStyle(
-                                  color: Colors.blue[700],
-                                  fontSize: 14,
-                            ),
-                          ),
-                        ],
-                      ),
-                        ),
-                      ],
-                      
-                      // הצגת תחומי עיסוק - מנהל, עסקי מנוי או אורח
-                      if ((_isAdmin == true) || 
-                          (userProfile.isSubscriptionActive && 
-                           userProfile.businessCategories != null && 
-                           userProfile.businessCategories!.isNotEmpty) ||
-                          (userProfile.userType == UserType.guest && 
-                           userProfile.businessCategories != null && 
-                           userProfile.businessCategories!.isNotEmpty)) ...[
-                      const SizedBox(height: 16),
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: Colors.green[50],
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.green[200]!),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Icon(Icons.work, color: Colors.green[700], size: 20),
-                                const SizedBox(width: 8),
-                                Text(
-                                  _isAdmin == true ? 'כל תחומי העיסוק' : 'תחומי עיסוק',
-                                  style: TextStyle(
-                                    color: Colors.green[700],
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                                const Spacer(),
-                                // כפתור עריכה רק למשתמש עסקי מנוי (לא למנהל)
-                                if (_isAdmin != true)
-                                  GestureDetector(
-                                    onTap: () => _showBusinessCategoriesDialog(),
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                      decoration: BoxDecoration(
-                                        color: Colors.green[700],
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: const Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            Icons.edit,
-                                            color: Colors.white,
-                                            size: 12,
-                                          ),
-                                          SizedBox(width: 4),
-                                          Text(
-                                            'ערוך',
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: _isAdmin == true 
-                                  ? [
-                                      // עבור מנהל - הצג רק "כל תחומי העיסוק"
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                        decoration: BoxDecoration(
-                                          color: Colors.blue[100],
-                                          borderRadius: BorderRadius.circular(16),
-                                          border: Border.all(color: Colors.blue[300]!),
-                                        ),
-                                        child: Text(
-                                          'כל תחומי העיסוק',
-                                          style: TextStyle(
-                                            color: Colors.blue[700],
-                                            fontSize: 12,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ),
-                                    ]
-                                  : userProfile.businessCategories!.map((category) {
-                                      // בדיקה נוספת לוודא שהקטגוריה קיימת
-                                      try {
-                                        return Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                          decoration: BoxDecoration(
-                                            color: Colors.green[100],
-                                            borderRadius: BorderRadius.circular(16),
-                                            border: Border.all(color: Colors.green[300]!),
-                                          ),
-                                          child: Text(
-                                          category.categoryDisplayName, // הצגת קטגוריה בעברית
-                                            style: TextStyle(
-                                              color: Colors.green[700],
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w600,
-                                            ),
-                                          ),
-                                        );
-                                      } catch (e) {
-                                  // אם יש שגיאה, נציג את שם הקטגוריה כפי שהוא
-                                  debugPrint('Error displaying category $category: $e');
-                                  return Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                    decoration: BoxDecoration(
-                                      color: Colors.green[100],
-                                      borderRadius: BorderRadius.circular(16),
-                                      border: Border.all(color: Colors.green[300]!),
-                                    ),
-                                    child: Text(
-                                      category.toString(),
-                                      style: TextStyle(
-                                        color: Colors.green[700],
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  );
-                                }
-                              }).toList(),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
                     ],
                   ),
                 ),
               ),
-              
-              // התראה למשתמש אורח שאין לו תחומי עיסוק
-              if (userProfile.userType == UserType.guest && 
-                  (userProfile.businessCategories == null || userProfile.businessCategories!.isEmpty)) ...[
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.amber[50],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.amber[200]!),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.warning, color: Colors.amber[700], size: 20),
-                          const SizedBox(width: 8),
-                          Text(
-                            'הגדר תחומי עיסוק',
-                            style: TextStyle(
-                              color: Colors.amber[700],
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'כדי לקבל התראות על בקשות רלוונטיות, עליך לבחור עד שני תחומי עיסוק:',
-                        style: TextStyle(
-                          color: Colors.amber[700],
-                          fontSize: 14,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      
-                      // צ'קבוקס לא נותן שירותים בתשלום
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.blue[50],
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.blue[200]!),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            CheckboxListTile(
-                              value: _noPaidServices,
-                        onChanged: (value) {
-                          debugPrint('🔍 DEBUG: "לא נותן שירותים" checkbox changed');
-                          debugPrint('🔍 DEBUG: value = $value');
-                          debugPrint('🔍 DEBUG: _noPaidServices before = $_noPaidServices');
-                          
-                          setState(() {
-                            _noPaidServices = value ?? false;
-                          });
-                          
-                          debugPrint('🔍 DEBUG: _noPaidServices after = $_noPaidServices');
-                          
-                          // עדכון ב-Firestore (גם לסימון וגם לביטול)
-                          _updateNoPaidServicesStatus(_noPaidServices);
-                        },
-                              title: const Text(
-                                'אני לא נותן שירות כלשהו תמורת תשלום',
-                                style: TextStyle(fontWeight: FontWeight.w600),
-                              ),
-                              controlAffinity: ListTileControlAffinity.leading,
-                              contentPadding: EdgeInsets.zero,
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'אם תסמן אפשרות זו, תוכל לראות רק בקשות חינמיות במסך הבקשות.',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.blue[700],
-                                fontStyle: FontStyle.italic,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: _noPaidServices ? null : () {
-                            debugPrint('🔍 DEBUG: "בחר תחומי עיסוק" button pressed');
-                            debugPrint('🔍 DEBUG: _noPaidServices = $_noPaidServices');
-                            _showGuestCategoriesDialog(userProfile);
-                          },
-                          icon: const Icon(Icons.work, size: 18),
-                          label: const Text('בחר תחומי עיסוק'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: _noPaidServices ? Colors.grey[400] : Colors.amber[700],
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-              
               const SizedBox(height: 16),
 
               // שדה שם פרטי ומשפחה/חברה/עסק/כינוי - לכל סוגי המשתמשים
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.green[50],
+                  color: Theme.of(context).brightness == Brightness.dark 
+                      ? Theme.of(context).colorScheme.surfaceContainerHighest
+                      : Theme.of(context).colorScheme.surfaceContainer,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.green[200]!),
+                  border: Border.all(
+                    color: Theme.of(context).brightness == Brightness.dark 
+                        ? Theme.of(context).colorScheme.onSurfaceVariant
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.person, color: Colors.green[700], size: 20),
+                        Icon(
+                          Icons.person, 
+                          color: Theme.of(context).brightness == Brightness.dark 
+                              ? Theme.of(context).colorScheme.onSurface
+                              : Theme.of(context).colorScheme.onSurface,
+                          size: 20,
+                        ),
                         const SizedBox(width: 8),
                         Text(
-                          'שם פרטי ומשפחה/חברה/עסק/כינוי',
+                          l10n.firstNameLastName,
                           style: TextStyle(
-                            color: Colors.green[700],
+                            color: Theme.of(context).brightness == Brightness.dark 
+                                ? Theme.of(context).colorScheme.onSurface
+                                : Theme.of(context).colorScheme.onSurface,
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
                           ),
@@ -1694,7 +1999,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                                 keyboardType: TextInputType.text,
                                 enabled: false, // שדה read-only
                                 decoration: InputDecoration(
-                                  hintText: 'הזן שם פרטי ומשפחה/חברה/עסק/כינוי',
+                                  hintText: l10n.enterFirstNameLastName,
                                   hintStyle: const TextStyle(
                                     color: Colors.grey,
                                     fontSize: 16,
@@ -1703,12 +2008,14 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   errorText: _displayNameError,
-                                  prefixIcon: Icon(Icons.person, color: Colors.green[600]),
+                                  prefixIcon: Icon(Icons.person, color: Theme.of(context).colorScheme.primary),
                                   filled: true,
-                                  fillColor: Colors.grey[100],
+                                  fillColor: Theme.of(context).colorScheme.surfaceContainer,
                                 ),
-                                style: const TextStyle(
-                                  color: Colors.black87,
+                                style: TextStyle(
+                                  color: Theme.of(context).brightness == Brightness.dark
+                                      ? Colors.white
+                                      : Colors.grey[900], // כהה מאוד (כמעט שחור) בערכה כהה
                                   fontSize: 16,
                                   fontWeight: FontWeight.w500,
                                 ),
@@ -1722,42 +2029,44 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                               },
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.orange,
-                                foregroundColor: Colors.white,
+                                foregroundColor: Theme.of(context).colorScheme.onPrimary,
                                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                               ),
-                              child: const Text('עדכן'),
+                              child: Text(l10n.update),
                             ),
                           ],
                         ),
                         const SizedBox(height: 4),
-                        Text(
-                          'השם יופיע בבקשות שלך ובמסך הבית',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                          ),
+                      Text(
+                        l10n.nameDisplayInfo,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).brightness == Brightness.light 
+                              ? Theme.of(context).colorScheme.onSurface
+                              : Theme.of(context).colorScheme.onSurface,
                         ),
+                      ),
                         const SizedBox(height: 8),
                         Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: Colors.blue[50],
+                            color: Theme.of(context).colorScheme.primaryContainer,
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: Colors.blue[200]!),
+                            border: Border.all(color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.5)),
                           ),
                           child: Row(
                             children: [
-                              Icon(Icons.info_outline, size: 16, color: Colors.blue[600]),
+                              Icon(Icons.info_outline, size: 16, color: Theme.of(context).colorScheme.primary),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
-                                  'לחץ על "עדכן" כדי לשנות את השם. השם יישמר אוטומטית',
+                                  l10n.clickUpdateToChangeName,
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: Colors.blue[700],
+                                    color: Theme.of(context).colorScheme.onPrimaryContainer,
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
@@ -1776,21 +2085,27 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.blue[50],
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.blue[200]!),
+                          color: Theme.of(context).brightness == Brightness.dark 
+                              ? Theme.of(context).colorScheme.surfaceContainerHighest
+                              : Theme.of(context).colorScheme.surfaceContainer,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: Theme.of(context).brightness == Brightness.dark 
+                                ? Theme.of(context).colorScheme.outlineVariant
+                                : Theme.of(context).colorScheme.outlineVariant,
+                          ),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.phone, color: Colors.blue[700], size: 20),
+                        Icon(Icons.phone, color: Theme.of(context).colorScheme.primary, size: 20),
                         const SizedBox(width: 8),
                         Text(
-                          'מספר טלפון',
+                          l10n.phoneNumber,
                           style: TextStyle(
-                            color: Colors.blue[700],
+                            color: Theme.of(context).colorScheme.primary,
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
                           ),
@@ -1817,7 +2132,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                                   });
                                 },
                                 decoration: InputDecoration(
-                                  hintText: 'הזן מספר טלפון (למשל: 050-1234567)',
+                                  hintText: l10n.enterPhoneNumber,
                                   hintStyle: const TextStyle(
                                     color: Colors.grey,
                                     fontSize: 16,
@@ -1826,12 +2141,14 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   errorText: _phoneError,
-                                  prefixIcon: Icon(Icons.phone, color: Colors.blue[600]),
+                                  prefixIcon: Icon(Icons.phone, color: Theme.of(context).colorScheme.primary),
                                   filled: true,
-                                  fillColor: Colors.grey[100],
+                                  fillColor: Theme.of(context).colorScheme.surfaceContainer,
                                 ),
-                                style: const TextStyle(
-                                  color: Colors.black87,
+                                style: TextStyle(
+                                  color: Theme.of(context).brightness == Brightness.dark
+                                      ? Colors.white
+                                      : Colors.grey[900], // כהה מאוד (כמעט שחור) בערכה כהה
                                   fontSize: 16,
                                   fontWeight: FontWeight.w500,
                                 ),
@@ -1845,22 +2162,24 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                               },
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.orange,
-                                foregroundColor: Colors.white,
+                                foregroundColor: Theme.of(context).colorScheme.onPrimary,
                                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                               ),
-                              child: const Text('עדכן'),
+                              child: Text(l10n.update),
                             ),
                           ],
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          'קידומות תקפות: 050-059 (10 ספרות), 02,03,04,08,09 (9 ספרות), 072-079 (10 ספרות)',
+                          l10n.validPrefixes,
                           style: TextStyle(
                             fontSize: 12,
-                            color: Colors.grey[600],
+                            color: Theme.of(context).brightness == Brightness.light 
+                                ? Theme.of(context).colorScheme.onSurface
+                                : Theme.of(context).colorScheme.onSurface,
                           ),
                         ),
                       ],
@@ -1877,14 +2196,16 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                             // שמירה אוטומטית של ההגדרה
                             await _savePhoneDisplaySetting(_allowPhoneDisplay);
                           } : null,
-                          activeColor: Colors.blue[600],
+                          activeColor: Theme.of(context).colorScheme.primary,
                         ),
                         Expanded(
                           child: Text(
-                            'מסכים להציג את הטלפון שלי במידה ומבקש שירות מעוניין לפנות אלי',
+                            l10n.agreeToDisplayPhone,
                             style: TextStyle(
                               fontSize: 14,
-                              color: Colors.grey[700],
+                              color: Theme.of(context).brightness == Brightness.light 
+                                  ? Theme.of(context).colorScheme.onSurface
+                                  : Theme.of(context).colorScheme.onSurface,
                             ),
                           ),
                         ),
@@ -1895,10 +2216,788 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               ),
               const SizedBox(height: 16),
 
-              // דירוג המשתמש
-              _buildRatingCard(userProfile),
+              // תחומי עיסוק - מנהל, עסקי מנוי או אורח
+              if (_isAdmin == true || 
+                  userProfile.userType == UserType.guest || 
+                  userProfile.userType == UserType.business) ...[
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).brightness == Brightness.dark 
+                        ? Theme.of(context).colorScheme.surfaceContainerHighest
+                        : Theme.of(context).colorScheme.surfaceContainer,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: Theme.of(context).brightness == Brightness.dark 
+                          ? Theme.of(context).colorScheme.outlineVariant
+                          : Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.work, color: Theme.of(context).colorScheme.primary, size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            _isAdmin == true ? l10n.allBusinessFields : l10n.businessFields,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.primary,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const Spacer(),
+                          // כפתור עריכה רק למשתמש עסקי מנוי (לא למנהל)
+                          if (_isAdmin != true)
+                            GestureDetector(
+                              onTap: () => _showBusinessCategoriesDialog(),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.edit,
+                                      color: Theme.of(context).colorScheme.onPrimary,
+                                      size: 12,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      l10n.edit,
+                                      style: TextStyle(
+                                        color: Theme.of(context).colorScheme.onPrimary,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _isAdmin == true 
+                            ? [
+                                // עבור מנהל - הצג רק "כל תחומי העיסוק"
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: Theme.of(context).brightness == Brightness.dark 
+                                        ? Theme.of(context).colorScheme.surfaceContainerHighest 
+                                        : Theme.of(context).colorScheme.surfaceContainer,
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
+                                      color: Theme.of(context).brightness == Brightness.dark 
+                                          ? Theme.of(context).colorScheme.outlineVariant
+                                          : Theme.of(context).colorScheme.outlineVariant,
+                                    ),
+                                  ),
+                                  child: Text(
+                                    l10n.allBusinessFields,
+                                    style: TextStyle(
+                                      color: Theme.of(context).brightness == Brightness.dark 
+                                          ? Theme.of(context).colorScheme.onSurface
+                                          : Theme.of(context).colorScheme.onSurface,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ]
+                            : (userProfile.businessCategories != null && userProfile.businessCategories!.isNotEmpty)
+                                ? userProfile.businessCategories!.map((category) {
+                                // בדיקה נוספת לוודא שהקטגוריה קיימת
+                                try {
+                                  return Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: Theme.of(context).brightness == Brightness.dark 
+                                          ? Theme.of(context).colorScheme.surfaceContainerHighest 
+                                          : Theme.of(context).colorScheme.surfaceContainer,
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(
+                                        color: Theme.of(context).brightness == Brightness.dark 
+                                            ? Theme.of(context).colorScheme.outlineVariant
+                                            : Theme.of(context).colorScheme.outlineVariant,
+                                      ),
+                                    ),
+                                    child: Text(
+                                      category.categoryDisplayName,
+                                      style: TextStyle(
+                                        color: Theme.of(context).brightness == Brightness.dark 
+                                            ? Theme.of(context).colorScheme.onSurface
+                                            : Theme.of(context).colorScheme.onSurface,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  );
+                                } catch (e) {
+                                  debugPrint('Error displaying category $category: $e');
+                                  return Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: Theme.of(context).brightness == Brightness.dark 
+                                          ? Theme.of(context).colorScheme.surfaceContainerHighest 
+                                          : Theme.of(context).colorScheme.surfaceContainer,
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(
+                                        color: Theme.of(context).brightness == Brightness.dark 
+                                            ? Theme.of(context).colorScheme.outlineVariant
+                                            : Theme.of(context).colorScheme.outlineVariant,
+                                      ),
+                                    ),
+                                    child: Text(
+                                      category.toString(),
+                                      style: TextStyle(
+                                        color: Theme.of(context).brightness == Brightness.dark 
+                                            ? Theme.of(context).colorScheme.onSurface
+                                            : Theme.of(context).colorScheme.onSurface,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  );
+                                }
+                              }).toList()
+                                : [
+                                  Text(
+                                    l10n.noBusinessFieldsDefined,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontStyle: FontStyle.italic,
+                                      color: Theme.of(context).brightness == Brightness.dark 
+                                          ? Theme.of(context).colorScheme.onSurfaceVariant
+                                          : Theme.of(context).colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
 
+              // התראה למשתמש אורח או עסקי מנוי שאין לו תחומי עיסוק
+              if ((userProfile.userType == UserType.guest || userProfile.userType == UserType.business) && 
+                  (userProfile.businessCategories == null || userProfile.businessCategories!.isEmpty)) ...[
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).brightness == Brightness.dark 
+                        ? Theme.of(context).colorScheme.surfaceContainerHighest
+                        : Theme.of(context).colorScheme.surfaceContainer,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: Theme.of(context).brightness == Brightness.dark 
+                          ? Theme.of(context).colorScheme.outlineVariant
+                          : Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.warning, 
+                            color: Theme.of(context).brightness == Brightness.dark 
+                                ? Theme.of(context).colorScheme.onSurface
+                                : Theme.of(context).colorScheme.onSurface,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'הגדר תחומי עיסוק',
+                            style: TextStyle(
+                              color: Theme.of(context).brightness == Brightness.dark 
+                                  ? Colors.white
+                                  : Colors.black87,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'כדי לקבל התראות על בקשות רלוונטיות, עליך לבחור עד שני תחומי עיסוק:',
+                        style: TextStyle(
+                          color: Theme.of(context).brightness == Brightness.dark 
+                              ? Theme.of(context).colorScheme.surfaceContainerHighest
+                              : Colors.black87,
+                          fontSize: 14,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      
+                      // צ'קבוקס לא נותן שירותים בתשלום
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).brightness == Brightness.dark 
+                              ? Theme.of(context).colorScheme.surfaceContainerHighest
+                              : Theme.of(context).colorScheme.surfaceContainer,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: Theme.of(context).brightness == Brightness.dark 
+                                ? Theme.of(context).colorScheme.outlineVariant
+                                : Theme.of(context).colorScheme.outlineVariant,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            CheckboxListTile(
+                              value: _noPaidServices,
+                              onChanged: (value) {
+                                setState(() {
+                                  _noPaidServices = value ?? false;
+                                });
+                                _updateNoPaidServicesStatus(_noPaidServices);
+                              },
+                              title: Text(
+                                'אני לא נותן שירות כלשהו תמורת תשלום',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: Theme.of(context).brightness == Brightness.dark 
+                                      ? Theme.of(context).colorScheme.onSurface
+                                      : Theme.of(context).colorScheme.onSurface,
+                                ),
+                              ),
+                              controlAffinity: ListTileControlAffinity.leading,
+                              contentPadding: EdgeInsets.zero,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'אם תסמן אפשרות זו, תוכל לראות רק בקשות חינמיות במסך הבקשות.',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Theme.of(context).brightness == Brightness.dark 
+                                    ? Theme.of(context).colorScheme.surfaceContainerHighest
+                                    : Colors.black87,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _noPaidServices ? null : () {
+                            _showGuestCategoriesDialog(userProfile);
+                          },
+                          icon: const Icon(Icons.work, size: 18),
+                          label: Text(l10n.selectBusinessCategories),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _noPaidServices ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.tertiary,
+                            foregroundColor: Theme.of(context).colorScheme.onTertiary,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // זמינות - מוצג למשתמשי אורח ועסקי מנוי
+              if (_isAdmin == true || 
+                  userProfile.userType == UserType.guest || 
+                  userProfile.userType == UserType.business) ...[
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).brightness == Brightness.dark 
+                        ? Theme.of(context).colorScheme.surfaceContainerHighest
+                        : Theme.of(context).colorScheme.surfaceContainer,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: Theme.of(context).brightness == Brightness.dark 
+                          ? Theme.of(context).colorScheme.outlineVariant
+                          : Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.schedule, color: Theme.of(context).colorScheme.primary, size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            l10n.availability,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.primary,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const Spacer(),
+                          // כפתור עריכה רק למשתמש אורח או עסקי מנוי (לא למנהל)
+                          if (_isAdmin != true)
+                            GestureDetector(
+                              onTap: () => _showAvailabilityDialog(userProfile),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.edit,
+                                      color: Theme.of(context).colorScheme.onPrimary,
+                                      size: 12,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      l10n.edit,
+                                      style: TextStyle(
+                                        color: Theme.of(context).colorScheme.onPrimary,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        l10n.availabilityDescription,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).brightness == Brightness.dark 
+                              ? Theme.of(context).colorScheme.onSurfaceVariant
+                              : Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      if (userProfile.availableAllWeek == true) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).brightness == Brightness.dark 
+                                ? Theme.of(context).colorScheme.surfaceContainerHighest 
+                                : Theme.of(context).colorScheme.surfaceContainer,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: Theme.of(context).brightness == Brightness.dark 
+                                  ? Theme.of(context).colorScheme.outlineVariant
+                                  : Theme.of(context).colorScheme.outlineVariant,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.check_circle, color: Theme.of(context).colorScheme.primary, size: 16),
+                              const SizedBox(width: 8),
+                              Text(
+                                l10n.availableAllWeek,
+                                style: TextStyle(
+                                  color: Theme.of(context).brightness == Brightness.dark 
+                                      ? Theme.of(context).colorScheme.onSurface
+                                      : Theme.of(context).colorScheme.onSurface,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ] else if (userProfile.weekAvailability != null && 
+                                 userProfile.weekAvailability!.days.any((d) => d.isAvailable)) ...[
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: userProfile.weekAvailability!.days
+                              .where((day) => day.isAvailable)
+                              .map((day) {
+                            final timeText = day.startTime != null && day.endTime != null
+                                ? ' ${day.startTime} - ${day.endTime}'
+                                : '';
+                            return Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).brightness == Brightness.dark 
+                                    ? Theme.of(context).colorScheme.surfaceContainerHighest 
+                                    : Theme.of(context).colorScheme.surfaceContainer,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: Theme.of(context).brightness == Brightness.dark 
+                                      ? Theme.of(context).colorScheme.outlineVariant
+                                      : Theme.of(context).colorScheme.outlineVariant,
+                                ),
+                              ),
+                              child: Text(
+                                '${l10n.getDayName(day.day)}$timeText',
+                                style: TextStyle(
+                                  color: Theme.of(context).brightness == Brightness.dark 
+                                      ? Theme.of(context).colorScheme.onSurface
+                                      : Theme.of(context).colorScheme.onSurface,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ] else ...[
+                        Text(
+                          l10n.noAvailabilityDefined,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontStyle: FontStyle.italic,
+                            color: Theme.of(context).brightness == Brightness.dark 
+                                ? Theme.of(context).colorScheme.onSurfaceVariant
+                                : Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // כרטיס מונה בקשות חודשיות - מוצג לכל המשתמשים
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.article_outlined,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            l10n.monthlyRequests,
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      _buildMonthlyRequestsCounter(userProfile),
+                    ],
+                  ),
+                ),
+              ),
               const SizedBox(height: 16),
+
+              // כרטיס מיקום - מוצג רק למשתמשים נותני שירות (אורח, עסקי, מנהל)
+              if (userProfile.userType == UserType.guest || 
+                  userProfile.userType == UserType.business ||
+                  _isAdmin == true) ...[
+                Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.location_on, color: Theme.of(context).colorScheme.primary),
+                          const SizedBox(width: 8),
+                          Text(
+                            l10n.fixedLocation,
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          const Spacer(),
+                          ElevatedButton.icon(
+                            onPressed: () async {
+                              await playButtonSound();
+                              _updateLocation();
+                            },
+                            icon: const Icon(Icons.edit, size: 16),
+                            label: Text(l10n.updateLocationAndRadius),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Theme.of(context).brightness == Brightness.dark 
+                ? const Color(0xFF9C27B0) // סגול יפה
+                : Theme.of(context).colorScheme.primary,
+                              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      // הודעה מיוחדת למנהל
+                      if (_isAdmin == true) ...[
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).brightness == Brightness.dark 
+                                ? Theme.of(context).colorScheme.surfaceContainerHighest
+                                : Theme.of(context).colorScheme.surfaceContainer,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: Theme.of(context).brightness == Brightness.dark 
+                                  ? Theme.of(context).colorScheme.outlineVariant
+                                  : Theme.of(context).colorScheme.outlineVariant,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.admin_panel_settings, 
+                                color: Theme.of(context).brightness == Brightness.dark 
+                                    ? Colors.white
+                                    : Colors.black87,
+                                size: 16,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  l10n.adminCanUpdateLocation,
+                                  style: TextStyle(
+                                    color: Theme.of(context).brightness == Brightness.dark 
+                                        ? Theme.of(context).colorScheme.onSurface
+                                        : Theme.of(context).colorScheme.onSurface,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+                      if (userProfile.latitude != null && userProfile.longitude != null) ...[
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).brightness == Brightness.dark 
+                                ? Theme.of(context).colorScheme.surfaceContainerHighest
+                                : Theme.of(context).colorScheme.surfaceContainer,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: Theme.of(context).brightness == Brightness.dark 
+                                  ? Theme.of(context).colorScheme.outlineVariant
+                                  : Theme.of(context).colorScheme.outlineVariant,
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.check_circle, 
+                                    color: Theme.of(context).brightness == Brightness.dark 
+                                        ? Theme.of(context).colorScheme.onSurface
+                                        : Theme.of(context).colorScheme.onSurface,
+                                    size: 16,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    l10n.fixedLocationDefined,
+                                    style: TextStyle(
+                                      color: Theme.of(context).brightness == Brightness.dark 
+                                          ? Theme.of(context).colorScheme.onSurface
+                                          : Theme.of(context).colorScheme.onSurface,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.my_location, 
+                                    size: 16,
+                                    color: Theme.of(context).brightness == Brightness.dark 
+                                        ? Theme.of(context).colorScheme.onSurfaceVariant
+                                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    '${userProfile.latitude!.toStringAsFixed(6)}, ${userProfile.longitude!.toStringAsFixed(6)}',
+                                    style: TextStyle(
+                                      color: Theme.of(context).brightness == Brightness.dark 
+                                          ? Theme.of(context).colorScheme.surfaceContainerHighest
+                                          : Theme.of(context).colorScheme.onSurfaceVariant,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.location_city, 
+                                    size: 16,
+                                    color: Theme.of(context).brightness == Brightness.dark 
+                                        ? Theme.of(context).colorScheme.onSurfaceVariant
+                                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    userProfile.village ?? l10n.villageNotDefined,
+                                    style: TextStyle(
+                                      color: Theme.of(context).brightness == Brightness.dark 
+                                          ? Theme.of(context).colorScheme.surfaceContainerHighest
+                                          : Theme.of(context).colorScheme.onSurfaceVariant,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                l10n.youWillAppearInRange,
+                                style: TextStyle(
+                                  color: Theme.of(context).brightness == Brightness.dark 
+                                      ? Theme.of(context).colorScheme.surfaceContainerHighest
+                                      : Colors.black87,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: ElevatedButton.icon(
+                                      onPressed: _updateLocation,
+                                      icon: const Icon(Icons.edit_location, size: 16),
+                                      label: Text(l10n.updateLocationAndRadius),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.blue,
+                                        foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                                        padding: const EdgeInsets.symmetric(vertical: 8),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: ElevatedButton.icon(
+                                      onPressed: _deleteLocation,
+                                      icon: const Icon(Icons.location_off, size: 16),
+                                      label: Text(l10n.deleteLocation),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.red,
+                                        foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                                        padding: const EdgeInsets.symmetric(vertical: 8),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ] else ...[
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).brightness == Brightness.dark 
+                                ? Theme.of(context).colorScheme.surfaceContainerHighest
+                                : Theme.of(context).colorScheme.surfaceContainer,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: Theme.of(context).brightness == Brightness.dark 
+                                  ? Theme.of(context).colorScheme.outlineVariant
+                                  : Theme.of(context).colorScheme.outlineVariant,
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.warning, 
+                                    color: Theme.of(context).brightness == Brightness.dark 
+                                        ? Colors.white
+                                        : Theme.of(context).colorScheme.onSurface,
+                                    size: 16,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    l10n.noFixedLocationDefined,
+                                    style: TextStyle(
+                                      color: Theme.of(context).brightness == Brightness.dark 
+                                          ? Colors.white
+                                          : Colors.grey[900],
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                l10n.asServiceProvider,
+                                style: TextStyle(
+                                  color: Theme.of(context).brightness == Brightness.dark 
+                                      ? Colors.white
+                                      : Colors.grey[900],
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                l10n.locationBenefits,
+                                style: TextStyle(
+                                  color: Theme.of(context).brightness == Brightness.dark 
+                                      ? Colors.white
+                                      : Colors.grey[900],
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+                const SizedBox(height: 16),
+              ],
+
+              // דירוג המשתמש - מוצג רק למשתמשים נותני שירות (אורח, עסקי, מנהל)
+              if (userProfile.userType == UserType.guest || 
+                  userProfile.userType == UserType.business ||
+                  _isAdmin == true) ...[
+                _buildRatingCard(userProfile),
+                const SizedBox(height: 16),
+              ],
 
               // הודעה מיוחדת למנהל
               if (_isAdmin == true) ...[
@@ -1908,19 +3007,25 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                     child: Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: Colors.blue[50],
+                            color: Theme.of(context).brightness == Brightness.dark 
+                                ? Theme.of(context).colorScheme.surfaceContainerHighest
+                                : Theme.of(context).colorScheme.surfaceContainer,
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.blue[200]!),
+                            border: Border.all(
+                              color: Theme.of(context).brightness == Brightness.dark 
+                                  ? Theme.of(context).colorScheme.outlineVariant
+                                  : Theme.of(context).colorScheme.outlineVariant,
+                            ),
                           ),
                           child: Row(
                             children: [
-                              Icon(Icons.admin_panel_settings, color: Colors.blue[700]),
+                              Icon(Icons.admin_panel_settings, color: Theme.of(context).colorScheme.primary),
                               const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
                               'מנהל מערכת - גישה מלאה לכל הפונקציות (עסקי מנוי)',
                                   style: TextStyle(
-                                    color: Colors.blue[700],
+                                    color: Theme.of(context).colorScheme.primary,
                                     fontWeight: FontWeight.bold,
                                   ),
                                 ),
@@ -1942,9 +3047,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'ניהול מערכת',
-                          style: TextStyle(
+                        Text(
+                          l10n.systemManagement,
+                          style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
                           ),
@@ -1964,10 +3069,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                                   );
                                 },
                                 icon: const Icon(Icons.contact_support),
-                                label: const Text('ניהול פניות'),
+                                label: Text(l10n.manageInquiries),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: const Color(0xFF03A9F4),
-                                  foregroundColor: Colors.white,
+                                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
                                   padding: const EdgeInsets.symmetric(vertical: 12),
                                 ),
                               ),
@@ -1985,10 +3090,82 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                                   );
                                 },
                                 icon: const Icon(Icons.people),
-                                label: const Text('ניהול אורחים'),
+                                label: const Text('ניהול משתמשים'),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: const Color(0xFF9C27B0),
-                                  foregroundColor: Colors.white,
+                                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: () {
+                                  AudioService().playSound(AudioEvent.buttonClick);
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => const AdminRequestsStatisticsScreen(),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.bar_chart),
+                                label: const Text('סטטיסטיקות בקשות'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF03A9F4),
+                                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: () => _showDeleteAllUsersConfirmation(context),
+                                icon: const Icon(Icons.delete_forever),
+                                label: const Text('מחיקת כל המשתמשים'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.red,
+                                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: () => _showDeleteAllRequestsConfirmation(context),
+                                icon: const Icon(Icons.delete_sweep),
+                                label: const Text('מחק כל הבקשות'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.orange,
+                                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: () => _showDeleteAllCollectionsConfirmation(context),
+                                icon: const Icon(Icons.delete_outline),
+                                label: const Text('מחק כל הקולקציות'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.purple,
+                                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
                                   padding: const EdgeInsets.symmetric(vertical: 12),
                                 ),
                               ),
@@ -2010,13 +3187,13 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'מידע נוסף',
+                        l10n.additionalInfo,
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 8),
                       ListTile(
                         leading: const Icon(Icons.calendar_today),
-                        title: const Text('תאריך הצטרפות'),
+                        title: Text(l10n.joinDate),
                         subtitle: Text(
                           '${userProfile.createdAt.day}/${userProfile.createdAt.month}/${userProfile.createdAt.year}',
                         ),
@@ -2042,210 +3219,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 ),
               ),
               const SizedBox(height: 16),
-
-              // כרטיס מונה בקשות חודשיות - מוצג לכל המשתמשים
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.article_outlined,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'בקשות חודשיות',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      _buildMonthlyRequestsCounter(userProfile),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-
-              // כרטיס מיקום
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.location_on, color: Theme.of(context).colorScheme.primary),
-                          const SizedBox(width: 8),
-                          Text(
-                            'מיקום קבוע',
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const Spacer(),
-                          ElevatedButton.icon(
-                            onPressed: () async {
-                              await playButtonSound();
-                              _updateLocation();
-                            },
-                            icon: const Icon(Icons.edit, size: 16),
-                            label: const Text('עדכן מיקום'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Theme.of(context).brightness == Brightness.dark 
-              ? const Color(0xFFFF9800) // כתום ענתיק
-              : Theme.of(context).colorScheme.primary,
-                              foregroundColor: Colors.white,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      // הודעה מיוחדת למנהל
-                      if (_isAdmin == true) ...[
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.blue[50],
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.blue[200]!),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(Icons.admin_panel_settings, color: Colors.blue[700], size: 16),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  'מנהל - ניתן לעדכן מיקום כמו כל משתמש אחר',
-                                  style: TextStyle(
-                                    color: Colors.blue[700],
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-                      if (userProfile.latitude != null && userProfile.longitude != null) ...[
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.green[50],
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.green[200]!),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(Icons.check_circle, color: Colors.green[700], size: 16),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'מיקום קבוע מוגדר',
-                                    style: TextStyle(
-                                      color: Colors.green[700],
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Row(
-                                children: [
-                                  Icon(Icons.my_location, size: 16, color: Colors.grey[600]),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    '${userProfile.latitude!.toStringAsFixed(6)}, ${userProfile.longitude!.toStringAsFixed(6)}',
-                                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  Icon(Icons.location_city, size: 16, color: Colors.grey[600]),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    userProfile.village ?? 'לא הוגדר כפר',
-                                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                '✅ אתה תופיע במפות של בקשות בטווח שלך גם אם שירות המיקום כובה',
-                                style: TextStyle(
-                                  color: Colors.green[600],
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ] else ...[
-                        Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.orange[50],
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.orange[200]!),
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Icon(Icons.warning, color: Colors.orange[700], size: 16),
-                                  const SizedBox(width: 8),
-                                  Text(
-                                    'לא הוגדר מיקום קבוע',
-                                    style: TextStyle(
-                                      color: Colors.orange[700],
-                                      fontSize: 14,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'כנותן שירות, הגדרת מיקום קבוע חיונית כדי:',
-                                style: TextStyle(
-                                  color: Colors.orange[700],
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '• להופיע במפות של בקשות בטווח שלך\n• לקבל התראות על בקשות רלוונטיות לתחום העיסוק שלך\n• לפעול גם כששירות המיקום כובה בטלפון',
-                                style: TextStyle(
-                                  color: Colors.orange[600],
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
               
               // כרטיס שיתוף והמלצה
               Card(
@@ -2263,7 +3236,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            'עזור לנו לצמוח',
+                            l10n.helpUsGrow,
                             style: Theme.of(context).textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.bold,
                             ),
@@ -2272,9 +3245,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                       ),
                       const SizedBox(height: 12),
                       Text(
-                        'המלץ על האפליקציה לחברים וקבל תגמולים!',
+                        l10n.recommendAppToFriends,
                         style: TextStyle(
-                          color: Colors.grey[600],
+                                      color: Theme.of(context).colorScheme.onPrimary,
                           fontSize: 14,
                         ),
                       ),
@@ -2285,13 +3258,15 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                             child: ElevatedButton.icon(
                               onPressed: () async {
                                 await playButtonSound();
+                                // Guard context usage after async gap
+                                if (!context.mounted) return;
                                 AppSharingService.shareApp(context);
                               },
                               icon: const Icon(Icons.share, size: 18),
-                              label: const Text('שתף'),
+                              label: Text(l10n.shareApp),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: Colors.blue,
-                                foregroundColor: Colors.white,
+                                foregroundColor: Theme.of(context).colorScheme.onPrimary,
                               ),
                             ),
                           ),
@@ -2300,13 +3275,15 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                             child: ElevatedButton.icon(
                               onPressed: () async {
                                 await playButtonSound();
+                                // Guard context usage after async gap
+                                if (!context.mounted) return;
                                 AppSharingService.rateApp(context);
                               },
                               icon: const Icon(Icons.star, size: 18),
-                              label: const Text('דרג'),
+                              label: Text(l10n.rateApp),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.amber[600],
-                                foregroundColor: Colors.white,
+                                backgroundColor: Theme.of(context).colorScheme.tertiary,
+                                foregroundColor: Theme.of(context).colorScheme.onPrimary,
                               ),
                             ),
                           ),
@@ -2319,10 +3296,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                             child: OutlinedButton.icon(
                               onPressed: () => AppSharingService.showRecommendationDialog(context),
                               icon: const Icon(Icons.favorite, size: 18),
-                              label: const Text('המלץ לחברים'),
+                              label: Text(l10n.recommendToFriends),
                               style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.red,
-                                side: BorderSide(color: Colors.red[300]!),
+                                foregroundColor: Theme.of(context).colorScheme.error,
+                                side: BorderSide(color: Theme.of(context).colorScheme.error),
                               ),
                             ),
                           ),
@@ -2331,10 +3308,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                             child: OutlinedButton.icon(
                               onPressed: () => AppSharingService.showRewardsDialog(context),
                               icon: const Icon(Icons.card_giftcard, size: 18),
-                              label: const Text('תגמולים'),
+                              label: Text(l10n.rewards),
                               style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.purple,
-                                side: BorderSide(color: Colors.purple[300]!),
+                                foregroundColor: Theme.of(context).colorScheme.tertiary,
+                                side: BorderSide(color: Theme.of(context).colorScheme.tertiary),
                               ),
                             ),
                           ),
@@ -2349,12 +3326,12 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             ],
           ),
         ),
-      ),
+          ),
         );
       },
     );
   }
-  
+
   /// בניית סטטוס המנוי
   Widget _buildSubscriptionStatus(UserProfile userProfile) {
     final subscriptionStatus = userProfile.subscriptionStatus ?? 'private_free';
@@ -2495,18 +3472,18 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'פרטי חינם',
               style: TextStyle(
-                color: Colors.blue,
+                color: Theme.of(context).colorScheme.primary,
             fontWeight: FontWeight.bold,
           ),
             ),
             const SizedBox(height: 4),
-            const Text(
+            Text(
               '🆓 גישה לבקשות חינמיות',
               style: TextStyle(
-                color: Colors.blue,
+                color: Theme.of(context).colorScheme.primary,
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
               ),
@@ -2524,13 +3501,15 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         return FutureBuilder<int>(
           future: _getMonthlyRequestsCount(),
           builder: (context, snapshot) {
+            final l10n = AppLocalizations.of(context);
+            
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
         
         if (snapshot.hasError) {
           return Text(
-            'שגיאה בטעינת נתונים: ${snapshot.error}',
+            '${l10n.errorLoadingData}: ${snapshot.error}',
             style: const TextStyle(color: Colors.red),
           );
         }
@@ -2548,20 +3527,24 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
-                    'פורסמו $requestsUsed בקשות החודש (ללא הגבלה)',
+                    l10n.publishedRequestsThisMonth(requestsUsed),
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
-                      color: Colors.blue[700],
+                      color: Theme.of(context).colorScheme.primary,
                     ),
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: Colors.blue[100],
+                      color: Theme.of(context).brightness == Brightness.dark 
+                          ? Theme.of(context).colorScheme.surfaceContainerHighest
+                          : Theme.of(context).colorScheme.surfaceContainer,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: Colors.blue[300]!,
+                        color: Theme.of(context).brightness == Brightness.dark 
+                            ? Theme.of(context).colorScheme.outlineVariant
+                            : Theme.of(context).colorScheme.outlineVariant,
                       ),
                     ),
                     child: Text(
@@ -2569,7 +3552,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
-                        color: Colors.blue[700],
+                        color: Theme.of(context).brightness == Brightness.dark 
+                            ? Colors.white
+                            : Colors.black87,
                       ),
                     ),
                   ),
@@ -2580,8 +3565,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               // בר התקדמות למנהל (תמיד ירוק)
               LinearProgressIndicator(
                 value: 0.0, // תמיד 0 כי אין הגבלה
-                backgroundColor: Colors.grey[300],
-                valueColor: const AlwaysStoppedAnimation<Color>(Colors.blue),
+                backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                valueColor: AlwaysStoppedAnimation<Color>(Theme.of(context).colorScheme.primary),
               ),
             ],
           );
@@ -2599,21 +3584,25 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               children: [
                 Text(
                   remainingRequests > 0 
-                    ? 'נשאר לך $remainingRequests בקשות לפרסום החודש'
-                    : 'הגעת למגבלת הבקשות החודשית',
+                    ? l10n.remainingRequestsThisMonth(remainingRequests)
+                    : l10n.reachedMonthlyRequestLimit,
                   style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
-                    color: remainingRequests > 0 ? Colors.green[700] : Colors.red[700],
+                    color: remainingRequests > 0 ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.error,
                   ),
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: remainingRequests > 0 ? Colors.green[100] : Colors.red[100],
+                    color: Theme.of(context).brightness == Brightness.dark 
+                        ? Theme.of(context).colorScheme.surfaceContainerHighest
+                        : Theme.of(context).colorScheme.surfaceContainer,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: remainingRequests > 0 ? Colors.green[300]! : Colors.red[300]!,
+                      color: Theme.of(context).brightness == Brightness.dark 
+                          ? Theme.of(context).colorScheme.outlineVariant
+                          : Theme.of(context).colorScheme.outlineVariant,
                     ),
                   ),
                   child: Text(
@@ -2621,7 +3610,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,
-                      color: remainingRequests > 0 ? Colors.green[700] : Colors.red[700],
+                      color: Theme.of(context).brightness == Brightness.dark 
+                          ? Colors.white
+                          : Colors.black87,
                     ),
                   ),
                 ),
@@ -2632,9 +3623,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             // בר התקדמות
             LinearProgressIndicator(
               value: requestsUsed / maxRequests,
-              backgroundColor: Colors.grey[300],
+              backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
               valueColor: AlwaysStoppedAnimation<Color>(
-                remainingRequests > 0 ? Colors.green : Colors.red,
+                remainingRequests > 0 ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.error,
               ),
             ),
             const SizedBox(height: 8),
@@ -2644,19 +3635,25 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.orange[50],
+                  color: Theme.of(context).brightness == Brightness.dark 
+                      ? Theme.of(context).colorScheme.surfaceContainerHighest
+                      : Theme.of(context).colorScheme.surfaceContainer,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.orange[200]!),
+                  border: Border.all(
+                    color: Theme.of(context).brightness == Brightness.dark 
+                        ? Theme.of(context).colorScheme.onSurfaceVariant
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.warning, color: Colors.orange[700], size: 20),
+                    Icon(Icons.warning, color: Theme.of(context).colorScheme.tertiary, size: 20),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'נשארו לך רק $remainingRequests בקשות!',
                         style: TextStyle(
-                          color: Colors.orange[700],
+                          color: Theme.of(context).colorScheme.tertiary,
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                         ),
@@ -2673,14 +3670,14 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: () => _showUpgradeDialog(userProfile),
+                  onPressed: () => _showSubscriptionTypeDialog(userProfile),
                   icon: const Icon(Icons.upgrade, size: 18),
                   label: const Text('רוצה יותר? שדרג מנוי'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Theme.of(context).brightness == Brightness.dark 
-              ? const Color(0xFFFF9800) // כתום ענתיק
+              ? const Color(0xFF9C27B0) // סגול יפה
               : Theme.of(context).colorScheme.primary,
-                    foregroundColor: Colors.white,
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
@@ -2699,7 +3696,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
 
   /// Stream למעקב אחר שינויים בבקשות (יצירה ומחיקה)
   Stream<String?> _getRequestDeletionStream() {
-    return Stream.periodic(const Duration(seconds: 2), (count) async {
+    return Stream.periodic(const Duration(seconds: 2), (index) async {
       final prefs = await SharedPreferences.getInstance();
       final deletionTime = prefs.getString('last_request_deletion');
       final creationTime = prefs.getString('last_request_creation');
@@ -2754,8 +3751,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     // מנהל לא יכול לשדרג
     if (_isAdmin == true) return false;
     
-    // משתמש אורח לא יכול לשדרג במהלך תקופת הניסיון
-    if (userProfile.userType == UserType.guest) return false;
+    // ✅ משתמש אורח תמיד יכול לשדרג (גם אם תקופת הניסיון לא הסתיימה)
+    // if (userProfile.userType == UserType.guest) return false; // הוסר - משתמש אורח יכול לשדרג תמיד
     
     // אם יש בקשה בתהליך אישור - לא יכול לשלוח בקשה נוספת
     if (userProfile.subscriptionStatus == 'pending_approval') return false;
@@ -2763,8 +3760,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     // קביעת רמת המנוי הנוכחית
     int currentLevel = _getSubscriptionLevel(userProfile);
     
-    // אם ברמה הנמוכה ביותר (פרטי חינם) - יכול לשדרג
-    if (currentLevel == 0) return true;
+    // אם ברמה הנמוכה ביותר (פרטי חינם או אורח) - יכול לשדרג
+    if (currentLevel == 0 || currentLevel == -1) return true;
     
     // אם ברמה הגבוהה ביותר (עסקי מנוי) - לא יכול לשדרג
     if (currentLevel >= 2) return false;
@@ -2775,8 +3772,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
   
   /// קביעת רמת המנוי הנוכחית
   int _getSubscriptionLevel(UserProfile userProfile) {
-    // משתמש אורח = 3 (לא יכול לשדרג)
-    if (userProfile.userType == UserType.guest) return 3;
+    // ✅ משתמש אורח = -1 (יכול לשדרג לפרטי מנוי או עסקי)
+    if (userProfile.userType == UserType.guest) return -1;
     
     // פרטי חינם = 0
     if (!userProfile.isSubscriptionActive) return 0;
@@ -2808,15 +3805,16 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
   /// קבלת שם רמת המנוי
   String _getSubscriptionLevelName(int level) {
     switch (level) {
+      case -1: return 'אורח';
       case 0: return 'פרטי חינם';
       case 1: return 'פרטי מנוי';
       case 2: return 'עסקי מנוי';
-      case 3: return 'אורח';
       default: return 'לא ידוע';
     }
   }
 
-  /// הצגת דיאלוג שדרוג מנוי
+  /// הצגת דיאלוג שדרוג מנוי (לא בשימוש - שמור לעתיד)
+  // ignore: unused_element
   void _showUpgradeDialog(UserProfile userProfile) {
     // בדיקה אם יש בקשה בתהליך אישור
     if (userProfile.subscriptionStatus == 'pending_approval') {
@@ -2875,12 +3873,12 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (currentLevel == 0) ...[
-              // פרטי חינם - יכול לשדרג לפרטי מנוי או עסקי
+            if (currentLevel == -1) ...[
+              // ✅ משתמש אורח - יכול לשדרג לפרטי מנוי או עסקי
               const Text('בחר סוג מנוי:'),
               const SizedBox(height: 16),
               _buildUpgradeOption(
-                title: 'פרטי מנוי - 10₪/שנה',
+                title: 'פרטי מנוי - 30₪/שנה',
                 description: '• 5 בקשות בחודש\n• טווח: 0-10 ק"מ + בונוסים\n• רואה רק בקשות חינם',
                 onTap: () {
                   Navigator.pop(context);
@@ -2889,7 +3887,28 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               ),
               const SizedBox(height: 8),
               _buildUpgradeOption(
-                title: 'עסקי מנוי - 50₪/שנה',
+                title: 'עסקי מנוי - 70₪/שנה',
+                description: '• 10 בקשות בחודש\n• טווח: 0-50 ק"מ + בונוסים\n• רואה בקשות חינם ובתשלום\n• בחירת תחומי עיסוק',
+                onTap: () {
+                  Navigator.pop(context);
+                  _updateSubscriptionType(UserType.business, true, userProfile: userProfile);
+                },
+              ),
+            ] else if (currentLevel == 0) ...[
+              // פרטי חינם - יכול לשדרג לפרטי מנוי או עסקי
+              const Text('בחר סוג מנוי:'),
+              const SizedBox(height: 16),
+              _buildUpgradeOption(
+                title: 'פרטי מנוי - 30₪/שנה',
+                description: '• 5 בקשות בחודש\n• טווח: 0-10 ק"מ + בונוסים\n• רואה רק בקשות חינם',
+                onTap: () {
+                  Navigator.pop(context);
+                  _updateSubscriptionType(UserType.personal, true, userProfile: userProfile);
+                },
+              ),
+              const SizedBox(height: 8),
+              _buildUpgradeOption(
+                title: 'עסקי מנוי - 70₪/שנה',
                 description: '• 10 בקשות בחודש\n• טווח: 0-50 ק"מ + בונוסים\n• רואה בקשות חינם ובתשלום\n• בחירת תחומי עיסוק',
                 onTap: () {
                   Navigator.pop(context);
@@ -2901,7 +3920,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               const Text('שדרוג לעסקי מנוי:'),
               const SizedBox(height: 16),
               _buildUpgradeOption(
-                title: 'עסקי מנוי - 50₪/שנה',
+                title: 'עסקי מנוי - 70₪/שנה',
                 description: '• 10 בקשות בחודש (במקום 5)\n• טווח: 0-50 ק"מ + בונוסים\n• רואה בקשות חינם ובתשלום\n• בחירת תחומי עיסוק',
                 onTap: () {
                   Navigator.pop(context);
@@ -2915,9 +3934,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.grey[100],
+                  color: Theme.of(context).colorScheme.surfaceContainer,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.grey[300]!),
+                  border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                 ),
                 child: const Row(
                   children: [
@@ -2957,7 +3976,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey[300]!),
+          border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Column(
@@ -2974,7 +3993,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             Text(
               description,
               style: TextStyle(
-                color: Colors.grey[600],
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
                 fontSize: 12,
               ),
             ),
@@ -2993,14 +4012,16 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-            color: Colors.green[100],
+            color: Theme.of(context).colorScheme.primaryContainer,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.green),
+            border: Border.all(color: Theme.of(context).colorScheme.primary),
           ),
-          child: const Text(
+          child: Text(
             'פעיל',
             style: TextStyle(
-              color: Colors.green,
+              color: Theme.of(context).brightness == Brightness.dark 
+                  ? Colors.white
+                  : Theme.of(context).colorScheme.onPrimaryContainer,
               fontWeight: FontWeight.bold,
               fontSize: 12,
             ),
@@ -3010,14 +4031,16 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-            color: Colors.orange[100],
+            color: Theme.of(context).colorScheme.tertiaryContainer,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.orange),
+            border: Border.all(color: Theme.of(context).colorScheme.tertiary),
           ),
-          child: const Text(
+          child: Text(
             'בתהליך אישור',
             style: TextStyle(
-              color: Colors.orange,
+              color: Theme.of(context).brightness == Brightness.dark 
+                  ? Colors.white
+                  : Theme.of(context).colorScheme.onTertiaryContainer,
               fontWeight: FontWeight.bold,
               fontSize: 12,
             ),
@@ -3027,14 +4050,16 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-            color: Colors.red[100],
+            color: Theme.of(context).colorScheme.errorContainer,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.red),
+            border: Border.all(color: Theme.of(context).colorScheme.error),
           ),
-          child: const Text(
+          child: Text(
             'נדחה',
             style: TextStyle(
-              color: Colors.red,
+              color: Theme.of(context).brightness == Brightness.dark 
+                  ? Colors.white
+                  : Theme.of(context).colorScheme.onErrorContainer,
               fontWeight: FontWeight.bold,
               fontSize: 12,
             ),
@@ -3045,14 +4070,16 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-            color: Colors.blue[100],
+            color: Theme.of(context).colorScheme.primaryContainer,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.blue),
+            border: Border.all(color: Theme.of(context).colorScheme.primary),
           ),
-          child: const Text(
+          child: Text(
             'פרטי חינם',
             style: TextStyle(
-              color: Colors.blue,
+              color: Theme.of(context).brightness == Brightness.dark 
+                  ? Colors.white
+                  : Theme.of(context).colorScheme.onPrimaryContainer,
               fontWeight: FontWeight.bold,
               fontSize: 12,
             ),
@@ -3062,6 +4089,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
   }
 
   Widget _buildRatingCard(UserProfile userProfile) {
+    final l10n = AppLocalizations.of(context);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -3072,12 +4100,12 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               children: [
                 Icon(
                   Icons.star,
-                  color: Colors.amber[600],
+                  color: Theme.of(context).colorScheme.tertiary,
                   size: 20,
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  'הדירוג שלך',
+                  l10n.yourRating,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
@@ -3103,13 +4131,24 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 final averageRating = (userData?['averageRating'] as num?)?.toDouble() ?? 0.0;
                 final ratingCount = (userData?['ratingCount'] as int?) ?? 0;
 
-                // דירוגים מפורטים
-                final reliability = (userData?['reliability'] as num?)?.toDouble() ?? 0.0;
-                final availability = (userData?['availability'] as num?)?.toDouble() ?? 0.0;
-                final attitude = (userData?['attitude'] as num?)?.toDouble() ?? 0.0;
-                final fairPrice = (userData?['fairPrice'] as num?)?.toDouble() ?? 0.0;
+                // דירוגים מפורטים - נטען מ-detailed_rating_stats
+                double reliability = 0.0;
+                double availability = 0.0;
+                double attitude = 0.0;
+                double fairPrice = 0.0;
 
                 // תמיד נציג את הדירוגים המפורטים, גם אם הם 0.0
+
+                return FutureBuilder<Map<String, double>>(
+                  future: _loadDetailedRatings(userProfile.userId),
+                  builder: (context, detailedSnapshot) {
+                    if (detailedSnapshot.hasData) {
+                      final detailedRatings = detailedSnapshot.data!;
+                      reliability = detailedRatings['reliability'] ?? 0.0;
+                      availability = detailedRatings['availability'] ?? 0.0;
+                      attitude = detailedRatings['attitude'] ?? 0.0;
+                      fairPrice = detailedRatings['fairPrice'] ?? 0.0;
+                    }
 
                 return Column(
                   children: [
@@ -3123,19 +4162,19 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                             if (index < averageRating.floor()) {
                               return Icon(
                                 Icons.star,
-                                color: Colors.amber[600],
+                                color: Theme.of(context).colorScheme.tertiary,
                                 size: 20,
                               );
                             } else if (index < averageRating) {
                               return Icon(
                                 Icons.star_half,
-                                color: Colors.amber[600],
+                                color: Theme.of(context).colorScheme.tertiary,
                                 size: 20,
                               );
                             } else {
                               return Icon(
                                 Icons.star_border,
-                                color: Colors.grey[400],
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
                                 size: 20,
                               );
                             }
@@ -3154,9 +4193,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'מבוסס על $ratingCount דירוג${ratingCount == 1 ? '' : 'ים'}',
+                      l10n.basedOnRatings(ratingCount),
                       style: TextStyle(
-                        color: Colors.grey[600],
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontSize: 14,
                         ),
                       ),
@@ -3164,17 +4203,22 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                       Row(
                         children: List.generate(5, (index) => Icon(
                           Icons.star_border,
-                          color: Colors.grey[400],
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
                           size: 20,
                         )),
                       ),
                       const SizedBox(height: 8),
-                      Text(
-                        'עדיין לא קיבלת דירוגים',
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontSize: 14,
-                        ),
+                      Builder(
+                        builder: (context) {
+                          final l10n = AppLocalizations.of(context);
+                          return Text(
+                            l10n.noRatingsYet,
+                            style: TextStyle(
+                                      color: Theme.of(context).colorScheme.onPrimary,
+                              fontSize: 14,
+                            ),
+                          );
+                        },
                       ),
                     ],
                     const SizedBox(height: 16),
@@ -3183,61 +4227,68 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.grey[50],
+                        color: Theme.of(context).colorScheme.surfaceContainer,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey[300]!),
+                        border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'דירוגים מפורטים:',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.grey[800],
-                            ),
-                          ),
-                          const SizedBox(height: 12),
-                          
-                          // אמינות
-                          _buildDetailedRatingRow(
-                            'אמינות',
-                            reliability,
-                            Icons.verified_user,
-                            Colors.blue,
-                          ),
-                          const SizedBox(height: 8),
-                          
-                          // זמינות
-                          _buildDetailedRatingRow(
-                            'זמינות',
-                            availability,
-                            Icons.access_time,
-                            Colors.green,
-                          ),
-                          const SizedBox(height: 8),
-                          
-                          // יחס
-                          _buildDetailedRatingRow(
-                            'יחס',
-                            attitude,
-                            Icons.people,
-                            Colors.orange,
-                          ),
-                          const SizedBox(height: 8),
-                          
-                          // מחיר הוגן
-                          _buildDetailedRatingRow(
-                            'מחיר הוגן',
-                            fairPrice,
-                            Icons.attach_money,
-                            Colors.purple,
-                          ),
-                        ],
+                      child: Builder(
+                        builder: (context) {
+                          final l10n = AppLocalizations.of(context);
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${l10n.detailedRatings}:',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: Theme.of(context).colorScheme.onSurface,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              
+                              // אמינות
+                              _buildDetailedRatingRow(
+                                l10n.reliability,
+                                reliability,
+                                Icons.verified_user,
+                                Colors.blue,
+                              ),
+                              const SizedBox(height: 8),
+                              
+                              // זמינות
+                              _buildDetailedRatingRow(
+                                l10n.availability,
+                                availability,
+                                Icons.access_time,
+                                Colors.green,
+                              ),
+                              const SizedBox(height: 8),
+                              
+                              // יחס
+                              _buildDetailedRatingRow(
+                                l10n.attitude,
+                                attitude,
+                                Icons.people,
+                                Colors.orange,
+                              ),
+                              const SizedBox(height: 8),
+                              
+                              // מחיר הוגן
+                              _buildDetailedRatingRow(
+                                l10n.fairPrice,
+                                fairPrice,
+                                Icons.attach_money,
+                                Colors.purple,
+                              ),
+                            ],
+                          );
+                        },
                       ),
                     ),
                   ],
+                );
+                  },
                 );
               },
             ),
@@ -3247,28 +4298,101 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     );
   }
 
+  /// טעינת דירוגים מפורטים מ-detailed_rating_stats
+  Future<Map<String, double>> _loadDetailedRatings(String userId) async {
+    try {
+      // טעינת כל הדירוגים המפורטים של המשתמש מכל הקטגוריות
+      final allStatsSnapshot = await FirebaseFirestore.instance
+          .collection('detailed_rating_stats')
+          .get();
+      
+      // סינון לפי userId (המפתח הוא ${userId}_${category})
+      final userStatsDocs = allStatsSnapshot.docs.where((doc) {
+        final docId = doc.id;
+        return docId.startsWith('${userId}_');
+      }).toList();
+      
+      if (userStatsDocs.isEmpty) {
+        return {
+          'reliability': 0.0,
+          'availability': 0.0,
+          'attitude': 0.0,
+          'fairPrice': 0.0,
+        };
+      }
+      
+      // חישוב ממוצע מכל הקטגוריות
+      double totalReliability = 0.0;
+      double totalAvailability = 0.0;
+      double totalAttitude = 0.0;
+      double totalFairPrice = 0.0;
+      int count = 0;
+      
+      for (var doc in userStatsDocs) {
+        final statsData = doc.data();
+        final rel = (statsData['averageReliability'] as num?)?.toDouble();
+        final avail = (statsData['averageAvailability'] as num?)?.toDouble();
+        final att = (statsData['averageAttitude'] as num?)?.toDouble();
+        final fp = (statsData['averageFairPrice'] as num?)?.toDouble();
+        
+        if (rel != null && avail != null && att != null && fp != null) {
+          totalReliability += rel;
+          totalAvailability += avail;
+          totalAttitude += att;
+          totalFairPrice += fp;
+          count++;
+        }
+      }
+      
+      if (count > 0) {
+        return {
+          'reliability': totalReliability / count,
+          'availability': totalAvailability / count,
+          'attitude': totalAttitude / count,
+          'fairPrice': totalFairPrice / count,
+        };
+      }
+      
+      return {
+        'reliability': 0.0,
+        'availability': 0.0,
+        'attitude': 0.0,
+        'fairPrice': 0.0,
+      };
+    } catch (e) {
+      debugPrint('❌ Error loading detailed ratings: $e');
+      return {
+        'reliability': 0.0,
+        'availability': 0.0,
+        'attitude': 0.0,
+        'fairPrice': 0.0,
+      };
+    }
+  }
+
   /// דיאלוג התנתקות
   Future<void> _showLogoutDialog(AppLocalizations l10n) async {
     return showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (BuildContext context) {
+        final dialogL10n = AppLocalizations.of(context);
         return AlertDialog(
-          title: const Text('התנתקות'),
-          content: const Text('האם אתה בטוח שברצונך להתנתק?'),
+          title: Text(dialogL10n.logoutTitle),
+          content: Text(dialogL10n.logoutMessage),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('ביטול'),
+              child: Text(dialogL10n.cancel),
             ),
             TextButton(
               onPressed: () async {
                 Navigator.of(context).pop();
                 await _performLogout();
               },
-              child: const Text(
-                'התנתקות',
-                style: TextStyle(color: Colors.red),
+              child: Text(
+                dialogL10n.logoutButton,
+                style: const TextStyle(color: Colors.red),
               ),
             ),
           ],
@@ -3304,18 +4428,46 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     }
   }
 
+  /// ביצוע התנתקות לצורך הרשמה (למשתמש אורח זמני)
+  Future<void> _performLogoutForRegistration() async {
+    try {
+      // התנתקות מלאה - מוחקת את כל המידע השמור
+      await AutoLoginService.logout();
+      
+      // חזרה למסך התחברות
+      if (mounted) {
+        Navigator.pushNamedAndRemoveUntil(
+          context,
+          '/auth',
+          (route) => false,
+        );
+      }
+    } catch (e) {
+      debugPrint('Error during logout for registration: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה בהתנתקות: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   /// דיאלוג מחיקת חשבון
   Future<void> _showDeleteAccountDialog(AppLocalizations l10n) async {
     return showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (BuildContext context) {
+        final dialogL10n = AppLocalizations.of(context);
         return AlertDialog(
           title: Row(
             children: [
-              Icon(Icons.warning, color: Colors.red[600], size: 28),
+              Icon(Icons.warning, color: Theme.of(context).colorScheme.error, size: 28),
               const SizedBox(width: 8),
-              const Text('מחיקת חשבון'),
+              Text(dialogL10n.deleteAccountTitle),
             ],
           ),
           content: SingleChildScrollView(
@@ -3323,44 +4475,52 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'האם אתה בטוח שברצונך למחוק את החשבון שלך?',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                Text(
+                  dialogL10n.deleteAccountConfirm,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 16),
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.red[50],
+                    color: Theme.of(context).colorScheme.errorContainer,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.red[200]!),
+                    border: Border.all(color: Theme.of(context).colorScheme.error),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.info, color: Colors.red[600], size: 20),
+                          Icon(
+                            Icons.info,
+                            color: Theme.of(context).brightness == Brightness.dark
+                                ? Theme.of(context).colorScheme.onSurface
+                                : Theme.of(context).colorScheme.error,
+                            size: 20,
+                          ),
                           const SizedBox(width: 8),
                           Text(
-                            'פעולה זו תמחק לצמיתות:',
+                            dialogL10n.thisActionWillDeletePermanently,
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
-                              color: Colors.red[800],
+                              color: Theme.of(context).brightness == Brightness.dark
+                                  ? Theme.of(context).colorScheme.onSurface
+                                  : Theme.of(context).colorScheme.onErrorContainer,
                             ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 8),
-                      _buildDeleteWarningPoint('פרטי הכניסה שלך'),
-                      _buildDeleteWarningPoint('המידע האישי בפרופיל'),
-                      _buildDeleteWarningPoint('כל הבקשות שפרסמת'),
-                      _buildDeleteWarningPoint('כל הפניות שפנית אליהן'),
-                      _buildDeleteWarningPoint('כל הצ\'אטים שלך'),
-                      _buildDeleteWarningPoint('כל ההודעות ששלחת וקיבלת'),
-                      _buildDeleteWarningPoint('כל התמונות והקבצים'),
-                      _buildDeleteWarningPoint('כל הנתונים וההיסטוריה'),
+                      _buildDeleteWarningPoint(dialogL10n.yourLoginCredentials),
+                      _buildDeleteWarningPoint(dialogL10n.yourPersonalInfo),
+                      _buildDeleteWarningPoint(dialogL10n.allYourPublishedRequests),
+                      _buildDeleteWarningPoint(dialogL10n.allYourInterestedRequests),
+                      _buildDeleteWarningPoint(dialogL10n.allYourChats),
+                      _buildDeleteWarningPoint(dialogL10n.allYourMessages),
+                      _buildDeleteWarningPoint(dialogL10n.allYourImages),
+                      _buildDeleteWarningPoint(dialogL10n.allYourData),
                     ],
                   ),
                 ),
@@ -3368,21 +4528,29 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.orange[50],
+                    color: Theme.of(context).colorScheme.tertiaryContainer,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.orange[200]!),
+                    border: Border.all(color: Theme.of(context).colorScheme.tertiary),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.warning_amber, color: Colors.orange[600], size: 20),
+                      Icon(
+                        Icons.warning_amber,
+                        color: Theme.of(context).brightness == Brightness.dark
+                            ? Theme.of(context).colorScheme.onSurface
+                            : Theme.of(context).colorScheme.tertiary,
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'פעולה זו איננה ניתנת לשחזור!',
+                          dialogL10n.thisActionCannotBeUndone,
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
-                            color: Colors.orange[800],
+                            color: Theme.of(context).brightness == Brightness.dark
+                                ? Theme.of(context).colorScheme.onSurface
+                                : Theme.of(context).colorScheme.onTertiaryContainer,
                           ),
                         ),
                       ),
@@ -3395,7 +4563,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('ביטול'),
+              child: Text(dialogL10n.cancel),
             ),
             ElevatedButton(
               onPressed: () async {
@@ -3403,10 +4571,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 await _showPasswordConfirmationDialog();
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
+                backgroundColor: Theme.of(context).colorScheme.error,
+                foregroundColor: Theme.of(context).colorScheme.onError,
               ),
-              child: const Text('מחק חשבון'),
+              child: Text(dialogL10n.deleteAccount),
             ),
           ],
         );
@@ -3424,6 +4592,30 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       return;
     }
 
+    // בדיקה אם המשתמש הוא אורח זמני
+    if (user != null) {
+      try {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        
+        if (userDoc.exists) {
+          final userData = userDoc.data() as Map<String, dynamic>;
+          final isTemporaryGuest = userData['isTemporaryGuest'] ?? false;
+          
+          if (isTemporaryGuest == true) {
+            // אורח זמני - אין סיסמה, עובר ישירות למחיקה
+            await _performAccountDeletion();
+            return;
+          }
+        }
+      } catch (e) {
+        debugPrint('Error checking temporary guest status: $e');
+        // אם יש שגיאה, נמשיך לדיאלוג סיסמה רגיל
+      }
+    }
+
     // משתמש שכונתי - מציג דיאלוג סיסמה
     final passwordController = TextEditingController();
     bool obscurePassword = true;
@@ -3435,20 +4627,21 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       builder: (BuildContext context) {
         return StatefulBuilder(
           builder: (context, setState) {
+            final dialogL10n = AppLocalizations.of(context);
             return AlertDialog(
               title: Row(
                 children: [
-                  Icon(Icons.security, color: Colors.red[600], size: 28),
+                  Icon(Icons.security, color: Theme.of(context).colorScheme.error, size: 28),
                   const SizedBox(width: 8),
-                  const Text('אישור סיסמה'),
+                  Text(dialogL10n.passwordConfirmation),
                 ],
               ),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text(
-                    'כדי למחוק את החשבון, אנא הזן את הסיסמה שלך לאישור:',
-                    style: TextStyle(fontSize: 16),
+                  Text(
+                    dialogL10n.passwordConfirmationMessage,
+                    style: const TextStyle(fontSize: 16),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 20),
@@ -3456,7 +4649,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                     controller: passwordController,
                     obscureText: obscurePassword,
                     decoration: InputDecoration(
-                      labelText: 'סיסמה',
+                      labelText: dialogL10n.password,
                       prefixIcon: const Icon(Icons.lock),
                       suffixIcon: IconButton(
                         icon: Icon(
@@ -3483,21 +4676,29 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.red[50],
+                      color: Theme.of(context).colorScheme.errorContainer,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.red[200]!),
+                      border: Border.all(color: Theme.of(context).colorScheme.error),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.warning, color: Colors.red[600], size: 20),
+                        Icon(
+                          Icons.warning,
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? Theme.of(context).colorScheme.onSurface
+                              : Theme.of(context).colorScheme.error,
+                          size: 20,
+                        ),
                         const SizedBox(width: 8),
-                        const Expanded(
+                        Expanded(
                           child: Text(
-                            'פעולה זו תמחק את החשבון לצמיתות!',
+                            dialogL10n.thisActionWillDeleteAccountPermanently,
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
-                              color: Colors.red,
+                              color: Theme.of(context).brightness == Brightness.dark
+                                  ? Theme.of(context).colorScheme.onSurface
+                                  : Theme.of(context).colorScheme.onErrorContainer,
                             ),
                           ),
                         ),
@@ -3509,13 +4710,13 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('ביטול'),
+                  child: Text(dialogL10n.cancel),
                 ),
                 ElevatedButton(
                   onPressed: () async {
                     if (passwordController.text.isEmpty) {
                       setState(() {
-                        errorText = 'אנא הזן את הסיסמה';
+                        errorText = dialogL10n.passwordRequired;
                       });
                       return;
                     }
@@ -3529,20 +4730,22 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                     
                     try {
                       await user?.reauthenticateWithCredential(credential);
+                      // Guard context usage after async gap
+                      if (!context.mounted) return;
                       // סיסמה נכונה - ממשיך למחיקה
                       Navigator.of(context).pop();
                       await _performAccountDeletion();
                     } catch (e) {
                       setState(() {
-                        errorText = 'סיסמה שגויה';
+                        errorText = dialogL10n.wrongPassword;
                       });
                     }
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.red,
-                    foregroundColor: Colors.white,
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary,
                   ),
-                  child: const Text('מחק חשבון'),
+                  child: Text(dialogL10n.deleteAccount),
                 ),
               ],
             );
@@ -3558,26 +4761,27 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       context: context,
       barrierDismissible: false,
       builder: (BuildContext context) {
+        final dialogL10n = AppLocalizations.of(context);
         return AlertDialog(
           title: Row(
             children: [
-              Icon(Icons.delete_forever, color: Colors.red[600], size: 28),
+              Icon(Icons.delete_forever, color: Theme.of(context).colorScheme.error, size: 28),
               const SizedBox(width: 8),
-              const Text('מחיקת משתמש'),
+              Text(dialogL10n.googleUserDeleteTitle),
             ],
           ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(
+              Icon(
                 Icons.account_circle,
-                color: Colors.blue,
+                color: Theme.of(context).colorScheme.primary,
                 size: 48,
               ),
               const SizedBox(height: 16),
-              const Text(
-                'התחברת דרך Google',
-                style: TextStyle(
+              Text(
+                dialogL10n.loggedInWithGoogle,
+                style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                 ),
@@ -3595,13 +4799,13 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                   children: [
                     Icon(Icons.warning, color: Colors.red[600], size: 20),
                     const SizedBox(width: 8),
-                    const Expanded(
+                    Expanded(
                       child: Text(
-                        'לחץ "אישור" כדי למחוק את החשבון לצמיתות.\nפעולה זו איננה ניתנת לשחזור!',
+                        dialogL10n.clickConfirmToDeletePermanently,
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
-                          color: Colors.red,
+                          color: Theme.of(context).colorScheme.error,
                         ),
                       ),
                     ),
@@ -3613,7 +4817,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('ביטול'),
+              child: Text(dialogL10n.cancel),
             ),
             ElevatedButton(
               onPressed: () async {
@@ -3621,10 +4825,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 await _performGoogleAccountDeletion();
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
+                backgroundColor: Theme.of(context).colorScheme.error,
+                foregroundColor: Theme.of(context).colorScheme.onError,
               ),
-              child: const Text('אישור'),
+              child: Text(dialogL10n.confirm),
             ),
           ],
         );
@@ -3720,9 +4924,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
         if (mounted) {
+          final l10n = AppLocalizations.of(context);
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('לא נמצא משתמש מחובר'),
+            SnackBar(
+              content: Text(l10n.noUserFound),
               backgroundColor: Colors.red,
             ),
           );
@@ -3794,16 +4999,19 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
   }
 
   Widget _buildDeleteWarningPoint(String text) {
+    final textColor = Theme.of(context).brightness == Brightness.dark
+        ? Theme.of(context).colorScheme.onSurface
+        : Theme.of(context).colorScheme.onErrorContainer;
     return Padding(
       padding: const EdgeInsets.only(bottom: 4.0),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('• ', style: TextStyle(color: Colors.red[600], fontSize: 14)),
+          Text('• ', style: TextStyle(color: textColor, fontSize: 14)),
           Expanded(
             child: Text(
               text,
-              style: TextStyle(color: Colors.red[700], fontSize: 13),
+              style: TextStyle(color: textColor, fontSize: 13),
             ),
           ),
         ],
@@ -3816,9 +5024,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
+        final l10n = AppLocalizations.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('לא נמצא משתמש מחובר'),
+          SnackBar(
+            content: Text(l10n.noUserFound),
             backgroundColor: Colors.red,
           ),
         );
@@ -3907,13 +5116,36 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
   /// מחיקת כל נתוני המשתמש מ-Firestore
   Future<void> _deleteUserDataFromFirestore(String userId) async {
     try {
+      // קבלת כל הבקשות שהמשתמש יצר לפני המחיקה (כדי למחוק את התמונות שלהן)
+      final userRequestsSnapshot = await FirebaseFirestore.instance
+          .collection('requests')
+          .where('createdBy', isEqualTo: userId)
+          .get();
+      
+      // מחיקת תמונות הבקשות שהמשתמש יצר מ-Storage
+      final storage = FirebaseStorage.instance;
+      for (var requestDoc in userRequestsSnapshot.docs) {
+        final requestId = requestDoc.id;
+        try {
+          final requestImagesRef = storage.ref().child('request_images/$requestId');
+          final listResult = await requestImagesRef.listAll();
+          for (var item in listResult.items) {
+            await item.delete();
+          }
+          debugPrint('Deleted images for request $requestId');
+        } catch (e) {
+          debugPrint('Error deleting images for request $requestId: $e');
+          // נמשיך גם אם יש שגיאה במחיקת תמונות
+        }
+      }
+      
       // מחיקה מקבילה של כל הנתונים
       await Future.wait([
         // מחיקת פרופיל המשתמש
         FirebaseFirestore.instance.collection('users').doc(userId).delete(),
         
         // מחיקת בקשות שהמשתמש יצר
-        _deleteCollectionData('requests', 'userId', userId),
+        _deleteCollectionData('requests', 'createdBy', userId),
         
         // מחיקת בקשות שהמשתמש פנה אליהן
         _deleteCollectionData('applications', 'applicantId', userId),
@@ -4001,25 +5233,696 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       // לא נזרוק שגיאה כאן כי זה לא קריטי
     }
   }
-  
-  // פונקציה לקבלת הודעת סטטוס למשתמש אורח
-  String _getGuestStatusMessage(UserProfile userProfile) {
-    if (userProfile.userType != UserType.guest) return '';
-    
-    final now = DateTime.now();
-    final trialStart = userProfile.guestTrialStartDate ?? now;
-    final daysSinceStart = now.difference(trialStart).inDays;
-    final hasCategories = userProfile.businessCategories != null && 
-                         userProfile.businessCategories!.isNotEmpty;
-    
-    if (daysSinceStart < 7) {
-      return '🎉 אתה נמצא בשבוע הראשון שלך! תוכל לראות כל הבקשות (חינם ובתשלום) מכל הקטגוריות.';
-    } else if (hasCategories) {
-      return '📋 שבוע הניסיון שלך הסתיים. אתה רואה בקשות בתשלום רק מתחומי העיסוק שבחרת.';
-    } else {
-      return '⚠️ שבוע הניסיון שלך הסתיים. כדי לראות בקשות בתשלום, בחר תחומי עיסוק למעלה.';
+
+  /// הצגת דיאלוג אישור למחיקת כל המשתמשים
+  Future<void> _showDeleteAllUsersConfirmation(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('מחיקת כל המשתמשים'),
+        content: const Text(
+          'האם אתה בטוח שברצונך למחוק את כל המשתמשים מהמערכת?\n\n'
+          'פעולה זו תמחק את כל המשתמשים חוץ ממנהלים.\n'
+          'פעולה זו אינה הפיכה!',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('ביטול'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+            ),
+            child: const Text('מחק הכל'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      if (!context.mounted) return;
+      await _deleteAllUsers(context);
     }
   }
+
+  /// מחיקת כל המשתמשים חוץ ממנהלים
+  Future<void> _deleteAllUsers(BuildContext context) async {
+    // הצגת דיאלוג טעינה
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    try {
+      // מחיקת כל המשתמשים מ-Firebase Authentication דרך Cloud Function
+      int authDeletedCount = 0;
+      List<dynamic>? authErrors;
+      try {
+        final currentUser = FirebaseAuth.instance.currentUser;
+        
+        if (currentUser == null) {
+          debugPrint('No current user - cannot call Cloud Function');
+          throw Exception('No user logged in');
+        }
+        
+        debugPrint('Current user: ${currentUser.email}');
+        final functions = FirebaseFunctions.instance;
+        final deleteAllUsersFunction = functions.httpsCallable('deleteAllUsersFromAuth');
+        
+        // הוספת timeout ארוך יותר למחיקה של הרבה משתמשים
+        final result = await deleteAllUsersFunction.call().timeout(
+          const Duration(minutes: 10),
+          onTimeout: () {
+            throw TimeoutException('Cloud Function call timed out after 10 minutes');
+          },
+        );
+        
+        authDeletedCount = result.data['deletedCount'] as int? ?? 0;
+        authErrors = result.data['errors'] as List<dynamic>?;
+
+        if (authErrors != null && authErrors.isNotEmpty) {
+          debugPrint('Errors deleting some users from Auth: $authErrors');
+        }
+        
+        debugPrint('Successfully deleted $authDeletedCount users from Authentication');
+      } catch (e) {
+        debugPrint('Error calling deleteAllUsersFromAuth Cloud Function: $e');
+        if (e.toString().contains('UNAUTHENTICATED')) {
+          debugPrint('Authentication error - user may not be logged in or token expired');
+          debugPrint('Please log out and log back in, then try again.');
+        } else {
+          debugPrint('This might mean the Cloud Function is not deployed yet.');
+          debugPrint('To deploy the Cloud Functions, run: firebase deploy --only functions');
+        }
+        // נמשיך למחוק מ-Firestore גם אם יש שגיאה ב-Authentication
+      }
+
+      // קבלת כל המשתמשים מ-Firestore
+      final usersSnapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .get();
+
+      int firestoreDeletedCount = 0;
+      final batch = FirebaseFirestore.instance.batch();
+
+      for (var userDoc in usersSnapshot.docs) {
+        final userData = userDoc.data();
+        final userEmail = userData['email'] as String?;
+        final isAdmin = userData['isAdmin'] ?? false;
+        
+        // בדיקה אם המשתמש הוא מנהל (לפי אימייל או שדה isAdmin)
+        if (userEmail == 'haitham.ay82@gmail.com' || userEmail == 'admin@gmail.com' || isAdmin == true) {
+          continue; // דילוג על מנהלים
+        }
+        
+        // משתמשים אורחים זמניים יימחקו גם כן (אין צורך לסנן אותם)
+
+        final userId = userDoc.id;
+
+        // מחיקת פרופיל המשתמש
+        batch.delete(userDoc.reference);
+
+        // מחיקת נתונים קשורים
+        await _deleteCollectionData('requests', 'createdBy', userId);
+        await _deleteCollectionData('chats', 'participants', userId, isArrayContains: true);
+        await _deleteCollectionData('messages', 'senderId', userId);
+        await _deleteCollectionData('ratings', 'raterId', userId);
+        await _deleteCollectionData('ratings', 'ratedUserId', userId);
+        await _deleteCollectionData('notifications', 'toUserId', userId);
+
+        // מחיקת תמונות מ-Storage
+        try {
+          final storage = FirebaseStorage.instance;
+          final userImagesRef = storage.ref().child('user_images/$userId');
+          final listResult = await userImagesRef.listAll();
+          for (var item in listResult.items) {
+            await item.delete();
+          }
+        } catch (e) {
+          debugPrint('Error deleting user images: $e');
+        }
+
+        firestoreDeletedCount++;
+      }
+
+      // ביצוע המחיקה מ-Firestore
+      await batch.commit();
+
+      // סגירת דיאלוג הטעינה
+      if (!context.mounted) return;
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+
+      // הצגת הודעת הצלחה
+      if (!context.mounted) return;
+      if (mounted) {
+        final authMessage = authDeletedCount > 0 
+            ? 'נמחקו $authDeletedCount משתמשים מ-Authentication ו-'
+            : '';
+        final errorMessage = authErrors != null && authErrors.isNotEmpty
+            ? '\n\nשגיאות ב-Authentication: ${authErrors.length} משתמשים לא נמחקו'
+            : '';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$authMessage$firestoreDeletedCount משתמשים מ-Firestore בהצלחה.$errorMessage'),
+            backgroundColor: authErrors != null && authErrors.isNotEmpty ? Colors.orange : Colors.green,
+            duration: const Duration(seconds: 8),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error deleting all users: $e');
+      
+      // סגירת דיאלוג הטעינה
+      if (!context.mounted) return;
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+
+      if (!context.mounted) return;
+      if (mounted) {
+        final l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.errorDeletingUsers(e.toString())),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    }
+  }
+
+  /// הצגת דיאלוג אישור למחיקת כל הבקשות
+  Future<void> _showDeleteAllRequestsConfirmation(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('מחיקת כל הבקשות'),
+        content: const Text(
+          'האם אתה בטוח שברצונך למחוק את כל הבקשות מהמערכת?\n\n'
+          'פעולה זו תמחק את כל הבקשות.\n'
+          'פעולה זו אינה הפיכה!',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('ביטול'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+            ),
+            child: const Text('מחק הכל'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      if (!context.mounted) return;
+      await _deleteAllRequests(context);
+    }
+  }
+
+  /// מחיקת כל הבקשות
+  Future<void> _deleteAllRequests(BuildContext context) async {
+    // הצגת דיאלוג טעינה
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    try {
+      // קבלת כל הבקשות
+      final requestsSnapshot = await FirebaseFirestore.instance
+          .collection('requests')
+          .get();
+
+      int deletedCount = 0;
+      final batch = FirebaseFirestore.instance.batch();
+
+      for (var requestDoc in requestsSnapshot.docs) {
+        final requestId = requestDoc.id;
+
+        // מחיקת הבקשה
+        batch.delete(requestDoc.reference);
+
+        // מחיקת נתונים קשורים
+        await _deleteCollectionData('chats', 'requestId', requestId);
+        await _deleteCollectionData('ratings', 'requestId', requestId);
+        await _deleteCollectionData('notifications', 'requestId', requestId);
+
+        // מחיקת תמונות מ-Storage
+        try {
+          final storage = FirebaseStorage.instance;
+          final requestImagesRef = storage.ref().child('request_images/$requestId');
+          final listResult = await requestImagesRef.listAll();
+          for (var item in listResult.items) {
+            await item.delete();
+          }
+        } catch (e) {
+          debugPrint('Error deleting request images: $e');
+        }
+
+        deletedCount++;
+      }
+
+      // ביצוע המחיקה
+      await batch.commit();
+
+      // סגירת דיאלוג הטעינה
+      if (!context.mounted) return;
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+
+      // הצגת הודעת הצלחה
+      if (!context.mounted) return;
+      if (mounted) {
+        final l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.requestsDeletedSuccessfully(deletedCount)),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error deleting all requests: $e');
+      
+      // סגירת דיאלוג הטעינה
+      if (!context.mounted) return;
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+
+      if (!context.mounted) return;
+      if (mounted) {
+        final l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.errorDeletingRequests(e.toString())),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    }
+  }
+
+  /// הצגת דיאלוג אישור למחיקת כל הקולקציות
+  Future<void> _showDeleteAllCollectionsConfirmation(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('מחיקת כל הקולקציות'),
+        content: const Text(
+          'האם אתה בטוח שברצונך למחוק את כל הקולקציות מ-Firestore?\n\n'
+          'פעולה זו תמחק את כל הקולקציות (requests, chats, messages, ratings, notifications וכו\')\n'
+          'וב-users ישארו רק המנהלים.\n\n'
+          'פעולה זו אינה הפיכה!',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('ביטול'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.purple,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+            ),
+            child: const Text('מחק הכל'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      if (!context.mounted) return;
+      await _deleteAllCollections(context);
+    }
+  }
+
+  /// מחיקת כל הקולקציות מ-Firestore (חוץ מ-users - שם ישארו רק מנהלים)
+  Future<void> _deleteAllCollections(BuildContext context) async {
+    // הצגת דיאלוג טעינה
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => const Center(
+        child: CircularProgressIndicator(),
+      ),
+    );
+
+    try {
+      // רשימת כל הקולקציות למחיקה
+      final collectionsToDelete = [
+        'requests',
+        'chats',
+        'messages',
+        'ratings',
+        'notifications',
+        'contact_inquiries',
+        'push_notifications',
+        'user_interests',
+        'user_states',
+        'monthly_requests_tracker',
+        'notification_preferences',
+        'detailed_rating_stats',
+        'detailed_ratings', // קולקציה נוספת
+        'applications',
+        'chat_notifications', // קולקציה נוספת
+        'filter_preferences', // קולקציה נוספת
+        'likes', // קולקציה נוספת
+        'notification_queue', // קולקציה נוספת
+      ];
+
+      int totalDeleted = 0;
+      final errors = <String>[];
+
+      // מחיקת כל הקולקציות
+      for (final collectionName in collectionsToDelete) {
+        try {
+          debugPrint('Deleting collection: $collectionName');
+          
+          // קבלת כל המסמכים בקולקציה (Source.server כדי לעקוף cache)
+          // עבור chats, נשתמש ב-Source.server כדי לוודא שאנחנו מקבלים את הנתונים מהשרת
+          final getOptions = collectionName == 'chats' 
+              ? const GetOptions(source: Source.server)
+              : const GetOptions(source: Source.server);
+          
+          QuerySnapshot snapshot;
+          try {
+            snapshot = await FirebaseFirestore.instance
+                .collection(collectionName)
+                .get(getOptions);
+          } catch (e) {
+            debugPrint('Error getting collection $collectionName: $e');
+            // ננסה שוב עם Source.defaultSource
+            try {
+              snapshot = await FirebaseFirestore.instance
+                  .collection(collectionName)
+                  .get();
+            } catch (e2) {
+              debugPrint('Error getting collection $collectionName with default source: $e2');
+              errors.add('$collectionName: $e2');
+              continue;
+            }
+          }
+
+          debugPrint('Collection $collectionName: Found ${snapshot.docs.length} documents (source: ${getOptions.source})');
+
+          if (snapshot.docs.isEmpty) {
+            debugPrint('Collection $collectionName is empty, skipping');
+            continue;
+          }
+
+          debugPrint('Found ${snapshot.docs.length} documents in collection $collectionName');
+
+          // אם זו קולקציית chats, צריך למחוק גם את ה-subcollections (messages)
+          if (collectionName == 'chats') {
+            debugPrint('Deleting chats with subcollections (messages)');
+            int chatsDeleted = 0;
+            int chatsFailed = 0;
+            for (var chatDoc in snapshot.docs) {
+              try {
+                debugPrint('Processing chat ${chatDoc.id}...');
+                
+                // מחיקת כל ההודעות בכל צ'אט (subcollection)
+                try {
+                  final messagesSnapshot = await chatDoc.reference
+                      .collection('messages')
+                      .get();
+                  
+                  if (messagesSnapshot.docs.isNotEmpty) {
+                    debugPrint('Found ${messagesSnapshot.docs.length} messages in chat ${chatDoc.id}');
+                    // מחיקת הודעות בקבוצות של 500
+                    const batchSize = 500;
+                    int messagesDeleted = 0;
+                    for (int i = 0; i < messagesSnapshot.docs.length; i += batchSize) {
+                      final messagesBatch = FirebaseFirestore.instance.batch();
+                      final end = (i + batchSize < messagesSnapshot.docs.length) 
+                          ? i + batchSize 
+                          : messagesSnapshot.docs.length;
+                      
+                      for (int j = i; j < end; j++) {
+                        messagesBatch.delete(messagesSnapshot.docs[j].reference);
+                      }
+                      
+                      await messagesBatch.commit();
+                      messagesDeleted += (end - i);
+                      debugPrint('Deleted $messagesDeleted/${messagesSnapshot.docs.length} messages from chat ${chatDoc.id}');
+                    }
+                    debugPrint('Successfully deleted all ${messagesSnapshot.docs.length} messages from chat ${chatDoc.id}');
+                  } else {
+                    debugPrint('No messages found in chat ${chatDoc.id}');
+                  }
+                } catch (e) {
+                  debugPrint('Error deleting messages from chat ${chatDoc.id}: $e');
+                  // נמשיך למחוק את הצ'אט גם אם יש שגיאה במחיקת ההודעות
+                }
+                
+                // מחיקת הצ'אט עצמו
+                await chatDoc.reference.delete();
+                chatsDeleted++;
+                totalDeleted++;
+                debugPrint('✅ Successfully deleted chat ${chatDoc.id}');
+              } catch (e) {
+                chatsFailed++;
+                debugPrint('❌ Error deleting chat ${chatDoc.id} with subcollections: $e');
+                errors.add('chats/${chatDoc.id}: $e');
+                // נמשיך למחוק את שאר הצ'אטים גם אם יש שגיאה
+              }
+            }
+            debugPrint('✅ Successfully deleted $chatsDeleted out of ${snapshot.docs.length} chats (failed: $chatsFailed)');
+          } else {
+            // מחיקה רגילה בקבוצות של 500 (מגבלת Firestore batch)
+            const batchSize = 500;
+            for (int i = 0; i < snapshot.docs.length; i += batchSize) {
+              final deleteBatch = FirebaseFirestore.instance.batch();
+              final end = (i + batchSize < snapshot.docs.length) 
+                  ? i + batchSize 
+                  : snapshot.docs.length;
+              
+              for (int j = i; j < end; j++) {
+                deleteBatch.delete(snapshot.docs[j].reference);
+              }
+              
+              await deleteBatch.commit();
+              totalDeleted += (end - i);
+            }
+
+            debugPrint('Successfully deleted collection: $collectionName (${snapshot.docs.length} documents)');
+          }
+        } catch (e) {
+          debugPrint('Error deleting collection $collectionName: $e');
+          errors.add('$collectionName: $e');
+        }
+      }
+
+      // מחיקת כל המשתמשים חוץ ממנהלים מ-users collection
+      try {
+        debugPrint('Cleaning users collection - keeping only admins');
+        
+        final usersSnapshot = await FirebaseFirestore.instance
+            .collection('users')
+            .get();
+
+        int usersDeleted = 0;
+        final usersBatch = FirebaseFirestore.instance.batch();
+
+        for (var userDoc in usersSnapshot.docs) {
+          final userData = userDoc.data();
+          final userEmail = userData['email'] as String?;
+          final isAdmin = userData['isAdmin'] ?? false;
+          
+          // שמירה על מנהלים בלבד (לפי אימייל או שדה isAdmin)
+          if (userEmail == 'haitham.ay82@gmail.com' || userEmail == 'admin@gmail.com' || isAdmin == true) {
+            continue;
+          }
+          
+          // משתמשים אורחים זמניים יימחקו גם כן (אין צורך לסנן אותם)
+
+          usersBatch.delete(userDoc.reference);
+          usersDeleted++;
+        }
+
+        if (usersDeleted > 0) {
+          await usersBatch.commit();
+          debugPrint('Successfully deleted $usersDeleted non-admin users from users collection');
+        }
+      } catch (e) {
+        debugPrint('Error cleaning users collection: $e');
+        errors.add('users: $e');
+      }
+
+      // מחיקת כל המשתמשים מ-Firebase Authentication דרך Cloud Function
+      int authDeletedCount = 0;
+      try {
+        debugPrint('Deleting all users from Authentication (except admins)');
+        final currentUser = FirebaseAuth.instance.currentUser;
+        
+        if (currentUser == null) {
+          debugPrint('No current user - cannot call Cloud Function');
+          errors.add('Authentication: No user logged in');
+        } else {
+          debugPrint('Current user: ${currentUser.email}');
+          final functions = FirebaseFunctions.instance;
+          final deleteAllUsersFunction = functions.httpsCallable('deleteAllUsersFromAuth');
+          
+          // הוספת timeout ארוך יותר למחיקה של הרבה משתמשים
+          final result = await deleteAllUsersFunction.call().timeout(
+            const Duration(minutes: 5),
+            onTimeout: () {
+              throw TimeoutException('Cloud Function call timed out after 5 minutes');
+            },
+          );
+          
+          authDeletedCount = result.data['deletedCount'] as int? ?? 0;
+          debugPrint('Successfully deleted $authDeletedCount users from Authentication');
+        }
+      } catch (e) {
+        debugPrint('Error deleting users from Authentication: $e');
+        if (e.toString().contains('UNAUTHENTICATED')) {
+          debugPrint('Authentication error - user may not be logged in or token expired');
+          errors.add('Authentication: User not authenticated. Please log out and log back in.');
+        } else {
+          debugPrint('This might mean the Cloud Function is not deployed yet.');
+          debugPrint('To deploy the Cloud Functions, run: firebase deploy --only functions');
+          errors.add('Authentication: $e');
+        }
+      }
+
+      // מחיקת כל התמונות מ-Firebase Storage
+      try {
+        debugPrint('Deleting all images from Storage');
+        final storage = FirebaseStorage.instance;
+        
+        // מחיקת תמונות משתמשים
+        try {
+          final userImagesRef = storage.ref().child('user_images');
+          final userImagesList = await userImagesRef.listAll();
+          
+          // מחיקת כל הקבצים
+          for (var file in userImagesList.items) {
+            await file.delete();
+          }
+          
+          // מחיקת כל התיקיות (prefixes)
+          for (var prefix in userImagesList.prefixes) {
+            final prefixList = await prefix.listAll();
+            for (var file in prefixList.items) {
+              await file.delete();
+            }
+            // נסיון למחוק את התיקייה עצמה (אם אפשר)
+            try {
+              await prefix.listAll();
+            } catch (e) {
+              // לא ניתן למחוק תיקיות ב-Storage, זה בסדר
+            }
+          }
+          
+          debugPrint('Successfully deleted user images from Storage');
+        } catch (e) {
+          debugPrint('Error deleting user images from Storage: $e');
+        }
+
+        // מחיקת תמונות בקשות
+        try {
+          final requestImagesRef = storage.ref().child('request_images');
+          final requestImagesList = await requestImagesRef.listAll();
+          
+          // מחיקת כל הקבצים
+          for (var file in requestImagesList.items) {
+            await file.delete();
+          }
+          
+          // מחיקת כל התיקיות (prefixes)
+          for (var prefix in requestImagesList.prefixes) {
+            final prefixList = await prefix.listAll();
+            for (var file in prefixList.items) {
+              await file.delete();
+            }
+            // נסיון למחוק את התיקייה עצמה (אם אפשר)
+            try {
+              await prefix.listAll();
+            } catch (e) {
+              // לא ניתן למחוק תיקיות ב-Storage, זה בסדר
+            }
+          }
+          
+          debugPrint('Successfully deleted request images from Storage');
+        } catch (e) {
+          debugPrint('Error deleting request images from Storage: $e');
+        }
+      } catch (e) {
+        debugPrint('Error deleting images from Storage: $e');
+        errors.add('Storage: $e');
+      }
+
+      // סגירת דיאלוג הטעינה
+      if (!context.mounted) return;
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+
+      // הצגת הודעת הצלחה
+      if (!context.mounted) return;
+      if (mounted) {
+        final errorMessage = errors.isNotEmpty 
+            ? '\n\nשגיאות:\n${errors.join('\n')}'
+            : '';
+        
+        final l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              l10n.documentsDeletedSuccessfully(totalDeleted, errorMessage),
+            ),
+            backgroundColor: errors.isNotEmpty ? Colors.orange : Colors.green,
+            duration: const Duration(seconds: 8),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error deleting all collections: $e');
+      
+      // סגירת דיאלוג הטעינה
+      if (!context.mounted) return;
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+
+      if (!context.mounted) return;
+      if (mounted) {
+        final l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.errorDeletingCollections(e.toString())),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    }
+  }
+
   
   // פונקציה לקבלת שם התצוגה של סוג המנוי
   String _getSubscriptionTypeDisplayName(UserProfile userProfile) {
@@ -4037,11 +5940,16 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     // בדיקה לפי סוג המשתמש
     switch (userProfile.userType) {
       case UserType.guest:
-        final daysLeft = userProfile.guestTrialEndDate?.difference(DateTime.now()).inDays ?? 0;
-        if (daysLeft > 0) {
-          return 'אורח ($daysLeft ימים)';
+        // אם זה אורח זמני - הצג רק "אורח" בלי ימים
+        if (userProfile.isTemporaryGuest == true) {
+          return 'אורח';
+        }
+        final timeLeft = userProfile.guestTrialEndDate?.difference(DateTime.now()) ?? Duration.zero;
+        if (timeLeft.inDays > 0) {
+          return 'אורח (${timeLeft.inDays} ימים)';
         } else {
-          return 'אורח (פג תוקף)';
+          // אם הזמן נגמר, עדיין הצג "אורח" - המעבר לפרטי יקרה אוטומטית
+          return 'אורח';
         }
       case UserType.personal:
     if (userProfile.isSubscriptionActive) {
@@ -4064,32 +5972,32 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
   Color _getSubscriptionTypeColor(UserProfile userProfile) {
     // בדיקה אם זה מנהל
     if (_isAdmin == true) {
-      return Colors.purple;
+      return Theme.of(context).colorScheme.tertiary;
     }
     
     // בדיקה לפי סוג המשתמש
     switch (userProfile.userType) {
       case UserType.guest:
-        final daysLeft = userProfile.guestTrialEndDate?.difference(DateTime.now()).inDays ?? 0;
-        if (daysLeft > 0) {
-          return Colors.amber; // צהוב לאורח פעיל
-    } else {
-          return Colors.red; // אדום לאורח שפג תוקף
+        final timeLeft = userProfile.guestTrialEndDate?.difference(DateTime.now()) ?? Duration.zero;
+        if (timeLeft.inDays > 0) {
+          return Theme.of(context).colorScheme.tertiary; // צהוב לאורח פעיל
+        } else {
+          return Colors.amber; // צהוב גם כשהזמן נגמר - המעבר יקרה אוטומטית
         }
       case UserType.personal:
         if (userProfile.isSubscriptionActive) {
-          return Colors.blue; // כחול לפרטי מנוי
+          return Theme.of(context).colorScheme.primary; // כחול לפרטי מנוי
         } else {
-          return Colors.grey; // אפור לפרטי חינם
+          return Theme.of(context).colorScheme.onSurfaceVariant; // אפור לפרטי חינם
         }
       case UserType.business:
         if (userProfile.isSubscriptionActive) {
-          return Colors.green; // ירוק לעסקי מנוי
+          return Theme.of(context).colorScheme.primary; // ירוק לעסקי מנוי
         } else {
-          return Colors.orange; // כתום לעסקי חינם
+          return Theme.of(context).colorScheme.tertiary; // כתום לעסקי חינם
         }
       case UserType.admin:
-        return Colors.purple; // סגול למנהל
+        return Theme.of(context).colorScheme.tertiary; // סגול למנהל
     }
   }
   
@@ -4168,8 +6076,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             
             _buildSubscriptionDetailItem(
               icon: Icons.location_on,
-              title: 'טווח: 0-10 ק"מ',
-              description: 'חשיפה עד 10 קילומטר מהמיקום שלך',
+              title: 'טווח: 0-3 ק"מ',
+              description: 'חשיפה עד 3 קילומטר מהמיקום שלך',
             ),
             const SizedBox(height: 12),
             
@@ -4191,19 +6099,19 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.orange[50],
+                color: Theme.of(context).colorScheme.tertiaryContainer,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange[200]!),
+                border: Border.all(color: Theme.of(context).colorScheme.tertiary),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.info, color: Colors.orange[700], size: 20),
+                  Icon(Icons.info, color: Theme.of(context).colorScheme.tertiary, size: 20),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'המנוי החינם מוגבל - שקול לשדרג לקבלת יותר אפשרויות',
                       style: TextStyle(
-                        color: Colors.orange[700],
+                        color: Theme.of(context).colorScheme.onTertiaryContainer,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -4225,8 +6133,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                     icon: const Icon(Icons.upgrade),
                     label: const Text('שדרג'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.blue[600],
-                      foregroundColor: Colors.white,
+                      backgroundColor: Theme.of(context).colorScheme.primary,
+                      foregroundColor: Theme.of(context).colorScheme.onPrimary,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
                   ),
@@ -4241,8 +6149,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                     icon: const Icon(Icons.work),
                     label: const Text('עסקי'),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.green[600],
-                      side: BorderSide(color: Colors.green[600]!),
+                      foregroundColor: Theme.of(context).colorScheme.primary,
+                      side: BorderSide(color: Theme.of(context).colorScheme.primary),
                       padding: const EdgeInsets.symmetric(vertical: 12),
                     ),
                   ),
@@ -4290,8 +6198,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             
             _buildSubscriptionDetailItem(
               icon: Icons.location_on,
-              title: 'טווח: 0-10 ק"מ + בונוסים',
-              description: 'חשיפה עד 10 קילומטר מהמיקום שלך',
+              title: 'טווח: 0-5 ק"מ + בונוסים',
+              description: 'חשיפה עד 5 קילומטר מהמיקום שלך',
             ),
             const SizedBox(height: 12),
             
@@ -4304,7 +6212,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             
             _buildSubscriptionDetailItem(
               icon: Icons.payment,
-              title: 'תשלום: 10₪ לשנה',
+              title: 'תשלום: 30₪ לשנה',
               description: 'תשלום חד-פעמי לשנה שלמה',
             ),
             const SizedBox(height: 16),
@@ -4313,19 +6221,19 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.blue[50],
+                color: Theme.of(context).colorScheme.primaryContainer,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue[200]!),
+                border: Border.all(color: Theme.of(context).colorScheme.primary),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.check_circle, color: Colors.blue[700], size: 20),
+                  Icon(Icons.check_circle, color: Theme.of(context).colorScheme.primary, size: 20),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'המנוי שלך פעיל עד ${userProfile.subscriptionExpiry != null ? '${userProfile.subscriptionExpiry!.day}/${userProfile.subscriptionExpiry!.month}/${userProfile.subscriptionExpiry!.year}' : 'לא ידוע'}',
                       style: TextStyle(
-                        color: Colors.blue[700],
+                        color: Theme.of(context).colorScheme.onPrimaryContainer,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -4347,8 +6255,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 icon: const Icon(Icons.upgrade),
                 label: const Text('שדרג לעסקי מנוי'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green[600],
-                  foregroundColor: Colors.white,
+                  backgroundColor: Theme.of(context).colorScheme.primary,
+                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
               ),
@@ -4368,6 +6276,45 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
 
   // דיאלוג פירוט מנוי עסקי
   void _showGuestSubscriptionDetailsDialog(UserProfile userProfile) {
+    // אם זה אורח זמני - הצג הודעה שונה
+    if (userProfile.isTemporaryGuest == true) {
+      final l10n = AppLocalizations.of(context);
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('שלום אורח'),
+          content: const Text(
+            'על מנת שתוכל ליצור בקשות ולפנות למבקשי שירות ולעדכן תחומי עיסוק, עליך להירשם.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('סגור'),
+            ),
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(context); // סגירת הדיאלוג הנוכחי
+                await _performLogoutForRegistration();
+              },
+              child: Text(l10n.register),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context); // סגירת הדיאלוג הנוכחי
+                _showSubscriptionTypeDialog(userProfile); // פתיחת דיאלוג בחירת סוג מנוי
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
+              ),
+              child: const Text('שדרג מנוי'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    
     // חישוב ימים נותרים
     final now = DateTime.now();
     final trialEndDate = userProfile.guestTrialEndDate ?? now.add(const Duration(days: 30));
@@ -4377,7 +6324,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('פרטי המנוי האורח שלך'),
-        content: Column(
+        content: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -4430,15 +6378,15 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: daysRemaining > 0 ? Colors.amber[50] : Colors.red[50],
+                color: daysRemaining > 0 ? Theme.of(context).colorScheme.tertiaryContainer : Theme.of(context).colorScheme.errorContainer,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: daysRemaining > 0 ? Colors.amber[200]! : Colors.red[200]!),
+                border: Border.all(color: daysRemaining > 0 ? Theme.of(context).colorScheme.tertiary : Theme.of(context).colorScheme.error),
               ),
               child: Row(
                 children: [
                   Icon(
                     daysRemaining > 0 ? Icons.schedule : Icons.warning,
-                    color: daysRemaining > 0 ? Colors.amber[700] : Colors.red[700],
+                    color: daysRemaining > 0 ? Theme.of(context).colorScheme.tertiary : Theme.of(context).colorScheme.error,
                     size: 20,
                   ),
                   const SizedBox(width: 8),
@@ -4446,9 +6394,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                     child: Text(
                       daysRemaining > 0 
                           ? 'תקופת הניסיון שלך פעילה עוד $daysRemaining ימים'
-                          : 'תקופת הניסיון שלך הסתיימה',
+                          : 'המנוי שלך עבר לסוג "פרטי חינם", שדרג עכשיו למנוי "פרטי מנוי" או "עסקי"',
                       style: TextStyle(
-                        color: daysRemaining > 0 ? Colors.amber[700] : Colors.red[700],
+                        color: daysRemaining > 0 ? Theme.of(context).colorScheme.onTertiaryContainer : Theme.of(context).colorScheme.onErrorContainer,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -4474,7 +6422,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                     child: Text(
                       'אחרי תקופת הניסיון, תעבור אוטומטית למנוי פרטי חינם. תוכל לשדרג בכל עת.',
                       style: TextStyle(
-                        color: Colors.blue[700],
+                        color: Theme.of(context).colorScheme.primary,
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
                       ),
@@ -4484,11 +6432,23 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               ),
             ),
           ],
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('סגור'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context); // סגירת הדיאלוג הנוכחי
+              _showSubscriptionTypeDialog(userProfile); // פתיחת דיאלוג בחירת סוג מנוי
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.primary,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+            ),
+            child: const Text('שדרג מנוי'),
           ),
         ],
       ),
@@ -4500,7 +6460,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('פרטי המנוי העסקי שלך'),
-        content: Column(
+        content: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -4544,7 +6505,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             
             _buildSubscriptionDetailItem(
               icon: Icons.payment,
-              title: 'תשלום: 50₪ לשנה',
+              title: 'תשלום: 70₪ לשנה',
               description: 'תשלום חד-פעמי לשנה שלמה',
             ),
             const SizedBox(height: 16),
@@ -4553,19 +6514,25 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.green[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.green[200]!),
+              color: Theme.of(context).brightness == Brightness.dark 
+                  ? Colors.grey[800]
+                  : Colors.grey[200],
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: Theme.of(context).brightness == Brightness.dark 
+                    ? Colors.grey[700]!
+                    : Colors.grey[400]!,
+              ),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.check_circle, color: Colors.green[700], size: 20),
+                  Icon(Icons.check_circle, color: Theme.of(context).colorScheme.primary, size: 20),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'המנוי שלך פעיל עד ${userProfile.subscriptionExpiry != null ? '${userProfile.subscriptionExpiry!.day}/${userProfile.subscriptionExpiry!.month}/${userProfile.subscriptionExpiry!.year}' : 'לא ידוע'}',
                       style: TextStyle(
-                        color: Colors.green[700],
+                                  color: Theme.of(context).colorScheme.primary,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -4574,6 +6541,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               ),
             ),
           ],
+          ),
         ),
         actions: [
           TextButton(
@@ -4594,7 +6562,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, color: Colors.blue[700], size: 20),
+        Icon(icon, color: Theme.of(context).colorScheme.primary, size: 20),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
@@ -4611,7 +6579,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               Text(
                 description,
                 style: TextStyle(
-                  color: Colors.grey[600],
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                   fontSize: 12,
                 ),
               ),
@@ -4695,46 +6663,28 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('בחירת סוג מנוי'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
             const Text('בחר את סוג המנוי שלך:'),
-            const SizedBox(height: 8),
-            
-            // הודעת הסבר על הגבלות
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.orange[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange[200]!),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.info, color: Colors.orange[700], size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'ניתן לשדרג בלבד: פרטי חינם → פרטי מנוי → עסקי מנוי',
-                      style: TextStyle(
-                        color: Colors.orange[700],
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
             const SizedBox(height: 16),
             
             // פרטי חינם - רק אם המשתמש לא במנוי
             if (!userProfile.isSubscriptionActive) ...[
               _buildSubscriptionOption(
                 title: 'פרטי (חינם)',
-                description: '• 1 בקשה בחודש\n• טווח: 0-10 ק"מ\n• רואה רק בקשות חינם\n• ללא תחומי עיסוק',
+                description: '• 1 בקשה בחודש\n• טווח: 0-3 ק"מ\n• רואה רק בקשות חינם\n• ללא תחומי עיסוק',
                 isSelected: true,
                 onTap: () => _updateSubscriptionType(UserType.personal, false, userProfile: userProfile),
+              ),
+              const SizedBox(height: 8),
+              // חץ למטה
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.arrow_downward, color: Theme.of(context).colorScheme.onSurfaceVariant, size: 24),
+                ],
               ),
               const SizedBox(height: 8),
             ],
@@ -4742,8 +6692,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             // פרטי מנוי - רק אם המשתמש לא עסקי מנוי
             if (!(userProfile.isSubscriptionActive && userProfile.businessCategories != null && userProfile.businessCategories!.isNotEmpty)) ...[
               _buildSubscriptionOption(
-                title: 'פרטי (מנוי) - 10₪/שנה',
-                description: '• 5 בקשות בחודש\n• טווח: 0-10 ק"מ + בונוסים\n• רואה רק בקשות חינם\n• ללא תחומי עיסוק\n• תשלום: 10₪ לשנה',
+                title: 'פרטי (מנוי) - 30₪/שנה',
+                description: '• 5 בקשות בחודש\n• טווח: 0-5 ק"מ\n• רואה רק בקשות חינם\n• ללא תחומי עיסוק\n• תשלום: 30₪ לשנה',
                 isSelected: userProfile.isSubscriptionActive && (userProfile.businessCategories == null || userProfile.businessCategories!.isEmpty),
                 onTap: () {
                   debugPrint('🔍 User selected PERSONAL subscription');
@@ -4751,19 +6701,28 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 },
               ),
               const SizedBox(height: 8),
+              // חץ למטה
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.arrow_downward, color: Theme.of(context).colorScheme.onSurfaceVariant, size: 24),
+                ],
+              ),
+              const SizedBox(height: 8),
             ],
             
             // עסקי מנוי - תמיד זמין
             _buildSubscriptionOption(
-              title: 'עסקי (מנוי) - 50₪/שנה',
-              description: '• 10 בקשות בחודש\n• טווח: 0-50 ק"מ + בונוסים\n• רואה בקשות חינם ובתשלום\n• בחירת עד 2 תחומי עיסוק\n• תשלום: 50₪ לשנה',
+              title: 'עסקי (מנוי) - 70₪/שנה',
+              description: '• 10 בקשות בחודש\n• טווח: 0-8 ק"מ\n• רואה בקשות חינם ובתשלום\n• בחירת תחומי עיסוק\n• תשלום: 70₪ לשנה',
               isSelected: userProfile.isSubscriptionActive && (userProfile.businessCategories != null && userProfile.businessCategories!.isNotEmpty),
               onTap: () {
                 debugPrint('🔍 User selected BUSINESS subscription');
                 _showBusinessCategoriesSelectionDialog(userProfile);
               },
             ),
-          ],
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -4787,10 +6746,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.blue[50] : Colors.grey[50],
+          color: isSelected ? Theme.of(context).colorScheme.primaryContainer : Theme.of(context).colorScheme.surfaceContainer,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: isSelected ? Colors.blue : Colors.grey[300]!,
+            color: isSelected ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.outlineVariant,
             width: isSelected ? 2 : 1,
           ),
         ),
@@ -4801,7 +6760,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               title,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
-                color: isSelected ? Colors.blue[700] : Colors.grey[700],
+                color: isSelected ? Theme.of(context).colorScheme.onPrimaryContainer : Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
             const SizedBox(height: 4),
@@ -4809,7 +6768,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               description,
               style: TextStyle(
                 fontSize: 12,
-                color: isSelected ? Colors.blue[600] : Colors.grey[600],
+                color: isSelected ? Theme.of(context).colorScheme.onPrimaryContainer : Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
           ],
@@ -4845,9 +6804,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       // בדיקה אם יש בקשה ממתינה לאישור
       if (userProfile != null && userProfile.subscriptionStatus == 'pending_approval') {
           if (mounted) {
+            final l10n = AppLocalizations.of(context);
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-              content: Text('יש לך בקשה ממתינה לאישור. לא ניתן לשלוח בקשה נוספת.'),
+              SnackBar(
+                content: Text(l10n.pendingRequestExists),
               backgroundColor: Colors.orange,
               ),
             );
@@ -4879,7 +6839,11 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       
       // אם עוברים למנוי - צריך לשלם (גם פרטי וגם עסקי)
       if (isActive) {
-        // לא סוגרים את הדיאלוג כאן - _showPaymentDialog תטפל בזה
+        // סגירת דיאלוג "בחירת סוג מנוי" אם הוא פתוח
+        if (mounted) {
+          Navigator.pop(context); // סגירת דיאלוג "בחירת סוג מנוי"
+        }
+        // פתיחת דיאלוג התשלום
         if (mounted) {
           await _showPaymentDialog(newType);
         }
@@ -4946,32 +6910,40 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     
     await showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: Text(_isAdmin == true ? 'בחירת תחומי עיסוק - עסקי מנוי (מנהל)' : 'בחירת תחומי עיסוק - עסקי מנוי'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: TwoLevelCategorySelector(
-              selectedCategories: selectedCategories,
-              maxSelections: 2,
-              title: 'בחירת תחומי עיסוק - עסקי מנוי',
-              instruction: 'עליך לבחור תחום ראשי ואז עד 2 תחומי משנה כדי להמשיך לעסקי מנוי:',
-              onSelectionChanged: (categories) {
-                debugPrint('🔍 DEBUG: TwoLevelCategorySelector (admin) onSelectionChanged called');
-                debugPrint('🔍 DEBUG: categories.length = ${categories.length}');
-                setState(() {
-                  selectedCategories = categories;
-                });
+      builder: (context) {
+        final l10n = AppLocalizations.of(context);
+        return StatefulBuilder(
+          builder: (context, setState) => AlertDialog(
+            title: Text(_isAdmin == true ? '${l10n.selectBusinessCategories} - עסקי מנוי (מנהל)' : '${l10n.selectBusinessCategories} - עסקי מנוי'),
+            content: SizedBox(
+              width: double.maxFinite,
+              height: MediaQuery.of(context).size.height * 0.65,
+              child: TwoLevelCategorySelector(
+                selectedCategories: selectedCategories,
+                maxSelections: 999,
+                title: '${l10n.selectBusinessCategories} - עסקי מנוי',
+                instruction: 'בחר תחומי עיסוק כדי להמשיך לעסקי מנוי:',
+                onSelectionChanged: (categories) {
+                  debugPrint('🔍 DEBUG: TwoLevelCategorySelector (admin) onSelectionChanged called');
+                  debugPrint('🔍 DEBUG: categories.length = ${categories.length}');
+                  setState(() {
+                    selectedCategories = categories;
+                  });
+                },
+              ),
+            ),
+          actions: [
+            Builder(
+              builder: (context) {
+                final l10n = AppLocalizations.of(context);
+                return TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(l10n.cancel),
+                );
               },
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('ביטול'),
-            ),
             ElevatedButton(
-              onPressed: selectedCategories.length > 0 
+              onPressed: selectedCategories.isNotEmpty 
                   ? () async {
                       if (mounted) {
                         Navigator.pop(context);
@@ -4979,11 +6951,12 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                       await _updateSubscriptionTypeWithCategories(UserType.business, true, selectedCategories, userProfile);
                     }
                   : null,
-              child: Text(_isAdmin == true ? 'המשך (${selectedCategories.length}/2)' : 'המשך לתשלום (${selectedCategories.length}/2)'),
+              child: Text(_isAdmin == true ? 'המשך (${selectedCategories.length} תחומים)' : 'המשך לתשלום (${selectedCategories.length} תחומים)'),
             ),
           ],
         ),
-      ),
+        );
+      },
     );
   }
 
@@ -5000,6 +6973,38 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       }
       return;
     }
+
+    // בדיקה אם המשתמש הוא אורח זמני
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        
+        if (userDoc.exists) {
+          final userData = userDoc.data()!;
+          final isTemporaryGuest = userData['isTemporaryGuest'] ?? false;
+          
+          if (isTemporaryGuest) {
+            if (mounted) {
+              final l10n = AppLocalizations.of(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(l10n.pleaseRegisterFirst),
+                  backgroundColor: Colors.orange,
+                  duration: const Duration(seconds: 3),
+                ),
+              );
+            }
+            return;
+          }
+        }
+      } catch (e) {
+        debugPrint('Error checking temporary guest status: $e');
+      }
+    }
     
     // התחל עם הקטגוריות הקיימות של המשתמש
     List<RequestCategory> selectedCategories = List.from(_selectedBusinessCategories);
@@ -5009,61 +7014,82 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
-          title: const Text('בחירת תחומי עיסוק'),
+          title: Builder(
+            builder: (context) {
+              final l10n = AppLocalizations.of(context);
+              return Text(l10n.selectBusinessCategories);
+            },
+          ),
           content: SizedBox(
             width: double.maxFinite,
-            child: TwoLevelCategorySelector(
-              selectedCategories: selectedCategories,
-              maxSelections: 2,
-              title: 'בחירת תחומי עיסוק',
-              instruction: 'בחר תחום ראשי ואז עד 2 תחומי משנה:',
-              onSelectionChanged: (categories) {
-                debugPrint('🔍 DEBUG: TwoLevelCategorySelector (business) onSelectionChanged called');
-                debugPrint('🔍 DEBUG: categories.length = ${categories.length}');
-                debugPrint('🔍 DEBUG: categories = ${categories.map((c) => c.name).toList()}');
-                debugPrint('🔍 DEBUG: noPaidServices before = $noPaidServices');
-                debugPrint('🔍 DEBUG: About to call setState...');
-                
-                setState(() {
-                  selectedCategories = categories;
-                  if (categories.isNotEmpty) {
-                    noPaidServices = false; // בטל בחירת "לא נותן שירותים"
-                    debugPrint('🔍 DEBUG: Categories not empty - setting noPaidServices = false');
-                  } else {
-                    // אם נוקו כל התחומים, הגדר כ"לא נותן שירותים"
-                    noPaidServices = true;
-                    debugPrint('🔍 DEBUG: Categories empty - setting noPaidServices = true');
-                  }
-                });
-                
-                debugPrint('🔍 DEBUG: noPaidServices after = $noPaidServices');
-                debugPrint('🔍 DEBUG: selectedCategories.length after = ${selectedCategories.length}');
+            height: MediaQuery.of(context).size.height * 0.65,
+            child: Builder(
+              builder: (context) {
+                final l10n = AppLocalizations.of(context);
+                return TwoLevelCategorySelector(
+                  selectedCategories: selectedCategories,
+                  maxSelections: 999,
+                  title: l10n.selectBusinessCategories,
+                  instruction: 'בחר תחומי עיסוק:',
+                  onSelectionChanged: (categories) {
+                    debugPrint('🔍 DEBUG: TwoLevelCategorySelector (business) onSelectionChanged called');
+                    debugPrint('🔍 DEBUG: categories.length = ${categories.length}');
+                    debugPrint('🔍 DEBUG: categories = ${categories.map((c) => c.name).toList()}');
+                    debugPrint('🔍 DEBUG: noPaidServices before = $noPaidServices');
+                    debugPrint('🔍 DEBUG: About to call setState...');
+                    
+                    setState(() {
+                      selectedCategories = categories;
+                      if (categories.isNotEmpty) {
+                        noPaidServices = false; // בטל בחירת "לא נותן שירותים"
+                        debugPrint('🔍 DEBUG: Categories not empty - setting noPaidServices = false');
+                      } else {
+                        // אם נוקו כל התחומים, הגדר כ"לא נותן שירותים"
+                        noPaidServices = true;
+                        debugPrint('🔍 DEBUG: Categories empty - setting noPaidServices = true');
+                      }
+                    });
+                    
+                    debugPrint('🔍 DEBUG: noPaidServices after = $noPaidServices');
+                    debugPrint('🔍 DEBUG: selectedCategories.length after = ${selectedCategories.length}');
+                  },
+                );
               },
             ),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('ביטול'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                // אם אין תחומי עיסוק נבחרים, הגדר כ"לא נותן שירותים"
-                if (selectedCategories.isEmpty) {
-                  await _updateNoPaidServicesStatus(true);
-                  // עדכון הפרופיל המקומי
-                  setState(() {
-                    _noPaidServices = true;
-                    _selectedBusinessCategories = [];
-                  });
-                } else {
-                  await _updateToBusinessWithCategories(selectedCategories);
-                }
-                if (mounted) {
-                  Navigator.pop(context);
-                }
+            Builder(
+              builder: (context) {
+                final l10n = AppLocalizations.of(context);
+                return TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(l10n.cancel),
+                );
               },
-              child: Text('שמור (${selectedCategories.length}/2)'),
+            ),
+            Builder(
+              builder: (context) {
+                final l10n = AppLocalizations.of(context);
+                return ElevatedButton(
+                  onPressed: () async {
+                    // אם אין תחומי עיסוק נבחרים, הגדר כ"לא נותן שירותים"
+                    if (selectedCategories.isEmpty) {
+                      await _updateNoPaidServicesStatus(true);
+                      // עדכון הפרופיל המקומי
+                      setState(() {
+                        _noPaidServices = true;
+                        _selectedBusinessCategories = [];
+                      });
+                    } else {
+                      await _updateToBusinessWithCategories(selectedCategories);
+                    }
+                    // Guard context usage after async gap
+                    if (!context.mounted) return;
+                      Navigator.pop(context);
+                  },
+                  child: Text('${l10n.save} (${selectedCategories.length} תחומים)'),
+                );
+              },
             ),
           ],
         ),
@@ -5109,8 +7135,269 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     }
   }
 
+  // דיאלוג לעריכת זמינות
+  Future<void> _showAvailabilityDialog(UserProfile userProfile) async {
+    // בדיקה אם המשתמש הוא אורח זמני
+    if (userProfile.isTemporaryGuest == true) {
+      if (mounted) {
+        final l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.pleaseRegisterFirst),
+            backgroundColor: Colors.orange,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+      return;
+    }
+    
+    final l10n = AppLocalizations.of(context);
+    bool availableAllWeek = userProfile.availableAllWeek ?? false;
+    WeekAvailability weekAvailability = userProfile.weekAvailability ?? 
+        WeekAvailability(days: DayOfWeek.values
+            .map((day) => DayAvailability(day: day, isAvailable: false))
+            .toList());
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Text(l10n.editAvailability),
+          content: SizedBox(
+            width: double.maxFinite,
+            height: MediaQuery.of(context).size.height * 0.7,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // צ'קבוקס "זמין כל השבוע"
+                  CheckboxListTile(
+                    value: availableAllWeek,
+                    onChanged: (value) {
+                      setState(() {
+                        availableAllWeek = value ?? false;
+                        if (availableAllWeek) {
+                          // אם בוחרים "זמין כל השבוע", מנקים את הזמינות הספציפית
+                          weekAvailability = WeekAvailability(
+                            days: DayOfWeek.values
+                                .map((day) => DayAvailability(day: day, isAvailable: false))
+                                .toList(),
+                          );
+                        }
+                      });
+                    },
+                    title: Text(
+                      l10n.availableAllWeek,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                  const Divider(),
+                  const SizedBox(height: 8),
+                  Text(
+                    l10n.selectDaysAndHours,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // רשימת ימים
+                  ...weekAvailability.days.map((dayAvailability) {
+                    return Card(
+                      margin: const EdgeInsets.symmetric(vertical: 4),
+                      child: ExpansionTile(
+                        title: Row(
+                          children: [
+                            Checkbox(
+                              value: dayAvailability.isAvailable && !availableAllWeek,
+                              onChanged: availableAllWeek
+                                  ? null
+                                  : (value) {
+                                      setState(() {
+                                        final index = weekAvailability.days
+                                            .indexWhere((d) => d.day == dayAvailability.day);
+                                        if (index != -1) {
+                                          weekAvailability.days[index] = dayAvailability.copyWith(
+                                            isAvailable: value ?? false,
+                                            startTime: value == false ? null : dayAvailability.startTime,
+                                            endTime: value == false ? null : dayAvailability.endTime,
+                                          );
+                                        }
+                                      });
+                                    },
+                            ),
+                            const SizedBox(width: 8),
+                            Text(l10n.getDayName(dayAvailability.day)),
+                          ],
+                        ),
+                        children: [
+                          if (dayAvailability.isAvailable && !availableAllWeek) ...[
+                            Padding(
+                              padding: const EdgeInsets.all(16.0),
+                              child: Column(
+                                children: [
+                                  ListTile(
+                                    title: Text(l10n.startTime),
+                                    trailing: TextButton(
+                                      onPressed: () async {
+                                        final TimeOfDay? picked = await showTimePicker(
+                                          context: context,
+                                          initialTime: dayAvailability.startTime != null
+                                              ? TimeOfDay(
+                                                  hour: int.parse(dayAvailability.startTime!.split(':')[0]),
+                                                  minute: int.parse(dayAvailability.startTime!.split(':')[1]),
+                                                )
+                                              : const TimeOfDay(hour: 9, minute: 0),
+                                        );
+                                        if (picked != null) {
+                                          setState(() {
+                                            final index = weekAvailability.days
+                                                .indexWhere((d) => d.day == dayAvailability.day);
+                                            if (index != -1) {
+                                              final timeStr = '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
+                                              weekAvailability.days[index] = dayAvailability.copyWith(
+                                                startTime: timeStr,
+                                              );
+                                            }
+                                          });
+                                        }
+                                      },
+                                      child: Text(
+                                        dayAvailability.startTime ?? l10n.selectTime,
+                                        style: TextStyle(
+                                          color: dayAvailability.startTime != null
+                                              ? Theme.of(context).colorScheme.primary
+                                              : Colors.grey,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  ListTile(
+                                    title: Text(l10n.endTime),
+                                    trailing: TextButton(
+                                      onPressed: () async {
+                                        final TimeOfDay? picked = await showTimePicker(
+                                          context: context,
+                                          initialTime: dayAvailability.endTime != null
+                                              ? TimeOfDay(
+                                                  hour: int.parse(dayAvailability.endTime!.split(':')[0]),
+                                                  minute: int.parse(dayAvailability.endTime!.split(':')[1]),
+                                                )
+                                              : const TimeOfDay(hour: 17, minute: 0),
+                                        );
+                                        if (picked != null) {
+                                          setState(() {
+                                            final index = weekAvailability.days
+                                                .indexWhere((d) => d.day == dayAvailability.day);
+                                            if (index != -1) {
+                                              final timeStr = '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
+                                              weekAvailability.days[index] = dayAvailability.copyWith(
+                                                endTime: timeStr,
+                                              );
+                                            }
+                                          });
+                                        }
+                                      },
+                                      child: Text(
+                                        dayAvailability.endTime ?? l10n.selectTime,
+                                        style: TextStyle(
+                                          color: dayAvailability.endTime != null
+                                              ? Theme.of(context).colorScheme.primary
+                                              : Colors.grey,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text(l10n.cancel),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                await _updateAvailability(availableAllWeek, weekAvailability);
+                if (!context.mounted) return;
+                Navigator.pop(context);
+              },
+              child: Text(l10n.save),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // עדכון זמינות ב-Firestore
+  Future<void> _updateAvailability(bool availableAllWeek, WeekAvailability weekAvailability) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+
+      final l10n = AppLocalizations.of(context);
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .update({
+        'availableAllWeek': availableAllWeek,
+        'weekAvailability': availableAllWeek ? null : weekAvailability.toFirestore(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.availabilityUpdated),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error updating availability: $e');
+      if (!context.mounted) return;
+      final l10n = AppLocalizations.of(context);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.errorUpdatingAvailability),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   // דיאלוג לבחירת תחומי עיסוק למשתמש אורח
   Future<void> _showGuestCategoriesDialog(UserProfile userProfile) async {
+    // בדיקה אם המשתמש הוא אורח זמני
+    if (userProfile.isTemporaryGuest == true) {
+      if (mounted) {
+        final l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(l10n.pleaseRegisterFirst),
+            backgroundColor: Colors.orange,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+      return;
+    }
     // התחל עם הקטגוריות הקיימות של המשתמש
     List<RequestCategory> selectedCategories = List.from(userProfile.businessCategories ?? []);
     bool noPaidServices = userProfile.noPaidServices ?? false;
@@ -5122,83 +7409,91 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     
     await showDialog(
       context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: const Text('הגדר תחומי עיסוק'),
-          content: SizedBox(
-            width: double.maxFinite,
-            height: MediaQuery.of(context).size.height * 0.7, // הגבל גובה
-            child: SingleChildScrollView( // הוסף גלילה
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                // אפשרות לא נותן שירותים בתשלום
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.blue[50],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.blue[200]!),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      CheckboxListTile(
-                        value: noPaidServices,
-                        onChanged: (value) {
-                          debugPrint('🔍 DEBUG: Checkbox changed!');
-                          debugPrint('🔍 DEBUG: value = $value');
-                          debugPrint('🔍 DEBUG: noPaidServices before = $noPaidServices');
-                          debugPrint('🔍 DEBUG: selectedCategories.length before = ${selectedCategories.length}');
-                          
-                          setState(() {
-                            noPaidServices = value ?? false;
-                            if (noPaidServices) {
-                              selectedCategories.clear(); // נקה בחירת תחומים
-                              debugPrint('🔍 DEBUG: Checkbox checked - clearing selectedCategories');
-                            }
-                          });
-                          
-                          debugPrint('🔍 DEBUG: noPaidServices after = $noPaidServices');
-                          debugPrint('🔍 DEBUG: selectedCategories.length after = ${selectedCategories.length}');
-                        },
-                        title: const Text(
-                          'אני לא נותן שירות כלשהו תמורת תשלום',
-                          style: TextStyle(fontWeight: FontWeight.w600),
+      builder: (context) {
+        final l10n = AppLocalizations.of(context);
+        return StatefulBuilder(
+          builder: (context, setState) => AlertDialog(
+            title: const Text('הגדר תחומי עיסוק'),
+            content: SizedBox(
+              width: double.maxFinite,
+              height: MediaQuery.of(context).size.height * 0.7, // הגבל גובה
+              child: SingleChildScrollView( // הוסף גלילה
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                  // אפשרות לא נותן שירותים בתשלום
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                            color: Theme.of(context).brightness == Brightness.dark 
+                                ? Colors.grey[800]
+                                : Colors.grey[200],
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: Theme.of(context).brightness == Brightness.dark 
+                                  ? Colors.grey[700]!
+                                  : Colors.grey[400]!,
+                            ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        CheckboxListTile(
+                          value: noPaidServices,
+                          onChanged: (value) {
+                            debugPrint('🔍 DEBUG: Checkbox changed!');
+                            debugPrint('🔍 DEBUG: value = $value');
+                            debugPrint('🔍 DEBUG: noPaidServices before = $noPaidServices');
+                            debugPrint('🔍 DEBUG: selectedCategories.length before = ${selectedCategories.length}');
+                            
+                            setState(() {
+                              noPaidServices = value ?? false;
+                              if (noPaidServices) {
+                                selectedCategories.clear(); // נקה בחירת תחומים
+                                debugPrint('🔍 DEBUG: Checkbox checked - clearing selectedCategories');
+                              }
+                            });
+                            
+                            debugPrint('🔍 DEBUG: noPaidServices after = $noPaidServices');
+                            debugPrint('🔍 DEBUG: selectedCategories.length after = ${selectedCategories.length}');
+                          },
+                          title: const Text(
+                            'אני לא נותן שירות כלשהו תמורת תשלום',
+                            style: TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          controlAffinity: ListTileControlAffinity.leading,
+                          contentPadding: EdgeInsets.zero,
                         ),
-                        controlAffinity: ListTileControlAffinity.leading,
-                        contentPadding: EdgeInsets.zero,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'אם תסמן אפשרות זו, תוכל לראות רק בקשות חינמיות במסך הבקשות.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.blue[700],
-                          fontStyle: FontStyle.italic,
+                        const SizedBox(height: 8),
+                        Text(
+                          'אם תסמן אפשרות זו, תוכל לראות רק בקשות חינמיות במסך הבקשות.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Theme.of(context).colorScheme.primary,
+                            fontStyle: FontStyle.italic,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                ),
-                
-                const SizedBox(height: 16),
-                
-                // בחירת תחומי עיסוק (רק אם לא בחר "לא נותן שירותים")
-                if (!noPaidServices) ...[
-                  const Text(
-                    'או בחר תחומי עיסוק:',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  TwoLevelCategorySelector(
-                    selectedCategories: selectedCategories,
-                    maxSelections: 2,
-                    title: 'בחירת תחומי עיסוק',
-                    instruction: 'בחר תחום ראשי ואז עד 2 תחומי משנה כדי לקבל בקשות רלוונטיות:',
+                  
+                  const SizedBox(height: 16),
+                  
+                  // בחירת תחומי עיסוק (רק אם לא בחר "לא נותן שירותים")
+                  if (!noPaidServices) ...[
+                    const Text(
+                      'או בחר תחומי עיסוק:',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TwoLevelCategorySelector(
+                      selectedCategories: selectedCategories,
+                      maxSelections: 999,
+                      title: l10n.selectBusinessCategories,
+                      instruction: 'בחר תחומי עיסוק כדי לקבל בקשות רלוונטיות:',
                     onSelectionChanged: (categories) {
                       debugPrint('🔍 DEBUG: onSelectionChanged called');
                       debugPrint('🔍 DEBUG: categories.length = ${categories.length}');
@@ -5226,35 +7521,46 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               ],
             ),
           ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('ביטול'),
             ),
-            ElevatedButton(
-              onPressed: () async {
-                debugPrint('🔍 DEBUG: Save button pressed!');
-                debugPrint('🔍 DEBUG: selectedCategories.length = ${selectedCategories.length}');
-                debugPrint('🔍 DEBUG: selectedCategories = ${selectedCategories.map((c) => c.name).toList()}');
-                debugPrint('🔍 DEBUG: noPaidServices = $noPaidServices');
-                
-                // אם אין תחומי עיסוק נבחרים, הגדר כ"לא נותן שירותים"
-                final finalNoPaidServices = selectedCategories.isEmpty ? true : noPaidServices;
-                debugPrint('🔍 DEBUG: finalNoPaidServices = $finalNoPaidServices');
-                
-                await _updateGuestCategories(selectedCategories, finalNoPaidServices);
-                if (mounted) {
-                  Navigator.pop(context);
-                }
+          actions: [
+            Builder(
+              builder: (context) {
+                final l10n = AppLocalizations.of(context);
+                return TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text(l10n.cancel),
+                );
               },
-              child: Text(selectedCategories.isEmpty 
-                  ? 'שמור (לא נותן שירותים)' 
-                  : 'שמור (${selectedCategories.length}/2)'),
+            ),
+            Builder(
+              builder: (context) {
+                final l10n = AppLocalizations.of(context);
+                return ElevatedButton(
+                  onPressed: () async {
+                    debugPrint('🔍 DEBUG: Save button pressed!');
+                    debugPrint('🔍 DEBUG: selectedCategories.length = ${selectedCategories.length}');
+                    debugPrint('🔍 DEBUG: selectedCategories = ${selectedCategories.map((c) => c.name).toList()}');
+                    debugPrint('🔍 DEBUG: noPaidServices = $noPaidServices');
+                    
+                    // אם אין תחומי עיסוק נבחרים, הגדר כ"לא נותן שירותים"
+                    final finalNoPaidServices = selectedCategories.isEmpty ? true : noPaidServices;
+                    debugPrint('🔍 DEBUG: finalNoPaidServices = $finalNoPaidServices');
+                    
+                    await _updateGuestCategories(selectedCategories, finalNoPaidServices);
+                    // Guard context usage after async gap
+                    if (!context.mounted) return;
+                      Navigator.pop(context);
+                  },
+                  child: Text(selectedCategories.isEmpty 
+                      ? '${l10n.save} (לא נותן שירותים)' 
+                      : '${l10n.save} (${selectedCategories.length} תחומים)'),
+                );
+              },
             ),
           ],
         ),
-      ),
+        );
+      },
     );
   }
 
@@ -5272,7 +7578,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
           .collection('users')
           .doc(user.uid)
           .update({
-        'businessCategories': noPaidServices ? [] : categories.map((c) => c.name).toList(),
+        'businessCategories': noPaidServices ? [] : categories.map((c) => c.categoryDisplayName).toList(),
         'noPaidServices': noPaidServices,
         'updatedAt': FieldValue.serverTimestamp(),
       });
@@ -5281,7 +7587,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       if (mounted) {
         String message = noPaidServices 
             ? 'הגדרת שלא אתה נותן שירותים בתשלום'
-            : 'תחומי העיסוק עודכנו בהצלחה! (${categories.length}/2)';
+            : 'תחומי העיסוק עודכנו בהצלחה! (${categories.length} תחומים)';
             
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -5377,32 +7683,44 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         return;
       }
 
-      // עדכון הפרופיל
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .update({
-        'isSubscriptionActive': isActive,
-        'subscriptionStatus': isActive ? 'active' : 'private_free',
-        'businessCategories': newType == UserType.business ? categories.map((c) => c.categoryDisplayName).toList() : null,
-      });
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('עודכן ל${newType == UserType.business ? 'עסקי מנוי' : 'פרטי מנוי'} בהצלחה'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-
-      // אם זה מנוי פעיל - הצג דיאלוג תשלום
+      // אם זה מנוי פעיל - הצג דיאלוג תשלום (בלי לעדכן את הפרופיל לפני התשלום)
       if (isActive) {
+        // שמירת הקטגוריות זמנית ב-SharedPreferences כדי להשתמש בהן אחרי התשלום
+        if (newType == UserType.business && categories.isNotEmpty) {
+          final prefs = await SharedPreferences.getInstance();
+          final categoriesJson = categories.map((c) => c.categoryDisplayName).toList();
+          await prefs.setStringList('pending_business_categories_${user.uid}', categoriesJson);
+          debugPrint('💾 Saved pending business categories: $categoriesJson');
+        }
+        
+        // סגירת דיאלוג "בחירת סוג מנוי" אם הוא עדיין פתוח
+        if (mounted) {
+          Navigator.pop(context); // סגירת דיאלוג "בחירת סוג מנוי"
+        }
         // המתנה קצרה כדי שהדיאלוג ייסגר
         await Future.delayed(const Duration(milliseconds: 100));
         // בדיקה אם ה-widget עדיין פעיל
         if (mounted) {
           await _showPaymentDialog(newType, categories);
+        }
+      } else {
+        // אם זה לא מנוי פעיל - עדכן את הפרופיל ישירות
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .update({
+          'isSubscriptionActive': isActive,
+          'subscriptionStatus': isActive ? 'active' : 'private_free',
+          'businessCategories': newType == UserType.business ? categories.map((c) => c.categoryDisplayName).toList() : null,
+        });
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('עודכן ל${newType == UserType.business ? 'עסקי מנוי' : 'פרטי מנוי'} בהצלחה'),
+              backgroundColor: Colors.green,
+            ),
+          );
         }
       }
     } catch (e) {
@@ -5431,7 +7749,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         'isSubscriptionActive': true,
         'subscriptionStatus': 'active',
         'requestedSubscriptionType': 'business',
-        'businessCategories': categories.map((c) => c.name).toList(),
+        'businessCategories': categories.map((c) => c.categoryDisplayName).toList(),
       });
       
       if (mounted) {
@@ -5461,8 +7779,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
   }
   
   // דיאלוג תשלום למנוי
-  /// פתיחת תשלום BIT דרך PayMe API
-  Future<void> _openPayMeBitPayment(UserType subscriptionType, int price) async {
+  /// פתיחת תשלום דרך PayMe API (multi-payment - משתמש בוחר Bit או כרטיס אשראי)
+  Future<void> _openPayMePayment(UserType subscriptionType, int price, [BuildContext? dialogContext, List<RequestCategory>? categories]) async {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) {
@@ -5477,124 +7795,39 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         return;
       }
 
-      final typeName = subscriptionType == UserType.personal ? 'פרטי' : 'עסקי';
-      final subscriptionTypeString = subscriptionType == UserType.personal ? 'personal' : 'business';
-      
-      debugPrint('🔗 Creating PayMe BIT payment for $typeName subscription, price: $price');
-      
-      // הצגת אינדיקטור טעינה
-      if (mounted) {
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => const Center(
-            child: CircularProgressIndicator(),
-          ),
-        );
-      }
-
-      // קבלת פרטי המשתמש
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      
-      final userName = userDoc.exists 
-          ? (userDoc.data()!['displayName'] ?? userDoc.data()!['name'] ?? user.email ?? 'משתמש')
-          : (user.email ?? 'משתמש');
-
-      // יצירת התשלום דרך PayMe API
-      final response = await PayMeService.createBitPayment(
-        subscriptionType: subscriptionTypeString,
-        userId: user.uid,
-        userEmail: user.email ?? '',
-        userName: userName,
-      );
-
-      // סגירת אינדיקטור הטעינה
-      if (mounted) {
-        Navigator.pop(context);
-      }
-
-      if (response.success && response.paymentUrl != null) {
-        debugPrint('✅ PayMe BIT payment created successfully: ${response.paymentId}');
+      // בדיקה אם המשתמש הוא אורח זמני
+      try {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
         
-        // פתיחת דף התשלום BIT
-        final uri = Uri.parse(response.paymentUrl!);
-          final result = await launchUrl(
-            uri, 
-            mode: LaunchMode.externalApplication,
-          );
+        if (userDoc.exists) {
+          final userData = userDoc.data()!;
+          final isTemporaryGuest = userData['isTemporaryGuest'] ?? false;
           
-          if (result) {
-        if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('פתחתי את דף התשלום BIT עבור ₪$price'),
-                backgroundColor: Colors.green,
-                action: SnackBarAction(
-                  label: 'בדוק סטטוס',
-                  onPressed: () => _checkPayMePaymentStatus(response.paymentId!),
+          if (isTemporaryGuest) {
+            if (mounted) {
+              final l10n = AppLocalizations.of(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(l10n.pleaseRegisterFirst),
+                  backgroundColor: Colors.orange,
+                  duration: const Duration(seconds: 3),
                 ),
-              ),
-            );
-          }
-        } else {
-          debugPrint('❌ Failed to open PayMe BIT payment URL');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('שגיאה בפתיחת דף התשלום BIT'),
-                backgroundColor: Colors.red,
-              ),
-            );
+              );
+            }
+            return;
           }
         }
-      } else {
-        debugPrint('❌ PayMe BIT payment creation failed: ${response.message}');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('שגיאה ביצירת תשלום BIT: ${response.message}'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint('❌ Error in PayMe BIT payment: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('שגיאה בתשלום BIT: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-
-  /// פתיחת תשלום דרך PayMe API (כרטיס אשראי)
-  Future<void> _openPayMeCreditCardPayment(UserType subscriptionType, int price) async {
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('שגיאה: משתמש לא מחובר'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-        return;
+      } catch (e) {
+        debugPrint('Error checking temporary guest status: $e');
       }
 
       final typeName = subscriptionType == UserType.personal ? 'פרטי' : 'עסקי';
       final subscriptionTypeString = subscriptionType == UserType.personal ? 'personal' : 'business';
       
-      debugPrint('💳 Creating PayMe Credit Card payment for $typeName subscription, price: $price');
+      debugPrint('💳 Creating PayMe payment for $typeName subscription, price: ₪$price');
       
       // הצגת אינדיקטור טעינה
       if (mounted) {
@@ -5607,55 +7840,38 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         );
       }
 
-      // קבלת פרטי המשתמש
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      
-      final userName = userDoc.exists 
-          ? (userDoc.data()!['displayName'] ?? userDoc.data()!['name'] ?? user.email ?? 'משתמש')
-          : (user.email ?? 'משתמש');
-
-      // יצירת התשלום דרך PayMe API
-      final response = await PayMeService.createCreditCardPayment(
-        subscriptionType: subscriptionTypeString,
-        userId: user.uid,
-        userEmail: user.email ?? '',
-        userName: userName,
-      );
-
-      // סגירת אינדיקטור הטעינה
-      if (mounted) {
-        Navigator.pop(context);
-      }
-
-      if (response.success && response.paymentUrl != null) {
-        debugPrint('✅ Payment created successfully: ${response.paymentId}');
-        
-        // פתיחת דף התשלום
-        final uri = Uri.parse(response.paymentUrl!);
-        final result = await launchUrl(
-          uri, 
-          mode: LaunchMode.externalApplication,
+      try {
+        // יצירת תשלום דרך PayMe API (multi-payment - משתמש בוחר Bit או כרטיס אשראי)
+        final result = await PayMePaymentService.createSubscriptionPayment(
+          subscriptionType: subscriptionTypeString,
+          businessCategories: categories != null ? categories.map((c) => c.categoryDisplayName).toList() : null,
         );
-        
-        if (result) {
-          if (mounted) {
+
+        // סגירת אינדיקטור הטעינה
+        if (mounted) {
+          Navigator.pop(context);
+        }
+
+        if (result.success && result.saleUrl != null) {
+          debugPrint('✅ PayMe payment created successfully: ${result.transactionId}');
+          
+          // סגירת הדיאלוג (אם יש)
+          if (dialogContext != null && mounted) {
+            Navigator.pop(dialogContext);
+          }
+          
+          // פתיחת דף התשלום (multi-payment - משתמש בוחר Bit או כרטיס אשראי)
+          final opened = await PayMePaymentService.openCheckout(result.saleUrl!);
+          
+          if (opened && mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('פתחתי את דף התשלום עבור ₪$price'),
+                content: Text('פתחתי את דף התשלום PayMe עבור ₪$price\nתוכל לבחור Bit או כרטיס אשראי'),
                 backgroundColor: Colors.green,
-                action: SnackBarAction(
-                  label: 'בדוק סטטוס',
-                  onPressed: () => _checkPayMePaymentStatus(response.paymentId!),
-                ),
+                duration: const Duration(seconds: 4),
               ),
             );
-          }
-        } else {
-          debugPrint('❌ Failed to open payment URL');
-          if (mounted) {
+          } else if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
                 content: Text('שגיאה בפתיחת דף התשלום'),
@@ -5663,121 +7879,50 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               ),
             );
           }
+        } else {
+          debugPrint('❌ PayMe payment creation failed: ${result.error}');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('שגיאה ביצירת תשלום: ${result.error ?? "שגיאה לא ידועה"}'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
         }
-      } else {
-        debugPrint('❌ Payment creation failed: ${response.message}');
+      } catch (e) {
+        debugPrint('❌ Error in PayMe payment: $e');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('שגיאה ביצירת התשלום: ${response.message}'),
+              content: Text('שגיאה בתשלום: $e'),
               backgroundColor: Colors.red,
             ),
           );
         }
       }
     } catch (e) {
-      debugPrint('❌ Error in Paid.co.il payment: $e');
+      debugPrint('❌ Error in PayMe payment: $e');
       if (mounted) {
-        // סגירת אינדיקטור הטעינה אם הוא פתוח
-        Navigator.pop(context);
-        
+        Navigator.pop(context); // Close loading dialog if still open
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('שגיאה לא צפויה: $e'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
-    }
-  }
-
-  /// בדיקת סטטוס תשלום PayMe
-  Future<void> _checkPayMePaymentStatus(String paymentId) async {
-    try {
-      debugPrint('🔍 Checking PayMe payment status: $paymentId');
-      
-      // הצגת אינדיקטור טעינה
-      if (mounted) {
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => const Center(
-            child: CircularProgressIndicator(),
-          ),
-        );
-      }
-
-      final status = await PayMeService.checkPaymentStatus(paymentId);
-      
-      // סגירת אינדיקטור הטעינה
-      if (mounted) {
-        Navigator.pop(context);
-      }
-
-      if (status.success) {
-        String statusText = '';
-        Color statusColor = Colors.blue;
-        
-        switch (status.status) {
-          case 'pending':
-            statusText = 'התשלום ממתין לאישור';
-            statusColor = Colors.orange;
-            break;
-          case 'completed':
-          case 'paid':
-            statusText = 'התשלום אושר! המנוי הופעל';
-            statusColor = Colors.green;
-            break;
-          case 'failed':
-          case 'cancelled':
-            statusText = 'התשלום נכשל או בוטל';
-            statusColor = Colors.red;
-            break;
-          default:
-            statusText = 'סטטוס: ${status.status}';
-        }
-
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(statusText),
-              backgroundColor: statusColor,
-              duration: const Duration(seconds: 4),
-            ),
-          );
-        }
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('שגיאה בבדיקת סטטוס: ${status.message}'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint('❌ Error checking PayMe payment status: $e');
-      if (mounted) {
-        Navigator.pop(context); // סגירת אינדיקטור הטעינה
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('שגיאה בבדיקת סטטוס: $e'),
+            content: Text('שגיאה בתשלום: $e'),
             backgroundColor: Colors.red,
           ),
         );
       }
     }
   }
+
 
 
   Future<void> _showPaymentDialog(UserType subscriptionType, [List<RequestCategory>? categories]) async {
-    print('💰 _showPaymentDialog called with: $subscriptionType');
+    debugPrint('💰 _showPaymentDialog called with: $subscriptionType');
     
     // מנהל לא צריך להעלות הוכחת תשלום
     if (_isAdmin == true) {
-      print('❌ Admin user, skipping payment dialog');
+      debugPrint('❌ Admin user, skipping payment dialog');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -5789,10 +7934,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       return;
     }
 
-    final price = subscriptionType == UserType.personal ? 10 : 50;
+    final price = subscriptionType == UserType.personal ? 30 : 70;
     final typeName = subscriptionType == UserType.personal ? 'פרטי' : 'עסקי';
     
-    print('💰 Opening payment dialog for $typeName subscription, price: $price');
+    debugPrint('💰 Opening payment dialog for $typeName subscription, price: $price');
     
     await showDialog(
       context: context,
@@ -5805,17 +7950,18 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.blue[50],
+                color: Theme.of(context).colorScheme.primaryContainer,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue[200]!),
+                border: Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.3)),
               ),
               child: Column(
                 children: [
                   Text(
                     'מנוי $typeName',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.onPrimaryContainer,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -5824,7 +7970,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                     style: TextStyle(
                       fontSize: 24,
                       fontWeight: FontWeight.bold,
-                      color: Colors.blue[700],
+                      color: Theme.of(context).colorScheme.onPrimaryContainer,
                     ),
                   ),
                   if (categories != null && categories.isNotEmpty) ...[
@@ -5833,7 +7979,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                       'תחומי עיסוק: ${categories.map((c) => c.categoryDisplayName).join(', ')}',
                       style: TextStyle(
                         fontSize: 14,
-                        color: Colors.blue[600],
+                        color: Theme.of(context).colorScheme.onPrimaryContainer,
                       ),
                       textAlign: TextAlign.center,
                     ),
@@ -5845,7 +7991,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.amber[50],
+                color: Theme.of(context).colorScheme.tertiaryContainer,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: Colors.amber[200]!),
               ),
@@ -5853,13 +7999,21 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.info_outline, color: Colors.amber[700], size: 20),
+                      Icon(
+                        Icons.info_outline, 
+                        color: Theme.of(context).brightness == Brightness.dark 
+                            ? Theme.of(context).colorScheme.onTertiaryContainer
+                            : Theme.of(context).colorScheme.onSurface, 
+                        size: 20,
+                      ),
                       const SizedBox(width: 8),
                       Text(
                         'איך לשלם:',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          color: Colors.amber[700],
+                          color: Theme.of(context).brightness == Brightness.dark 
+                              ? Theme.of(context).colorScheme.onTertiaryContainer
+                              : Theme.of(context).colorScheme.onSurface,
                         ),
                       ),
                     ],
@@ -5868,29 +8022,43 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                   Text(
                     '1. בחר דרך תשלום: BIT (PayMe) או כרטיס אשראי (PayMe)\n'
                     '2. השלם את הסכום (₪$price) - המנוי יופעל אוטומטית\n'
-                    '3. אם יש בעיה, השתמש בכפתור "העלה הוכחת תשלום"',
-                    style: const TextStyle(fontSize: 13),
+                    '3. אם יש בעיה, פנה לתמיכה',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Theme.of(context).colorScheme.onTertiaryContainer
+                          : Theme.of(context).colorScheme.onSurface,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: Colors.amber[50],
+                      color: Theme.of(context).colorScheme.tertiaryContainer,
                       borderRadius: BorderRadius.circular(6),
                       border: Border.all(color: Colors.amber[200]!),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.warning, color: Colors.amber[700], size: 16),
+                        Icon(
+                          Icons.warning, 
+                          color: Theme.of(context).brightness == Brightness.dark 
+                              ? Theme.of(context).colorScheme.onTertiaryContainer
+                              : Theme.of(context).colorScheme.onSurface, 
+                          size: 16,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             'BIT (PayMe): יפתח דף תשלום מאובטח של PayMe\n'
                             'כרטיס אשראי (PayMe): יפתח דף תשלום מאובטח של PayMe\n'
-                            'המנוי יופעל אוטומטית לאחר התשלום - אין צורך בהעלאת הוכחה',
+                            'המנוי יופעל אוטומטית לאחר התשלום',
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.amber[700],
+                              color: Theme.of(context).brightness == Brightness.dark 
+                                  ? Theme.of(context).colorScheme.onTertiaryContainer
+                                  : Theme.of(context).colorScheme.onSurface,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -5903,59 +8071,34 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             ),
             const SizedBox(height: 16),
             
-            // כפתור PayMe BIT
+            // כפתור PayMe (multi-payment - משתמש בוחר Bit או כרטיס אשראי)
             Container(
               width: double.infinity,
               margin: const EdgeInsets.only(bottom: 8),
               child: ElevatedButton.icon(
                 onPressed: () async {
-                  await _openPayMeBitPayment(subscriptionType, price);
+                  await _openPayMePayment(subscriptionType, price, context, categories);
                 },
                 icon: const Icon(Icons.payment, color: Colors.white),
-                label: const Text('שלם ב-BIT (PayMe)'),
+                label: const Text('שלם דרך PayMe (Bit או כרטיס אשראי)'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue[700],
-                  foregroundColor: Colors.white,
+                  backgroundColor: Theme.of(context).colorScheme.primary,
+                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
               ),
             ),
-            
-            // כפתור PayMe כרטיס אשראי
+            // כפתור תשלום במזומן
             Container(
               width: double.infinity,
               margin: const EdgeInsets.only(bottom: 8),
               child: ElevatedButton.icon(
                 onPressed: () async {
-                  await _openPayMeCreditCardPayment(subscriptionType, price);
+                  Navigator.pop(context); // סגירת דיאלוג התשלום הנוכחי
+                  await _showCashPaymentDialog(subscriptionType, price, categories);
                 },
-                icon: const Icon(Icons.credit_card, color: Colors.white),
-                label: const Text('שלם בכרטיס אשראי (PayMe)'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green[700],
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-              ),
-            ),
-            
-            
-            // כפתור העלאת הוכחת תשלום
-            Container(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () async {
-                  print('🖼️ Payment button pressed for $subscriptionType, price: $price');
-                  // הסרנו את סגירת הדיאלוג מכאן - _processPayment תטפל בזה
-                  if (mounted) {
-                    print('🖼️ Widget still mounted, calling _processPayment...');
-                    await _processPayment(subscriptionType, price);
-                  } else {
-                    print('❌ Widget not mounted, skipping _processPayment');
-                  }
-                },
-                icon: const Icon(Icons.upload),
-                label: const Text('העלה הוכחת תשלום'),
+                icon: const Icon(Icons.money, color: Colors.white),
+                label: Text(AppLocalizations.of(context).payCash),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.green,
                   foregroundColor: Colors.white,
@@ -5975,62 +8118,215 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       ),
     );
   }
-  
-  // עיבוד התשלום
-  Future<void> _processPayment(UserType subscriptionType, int price) async {
-    print('💰 _processPayment called with: $subscriptionType, $price');
-    try {
-      // בדיקה אם ה-widget עדיין פעיל
-      if (!mounted) {
-        print('❌ Widget not mounted, returning');
-        return;
-      }
-      
-      // פתיחת מסך העלאת הוכחת תשלום
-      if (!mounted) {
-        print('❌ Widget not mounted before Navigator.push, returning');
-        return; // בדיקה נוספת לפני Navigator.push
-      }
-      
-      print('🚀 Opening ManualPaymentScreen...');
-      final result = await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ManualPaymentScreen(
-            subscriptionType: subscriptionType.name,
-            amount: price,
-            onPaymentSuccess: () {
-              // הפונקציה submitSubscriptionRequest כבר מטפלת בשליחת הבקשה למנהל
-              // אין צורך בקריאה נוספת
-            },
+
+  /// דיאלוג תשלום במזומן
+  Future<void> _showCashPaymentDialog(UserType subscriptionType, int price, [List<RequestCategory>? categories]) async {
+    final l10n = AppLocalizations.of(context);
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    // קבלת פרטי המשתמש
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
+    
+    if (!userDoc.exists) return;
+    
+    final userData = userDoc.data()!;
+    final userName = userData['displayName'] ?? userData['name'] ?? user.email ?? 'משתמש';
+    final userEmail = user.email ?? '';
+    final userPhone = userData['phoneNumber'] as String? ?? '';
+    
+    final typeName = subscriptionType == UserType.personal ? 'פרטי' : 'עסקי';
+    final subscriptionTypeString = subscriptionType == UserType.personal ? 'personal' : 'business';
+    
+    final TextEditingController phoneController = TextEditingController();
+    if (userPhone.isNotEmpty) {
+      phoneController.text = userPhone;
+    }
+    String? phoneError;
+    final bool hasPhone = userPhone.isNotEmpty;
+    
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Text(l10n.cashPayment),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // שם המשתמש
+                TextField(
+                  enabled: false,
+                  controller: TextEditingController(text: userName),
+                  decoration: InputDecoration(
+                    labelText: 'שם',
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // מייל המשתמש
+                TextField(
+                  enabled: false,
+                  controller: TextEditingController(text: userEmail),
+                  decoration: InputDecoration(
+                    labelText: 'מייל',
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // שדה טלפון
+                TextField(
+                  enabled: !hasPhone, // אם יש טלפון - לא ניתן לעריכה
+                  controller: phoneController,
+                  decoration: InputDecoration(
+                    labelText: 'טלפון${hasPhone ? '' : ' *'}',
+                    hintText: hasPhone ? '' : 'הזן מספר טלפון',
+                    border: const OutlineInputBorder(),
+                    errorText: phoneError,
+                  ),
+                  keyboardType: TextInputType.phone,
+                  onChanged: (value) {
+                    if (phoneError != null) {
+                      setState(() {
+                        phoneError = null;
+                      });
+                    }
+                  },
+                ),
+                const SizedBox(height: 16),
+                // פרטי המנוי
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'פרטי המנוי:',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'סוג מנוי: $typeName',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                      Text(
+                        'מחיר: ₪$price',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('ביטול'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final phoneValue = phoneController.text.trim();
+                
+                // ולידציה של טלפון
+                if (phoneValue.isEmpty) {
+                  setState(() {
+                    phoneError = 'טלפון הוא שדה חובה';
+                  });
+                  return;
+                }
+                
+                // ולידציה של טלפון ישראלי (רק אם אין טלפון שמור)
+                if (!hasPhone) {
+                  final validationError = _validateIsraeliPhoneNumber(phoneValue, context);
+                  if (validationError != null) {
+                    setState(() {
+                      phoneError = validationError;
+                    });
+                    return;
+                  }
+                }
+                
+                // שליחת בקשת התשלום
+                final success = await _submitCashPaymentRequest(
+                  userId: user.uid,
+                  userEmail: userEmail,
+                  userName: userName,
+                  phone: phoneValue,
+                  subscriptionType: subscriptionTypeString,
+                  amount: price.toDouble(),
+                  businessCategories: categories != null ? categories.map((c) => c.categoryDisplayName).toList() : null,
+                );
+                
+                if (!mounted) return;
+                
+                if (success) {
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(l10n.paymentRequestSentSuccessfully),
+                      backgroundColor: Colors.green,
+                      duration: const Duration(seconds: 4),
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(l10n.errorSendingPaymentRequest),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              },
+              child: Text(l10n.sendPaymentRequest),
+            ),
+          ],
         ),
+      ),
+    );
+  }
+
+  /// שליחת בקשת תשלום במזומן
+  Future<bool> _submitCashPaymentRequest({
+    required String userId,
+    required String userEmail,
+    required String userName,
+    required String phone,
+    required String subscriptionType,
+    required double amount,
+    List<String>? businessCategories,
+  }) async {
+    try {
+      return await ManualPaymentService.submitCashPaymentRequest(
+        userId: userId,
+        userEmail: userEmail,
+        userName: userName,
+        phone: phone,
+        subscriptionType: subscriptionType,
+        amount: amount,
+        businessCategories: businessCategories,
       );
-      
-      print('🔙 Navigator.push completed with result: $result');
-      
-      // סגירת הדיאלוג אחרי ש-ManualPaymentScreen נסגרת
-      if (mounted) {
-        Navigator.pop(context);
-      }
-      
-      // הסרנו את ה-SnackBar כי הדיאלוג האישור כבר מוצג ב-ManualPaymentScreen
     } catch (e) {
-      // הדפסה ללא context קודם
-      print('Error processing payment: $e');
-      
-      // בדיקה אם ה-widget עדיין פעיל לפני פעולות UI
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('שגיאה בעיבוד התשלום: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      debugPrint('Error submitting cash payment request: $e');
+      return false;
     }
   }
-  
 
   // ולידציה של שם תצוגה
   String? _validateDisplayName(String? name) {
@@ -6050,7 +8346,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
   }
 
   // ולידציה של מספר טלפון ישראלי
-  String? _validateIsraeliPhoneNumber(String? phone) {
+  String? _validateIsraeliPhoneNumber(String? phone, BuildContext context) {
     if (phone == null || phone.trim().isEmpty) {
       return null; // מספר טלפון ריק הוא תקין (אופציונלי)
     }
@@ -6077,7 +8373,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     }
     
     if (!isValidPrefix) {
-      return 'קידומת לא תקפה. קידומות תקפות: 050-059, 02, 03, 04, 08, 09, 072-079';
+      final l10n = AppLocalizations.of(context);
+      return '${l10n.invalidPrefix}. ${l10n.validPrefixes}';
     }
     
     // בדיקת אורך לפי הקידומת
@@ -6183,20 +8480,21 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            final l10n = AppLocalizations.of(context);
         return AlertDialog(
-          title: const Text('עריכת מספר טלפון'),
+          title: Text(l10n.editPhoneNumber),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               // שדה קידומת
               DropdownButtonFormField<String>(
-                value: _selectedEditPrefix.isNotEmpty ? _selectedEditPrefix : null,
+                initialValue: _selectedEditPrefix.isNotEmpty ? _selectedEditPrefix : null,
                 decoration: InputDecoration(
-                  labelText: 'קידומת',
+                  labelText: l10n.phonePrefix,
                   border: const OutlineInputBorder(),
                   prefixIcon: Icon(Icons.phone, color: Colors.blue[600]),
                 ),
-                hint: const Text('בחר קידומת'),
+                hint: Text('${l10n.select} ${l10n.phonePrefix}'),
                 items: [
                   '050', '051', '052', '053', '054', '055', '056', '057', '058', '059',
                   '02', '03', '04', '08', '09',
@@ -6212,7 +8510,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 },
                 validator: (value) {
                   if (value == null || value.isEmpty) {
-                    return 'בחר קידומת';
+                    return '${l10n.select} ${l10n.phonePrefix}';
                   }
                   return null;
                 },
@@ -6229,8 +8527,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                   });
                 },
                 decoration: InputDecoration(
-                  labelText: 'מספר טלפון',
-                  hintText: 'הזן מספר (למשל: 1234567)',
+                  labelText: l10n.phoneNumber,
+                  hintText: '${l10n.enterPhoneNumber.split('(')[0].trim()} (${l10n.forExample}: 1234567)',
                   hintStyle: const TextStyle(
                     color: Colors.grey,
                     fontSize: 16,
@@ -6240,7 +8538,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                   ),
                   errorText: tempError,
                   prefixIcon: Icon(Icons.phone, color: Colors.blue[600]),
-                  helperText: 'הזן את המספר ללא הקידומת',
+                  helperText: l10n.enterNumberWithoutPrefix,
                   helperMaxLines: 2,
                 ),
                 inputFormatters: [
@@ -6251,9 +8549,14 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             ],
           ),
               actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('ביטול'),
+                Builder(
+                  builder: (context) {
+                    final l10n = AppLocalizations.of(context);
+                    return TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: Text(l10n.cancel),
+                    );
+                  },
                 ),
                 TextButton(
                   onPressed: () {
@@ -6263,12 +8566,15 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                   style: TextButton.styleFrom(
                     foregroundColor: Colors.red,
                   ),
-                  child: const Text('מחק'),
+                  child: Text(l10n.delete),
                 ),
-                ElevatedButton(
-                  onPressed: tempError == null ? () {
-                    // שמירת המספר המלא (קידומת + מספר)
-                    final fullNumber = '$_selectedEditPrefix-${editController.text}';
+                Builder(
+                  builder: (context) {
+                    final l10n = AppLocalizations.of(context);
+                    return ElevatedButton(
+                      onPressed: tempError == null ? () {
+                        // שמירת המספר המלא (קידומת + מספר)
+                        final fullNumber = '$_selectedEditPrefix-${editController.text}';
                     _phoneController.text = fullNumber;
                     if (mounted) {
                       setState(() {
@@ -6282,11 +8588,13 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                     Navigator.of(context).pop();
                     _savePhoneSettings();
                   } : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue[600],
-                    foregroundColor: Colors.white,
-                  ),
-                  child: const Text('שמור'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                      ),
+                      child: Text(l10n.save),
+                    );
+                  },
                 ),
               ],
             );
@@ -6366,8 +8674,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
+            final l10n = AppLocalizations.of(context);
             return AlertDialog(
-              title: const Text('עריכת שם תצוגה'),
+              title: Text(l10n.editDisplayName),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -6410,10 +8719,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'לאחר השמירה, השם יתעדכן בכל מקום באפליקציה',
+                            l10n.afterSavingNameWillUpdate,
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.blue[700],
+                              color: Theme.of(context).colorScheme.primary,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
@@ -6424,31 +8733,41 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 ],
               ),
               actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('ביטול'),
+                Builder(
+                  builder: (context) {
+                    final l10n = AppLocalizations.of(context);
+                    return TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: Text(l10n.cancel),
+                    );
+                  },
                 ),
-                ElevatedButton(
-                  onPressed: tempError == null ? () async {
-                    debugPrint('=== UPDATING DISPLAY NAME CONTROLLER ===');
-                    debugPrint('Old display name: ${_displayNameController.text}');
-                    debugPrint('New display name: ${editController.text.trim()}');
-                    
-                    _displayNameController.text = editController.text.trim();
-                    _displayNameError = null;
-                    Navigator.pop(context);
-                    setState(() {});
-                    
-                    debugPrint('✅ Display name controller updated');
-                    
-                    // שמירה אוטומטית ב-Firestore
-                    await _saveDisplayName();
-                  } : null,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green[600],
-                    foregroundColor: Colors.white,
-                  ),
-                  child: const Text('שמור'),
+                Builder(
+                  builder: (context) {
+                    final l10n = AppLocalizations.of(context);
+                    return ElevatedButton(
+                      onPressed: tempError == null ? () async {
+                        debugPrint('=== UPDATING DISPLAY NAME CONTROLLER ===');
+                        debugPrint('Old display name: ${_displayNameController.text}');
+                        debugPrint('New display name: ${editController.text.trim()}');
+                        
+                        _displayNameController.text = editController.text.trim();
+                        _displayNameError = null;
+                        Navigator.pop(context);
+                        setState(() {});
+                        
+                        debugPrint('✅ Display name controller updated');
+                        
+                        // שמירה אוטומטית ב-Firestore
+                        await _saveDisplayName();
+                      } : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Theme.of(context).colorScheme.primary,
+                        foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                      ),
+                      child: Text(l10n.save),
+                    );
+                  },
                 ),
               ],
             );
@@ -6538,7 +8857,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     }
     
     // ולידציה של מספר הטלפון
-    String? phoneError = _validateIsraeliPhoneNumber(_phoneController.text);
+    String? phoneError = _validateIsraeliPhoneNumber(_phoneController.text, context);
     if (phoneError != null) {
       if (mounted) {
         setState(() {
@@ -6598,7 +8917,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         decoration: BoxDecoration(
           color: Colors.grey[100],
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.grey[300]!),
+          border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
         ),
         child: Row(
           children: [
@@ -6617,15 +8936,16 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       );
     }
 
-    return Container(
+    final l10n = AppLocalizations.of(context);
+    return SizedBox(
       width: double.infinity,
       child: ElevatedButton.icon(
         onPressed: () => _showTrialExtensionDialog(userProfile),
         icon: const Icon(Icons.schedule, size: 18),
-        label: const Text('הארך תקופת ניסיון בשבועיים'),
+        label: Text(l10n.extendTrialPeriodByTwoWeeks),
         style: ElevatedButton.styleFrom(
           backgroundColor: Colors.orange[600],
-          foregroundColor: Colors.white,
+          foregroundColor: Theme.of(context).colorScheme.onPrimary,
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(8),
@@ -6637,6 +8957,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
 
   // דיאלוג הארכת תקופת ניסיון
   void _showTrialExtensionDialog(UserProfile userProfile) {
+    final l10n = AppLocalizations.of(context);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -6644,125 +8965,158 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
           children: [
             Icon(Icons.schedule, color: Colors.orange[600], size: 28),
             const SizedBox(width: 8),
-            const Text('הארכת תקופת ניסיון'),
+            Text(l10n.extendTrialPeriod),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'כדי להאריך את תקופת הניסיון שלך בשבועיים, עליך לבצע את הפעולות הבאות:',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 16),
-            
-            // דרישה 1: שיתוף
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.blue[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue[200]!),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.share, color: Colors.blue[600], size: 20),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'שתף את האפליקציה ל-5 חברים (WhatsApp, SMS, Email)',
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-                    ),
+        content: Builder(
+          builder: (context) {
+            final l10n = AppLocalizations.of(context);
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  l10n.toExtendTrialPeriod,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 16),
+                
+                // דרישה 1: שיתוף
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue[200]!),
                   ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            
-            // דרישה 2: דירוג
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.amber[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.amber[200]!),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.star, color: Colors.amber[600], size: 20),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'דרג את האפליקציה בחנות 5 כוכבים',
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-                    ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.share, color: Colors.blue[600], size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          l10n.shareAppTo5Friends,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.black,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            
-            // דרישה 3: פרסום בקשה
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.green[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.green[200]!),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.add_circle, color: Colors.green[600], size: 20),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'פרסם בקשה חדשה בכל תחום שתרצה',
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-                    ),
+                ),
+                const SizedBox(height: 12),
+                
+                // דרישה 2: דירוג
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.tertiaryContainer,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.amber[200]!),
                   ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.orange[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.orange[200]!),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.access_time, color: Colors.orange[600], size: 20),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'יש לבצע את כל הפעולות תוך שעה אחת',
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                    ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.star, color: Colors.amber[600], size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          l10n.rateApp5Stars,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.black,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ),
-          ],
+                ),
+                const SizedBox(height: 12),
+                
+                // דרישה 3: פרסום בקשה
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                  color: Theme.of(context).brightness == Brightness.dark 
+                      ? Theme.of(context).colorScheme.surfaceContainerHighest
+                      : Theme.of(context).colorScheme.surfaceContainer,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: Theme.of(context).brightness == Brightness.dark 
+                        ? Theme.of(context).colorScheme.onSurfaceVariant
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.add_circle, color: Colors.green[600], size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          l10n.publishNewRequest,
+                          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.tertiaryContainer,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Theme.of(context).colorScheme.tertiary),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.access_time, color: Colors.orange[600], size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          l10n.completeAllActionsWithinHour,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          },
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('ביטול'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _startTrialExtensionProcess(userProfile);
+          Builder(
+            builder: (context) {
+              final l10n = AppLocalizations.of(context);
+              return TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(l10n.cancel),
+              );
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.orange[600],
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('התחל תהליך'),
+          ),
+          Builder(
+            builder: (context) {
+              final l10n = AppLocalizations.of(context);
+              return ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _startTrialExtensionProcess(userProfile);
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange[600],
+                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                ),
+                child: Text(l10n.startProcess),
+              );
+            },
           ),
         ],
       ),
@@ -6798,6 +9152,5 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       debugPrint('Error saving trial extension start time: $e');
     }
   }
-
 
 }

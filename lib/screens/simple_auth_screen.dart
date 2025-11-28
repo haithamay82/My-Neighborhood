@@ -93,16 +93,18 @@ class _SimpleAuthScreenState extends State<SimpleAuthScreen> with AudioMixin {
             borderRadius: BorderRadius.circular(20),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.2),
+                color: Colors.black.withValues(alpha: 0.2),
                 blurRadius: 20,
                 offset: const Offset(0, 10),
               ),
             ],
           ),
-          child: const Icon(
-            Icons.favorite,
-            size: 60,
-            color: Color(0xFF6C5CE7),
+          child: Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Image.asset(
+              'assets/images/logolarge.png',
+              fit: BoxFit.contain,
+            ),
           ),
         ),
         
@@ -194,7 +196,7 @@ class _SimpleAuthScreenState extends State<SimpleAuthScreen> with AudioMixin {
           backgroundColor: color,
           foregroundColor: textColor,
           elevation: 8,
-          shadowColor: Colors.black.withOpacity(0.3),
+          shadowColor: Colors.black.withValues(alpha: 0.3),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
           ),
@@ -209,7 +211,7 @@ class _SimpleAuthScreenState extends State<SimpleAuthScreen> with AudioMixin {
         Expanded(
           child: Container(
             height: 1,
-            color: Colors.white.withOpacity(0.3),
+            color: Colors.white.withValues(alpha: 0.3),
           ),
         ),
         Padding(
@@ -217,7 +219,7 @@ class _SimpleAuthScreenState extends State<SimpleAuthScreen> with AudioMixin {
           child: Text(
             'או',
             style: TextStyle(
-              color: Colors.white.withOpacity(0.7),
+              color: Colors.white.withValues(alpha: 0.7),
               fontSize: 14,
             ),
           ),
@@ -225,7 +227,7 @@ class _SimpleAuthScreenState extends State<SimpleAuthScreen> with AudioMixin {
         Expanded(
           child: Container(
             height: 1,
-            color: Colors.white.withOpacity(0.3),
+            color: Colors.white.withValues(alpha: 0.3),
           ),
         ),
       ],
@@ -245,7 +247,7 @@ class _SimpleAuthScreenState extends State<SimpleAuthScreen> with AudioMixin {
         shape: BoxShape.circle,
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF6C5CE7).withOpacity(0.4),
+            color: const Color(0xFF6C5CE7).withValues(alpha: 0.4),
             blurRadius: 20,
             spreadRadius: 2,
             offset: const Offset(0, 8),
@@ -275,7 +277,7 @@ class _SimpleAuthScreenState extends State<SimpleAuthScreen> with AudioMixin {
       child: Text(
         'התחבר עם אימייל',
         style: TextStyle(
-          color: Colors.white.withOpacity(0.8),
+          color: Colors.white.withValues(alpha: 0.8),
           fontSize: 16,
           decoration: TextDecoration.underline,
         ),
@@ -295,6 +297,8 @@ class _SimpleAuthScreenState extends State<SimpleAuthScreen> with AudioMixin {
       }
     } catch (e) {
       await playErrorSound();
+      // Guard context usage after async gap
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('שגיאה בהתחברות: $e')),
       );
@@ -321,6 +325,8 @@ class _SimpleAuthScreenState extends State<SimpleAuthScreen> with AudioMixin {
       }
     } catch (e) {
       await playErrorSound();
+      // Guard context usage after async gap
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('שגיאה בהתחברות: $e')),
       );
@@ -333,6 +339,8 @@ class _SimpleAuthScreenState extends State<SimpleAuthScreen> with AudioMixin {
     setState(() => _isLoading = true);
     try {
       await playErrorSound();
+      // Guard context usage after async gap
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('כניסה דרך אינסטגרם תהיה זמינה בקרוב!'),

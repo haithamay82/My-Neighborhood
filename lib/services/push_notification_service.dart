@@ -13,8 +13,8 @@ class PushNotificationService {
   /// אתחול שירות ההתראות
   static Future<void> initialize() async {
     try {
-      // בקשת הרשאות
-      await _requestPermissions();
+      // הערה: בקשות הרשאות מועברות למסך התחברות בלבד
+      // לא מבקשים הרשאות כאן כדי לא להציג דיאלוג במסך splash
 
       // קבלת token
       final token = await _messaging.getToken();
@@ -51,8 +51,8 @@ class PushNotificationService {
     }
   }
 
-  /// בקשת הרשאות להתראות
-  static Future<void> _requestPermissions() async {
+  /// בקשת הרשאות להתראות (ציבורי - נקרא ממסך התחברות)
+  static Future<void> requestPermissions() async {
     // בקשת הרשאות Android
     if (defaultTargetPlatform == TargetPlatform.android) {
       final status = await Permission.notification.request();
@@ -113,15 +113,19 @@ class PushNotificationService {
     
     // ניווט לפי payload
     final payload = message.data['payload'];
+    final requestId = message.data['requestId'];
+    final chatId = message.data['chatId'];
+    final userId = message.data['userId'];
+    
     if (payload != null) {
       final context = AppStateService.currentContext;
       if (context != null) {
         NotificationNavigationService.navigateFromNotification(
           context,
           payload,
-          chatId: message.data['chatId'],
-          requestId: message.data['requestId'],
-          userId: message.data['userId'],
+          chatId: chatId,
+          requestId: requestId,
+          userId: userId,
         );
       }
     }
@@ -166,19 +170,22 @@ class PushNotificationService {
     
     try {
       final user = FirebaseAuth.instance.currentUser;
-      if (user == null) return;
+      if (user == null) {
+        debugPrint('⚠️ No user logged in, FCM token not saved');
+        return;
+      }
 
       await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
-          .update({
+          .set({
         'fcmToken': token,
         'lastTokenUpdate': FieldValue.serverTimestamp(),
-      });
+      }, SetOptions(merge: true));
 
-      debugPrint('FCM token saved for user: ${user.uid}');
+      debugPrint('✅ FCM token saved for user: ${user.uid}');
     } catch (e) {
-      debugPrint('Error saving FCM token: $e');
+      debugPrint('❌ Error saving FCM token: $e');
     }
   }
 

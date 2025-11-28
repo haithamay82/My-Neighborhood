@@ -1,0 +1,75 @@
+Data Safety Declaration - "Shchunati" App
+
+Last Updated: 2025
+
+This document describes the types of data we collect, how we use it, who we share it with, and the controls we provide to you.
+
+Data Collected and Used
+
+1. Identity Information
+• Username, display name
+• Email address
+• Phone number
+• Date of birth (for age verification)
+• Profile picture (optional)
+
+Use: User identification, account creation, communication between users
+Sharing: Firebase Authentication, Cloud Firestore
+
+2. Location
+• Precise GPS coordinates
+• Estimated address
+
+Use: Connecting with nearby neighbors, displaying relevant requests
+Sharing: Cloud Firestore (encrypted)
+Deletion: Can be deleted at any time from account settings
+
+3. Photos and Video
+• Images published in help requests
+• Profile pictures
+
+Use: Displaying help requests, user identification
+Sharing: Firebase Storage (encrypted)
+Deletion: Can be deleted at any time
+
+4. Audio Files
+• Voice messages
+
+Use: Communication between users
+Sharing: Firebase Storage (encrypted)
+Deletion: Can be deleted at any time
+
+5. App Activity
+• Activity logs
+• User preferences
+• Request history
+
+Use: Improving services, security, usage analysis
+Sharing: Cloud Firestore
+Deletion: Retained for a limited period
+
+6. Technical Information
+• IP address
+• Device type and operating system
+• Device identifier
+
+Use: Security, fraud prevention, technical support
+Sharing: Firebase Analytics (anonymous)
+
+Data Security
+
+• All data encrypted in transit and at rest
+• Limited access to data only to employees who need it
+• Advanced security systems
+• Regular backups
+
+User Rights
+
+• Access to your data
+• Correction of inaccurate data
+• Deletion of data
+• Data portability
+• Objection to processing
+
+To exercise your rights, contact support through the app.
+

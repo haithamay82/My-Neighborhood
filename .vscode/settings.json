@@ -1,3 +1,23 @@
 {
+    "code-runner.runInTerminal": true,
+    "window.zoomLevel": 2,
+    "[html]": {
+        "editor.defaultFormatter": "vscode.html-language-features"
+    },
+    "git.autofetch": true,
+    "git.defaultCloneDirectory": "",
+    "javascript.updateImportsOnFileMove.enabled": "always",
+    "redhat.telemetry.enabled": true,
+    "rsp-ui.enableStartServerOnActivation": [
+        {
+            "id": "redhat.vscode-community-server-connector",
+            "name": "Community Server Connector",
+            "startOnActivation": true
+        }
+    ],
+    "editor.fontSize": 15,
+    "cmake.configureOnOpen": true,
+    "dart.flutterSdkPath": "C:\\Users\\haith\\vscode flutter\\flutter",
+    "java.jdt.ls.java.home": "C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.8.9-hotspot",
     "java.configuration.updateBuildConfiguration": "interactive"
 }

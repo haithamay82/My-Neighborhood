@@ -19,7 +19,12 @@ import '../services/network_service.dart';
 import '../services/location_service.dart';
 import '../services/app_sharing_service.dart';
 import '../services/monthly_requests_tracker.dart';
+import '../services/notification_preferences_service.dart';
+import '../models/notification_preferences.dart';
+import '../services/filter_preferences_service.dart';
+import '../models/filter_preferences.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:geolocator/geolocator.dart';
 
 class NewRequestScreen extends StatefulWidget {
   const NewRequestScreen({super.key});
@@ -61,6 +66,10 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
   DateTime? _selectedDeadline;
   final List<RequestCategory> _selectedTargetCategories = [];
   
+  // מחיר (אופציונאלי) - רק לבקשות בתשלום
+  final _priceController = TextEditingController();
+  double? _price;
+  
   // שדות דחיפות חדשים
   UrgencyLevel _selectedUrgency = UrgencyLevel.normal;
   final List<RequestTag> _selectedTags = [];
@@ -68,7 +77,14 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
   
   // בדיקת מספר נותני שירות
   int _availableHelpersCount = 0;
-  bool _isCheckingHelpers = false;
+  
+  // האם להציג בקשה לנותני שירות שלא בטווח שהגדרת
+  bool? _showToProvidersOutsideRange; // null = לא נבחר, true = כן, false = לא
+  bool _showToProvidersOutsideRangeError = false; // האם להציג שגיאה על השדה
+  
+  // האם להציג בקשה לכל המשתמשים או רק לנותני שירות מתחום X
+  bool? _showToAllUsers; // null = לא נבחר, true = לכל המשתמשים, false = רק לנותני שירות מתחום X
+  bool _showToAllUsersError = false; // האם להציג שגיאה על השדה
   
   @override
   void initState() {
@@ -76,7 +92,9 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
     debugPrint('🔍 NewRequestScreen initState called');
     // טעינת מספר הטלפון אחרי שה-widget נבנה
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
       _loadUserPhoneNumber();
+      }
     });
   }
   
@@ -114,10 +132,12 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                 _selectedPhonePrefix = phoneParts['prefix']!;
                 _selectedPhoneNumber = phoneParts['number']!;
               });
-              debugPrint('🔍 _loadUserPhoneNumber: Set prefix: ${_selectedPhonePrefix}, number: ${_selectedPhoneNumber}');
+              debugPrint('🔍 _loadUserPhoneNumber: Set prefix: "$_selectedPhonePrefix", number: "$_selectedPhoneNumber"');
+              debugPrint('🔍 _loadUserPhoneNumber: _selectedPhonePrefix.isNotEmpty: ${_selectedPhonePrefix.isNotEmpty}');
+              debugPrint('🔍 _loadUserPhoneNumber: _selectedPhoneNumber.isNotEmpty: ${_selectedPhoneNumber.isNotEmpty}');
             }
           } else {
-            debugPrint('🔍 _loadUserPhoneNumber: Failed to parse phone number');
+            debugPrint('🔍 _loadUserPhoneNumber: Failed to parse phone number: $phoneNumber');
           }
         } else {
           debugPrint('🔍 _loadUserPhoneNumber: No phone number in profile');
@@ -212,13 +232,9 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
   Future<void> _checkAvailableHelpers() async {
     if (_selectedCategory == null) return;
     
-    debugPrint('🔍 Checking available helpers for category: ${_selectedCategory.toString()}');
-    debugPrint('🔍 Looking for: ${_selectedCategory.toString().split('.').last}');
+    debugPrint('🔍 Checking available helpers for sub-category: ${_selectedCategory.toString()}');
+    debugPrint('🔍 Looking for exact sub-category: ${_selectedCategory!.name}');
     debugPrint('🔍 Request type: ${_selectedType.toString()}');
-    
-    setState(() {
-      _isCheckingHelpers = true;
-    });
     
     try {
       // בדיקה מקיפה - נספור כל סוגי המשתמשים שיכולים לספק שירות בתחום הרלוונטי
@@ -253,111 +269,99 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
         ...adminQuery.docs,
       ];
       
+      debugPrint('📊 Total users found: ${allUsers.length}');
+      debugPrint('🔍 Filtering users for category: ${_selectedCategory!.name} (${_selectedCategory!.categoryDisplayName})');
+      debugPrint('🔍 Request type: ${_selectedType == RequestType.free ? "FREE" : "PAID"}');
+      
       int count = 0;
+      final selectedCategoryName = _selectedCategory!.name; // שם ה-enum המדויק (למשל "plumbing")
+      
       for (var doc in allUsers) {
         final data = doc.data();
         final businessCategories = data['businessCategories'] as List<dynamic>? ?? [];
         final userType = data['userType'] as String? ?? '';
         
-        debugPrint('👤 User ${doc.id} (${userType}) has categories: $businessCategories');
+        debugPrint('👤 Checking user ${doc.id} ($userType) with categories: $businessCategories');
         
-        // בדיקה אם המשתמש עוסק בתחום הרלוונטי
         // בדיקה אם המשתמש הוא משתמש אמיתי (לא משתמש בדיקה עם כל הקטגוריות)
         bool isRealUser = businessCategories.length < 20; // משתמש אמיתי לא יהיה לו 20+ קטגוריות
         
-        if (isRealUser) {
-          // בדיקה מיוחדת למשתמשי אורח
-          if (userType == 'guest') {
-            bool canProvideService = false;
+        if (!isRealUser) {
+          debugPrint('🚫 Skipping test user with ${businessCategories.length} categories');
+          continue;
+        }
+        
+        bool canProvideService = false;
+        
+        // בדיקה: האם המשתמש יכול לספק שירות בקטגוריה הנבחרת
+        // תמיד צריך לבדוק אם המשתמש יש לו את הקטגוריה הנבחרת (גם לבקשות חינם)
+        if (businessCategories.isNotEmpty) {
+          // קבלת שם התצוגה של הקטגוריה הנבחרת (למשל "חשמל")
+          final selectedCategoryDisplayName = _selectedCategory!.categoryDisplayName;
+          
+          for (var category in businessCategories) {
+            bool matches = false;
             
-            // בקשות חינם: כל משתמשי אורח יכולים לספק שירות
-            if (_selectedType == RequestType.free) {
-              canProvideService = true;
-              debugPrint('✅ Guest user can provide FREE service (no category restriction)');
+            // אם category הוא Map, נגש ל'category' או 'categoryDisplayName'
+            if (category is Map) {
+              final mapCategoryName = category['category']?.toString() ?? '';
+              final mapCategoryDisplayName = category['categoryDisplayName']?.toString();
+              
+              // השוואה לפי name (למשל "electrical")
+              if (mapCategoryName == selectedCategoryName) {
+                matches = true;
+              }
+              // השוואה לפי categoryDisplayName (למשל "חשמל")
+              else if (mapCategoryDisplayName != null && mapCategoryDisplayName == selectedCategoryDisplayName) {
+                matches = true;
+              }
             }
-            // בקשות בתשלום: רק אם יש קטגוריות מתאימות
-            else if (_selectedType == RequestType.paid) {
-              if (businessCategories.isNotEmpty) {
-                final selectedCategoryName = _selectedCategory.toString().split('.').last;
-                
-                for (var category in businessCategories) {
-                  String categoryName = '';
-                  
-                  // אם category הוא Map, נגש ל'category'
-                  if (category is Map) {
-                    categoryName = category['category'] ?? '';
+            // אם category הוא String, נשווה ישירות
+            else if (category is String) {
+              final categoryStr = category;
+              
+              // השוואה ישירה לפי name (למשל "electrical")
+              if (categoryStr == selectedCategoryName) {
+                matches = true;
+              }
+              // השוואה ישירה לפי categoryDisplayName (למשל "חשמל")
+              else if (categoryStr == selectedCategoryDisplayName) {
+                matches = true;
+              }
+              // נסה למצוא את הקטגוריה לפי שם או שם תצוגה ולהשוות
+              else {
+                try {
+                  final cat = RequestCategory.values.firstWhere(
+                    (c) => c.name == categoryStr || c.categoryDisplayName == categoryStr,
+                    orElse: () => RequestCategory.plumbing,
+                  );
+                  // אם מצאנו קטגוריה, נשווה אותה לקטגוריה הנבחרת
+                  if (cat == _selectedCategory) {
+                    matches = true;
                   }
-                  // אם category הוא String, נשווה ישירות
-                  else if (category is String) {
-                    categoryName = category;
-                  }
-                  
-                  // בדיקה אם הקטגוריות תואמות
-                  if (_isCategoryMatch(categoryName, selectedCategoryName)) {
-                    canProvideService = true;
-                    debugPrint('✅ Guest user has matching category for PAID service: $categoryName');
-                    break;
-                  }
+                } catch (e) {
+                  // אם לא מצאנו, נמשיך
                 }
               }
-              
-              if (!canProvideService) {
-                debugPrint('❌ Guest user has no matching categories for PAID service');
-              }
             }
             
-            if (canProvideService) {
-              count++;
-              debugPrint('✅ Guest user can provide service in this category');
-            } else {
-              debugPrint('❌ Guest user cannot provide service in this category');
-            }
-            continue; // עבור למשתמש הבא
-          }
-          
-          // בדיקה רגילה למשתמשים עסקיים ומנהלים
-          bool canProvideService = false;
-          
-          // בקשות חינם: כל המשתמשים יכולים לספק שירות
-          if (_selectedType == RequestType.free) {
-            canProvideService = true;
-            debugPrint('✅ ${userType} user can provide FREE service (no category restriction)');
-          }
-          // בקשות בתשלום: רק אם יש קטגוריות מתאימות
-          else if (_selectedType == RequestType.paid) {
-            final selectedCategoryName = _selectedCategory.toString().split('.').last;
-            
-            for (var category in businessCategories) {
-              String categoryName = '';
-              
-              // אם category הוא Map, נגש ל'category'
-              if (category is Map) {
-                categoryName = category['category'] ?? '';
-              }
-              // אם category הוא String, נשווה ישירות
-              else if (category is String) {
-                categoryName = category;
-              }
-              
-              // בדיקה אם הקטגוריות תואמות
-              if (_isCategoryMatch(categoryName, selectedCategoryName)) {
-                canProvideService = true;
-                debugPrint('✅ Found match: $categoryName == $selectedCategoryName');
-                break;
-              } else {
-                debugPrint('❌ No match: $categoryName != $selectedCategoryName');
-              }
+            if (matches) {
+              canProvideService = true;
+              debugPrint('✅ $userType user has exact matching sub-category: "$category" matches "$selectedCategoryName" (display: "$selectedCategoryDisplayName")');
+              break;
             }
           }
-          
-          if (canProvideService) {
-            count++;
-            debugPrint('✅ ${userType} user can provide service in this category');
-          } else {
-            debugPrint('❌ ${userType} user cannot provide service in this category');
-          }
+        }
+        
+        if (!canProvideService) {
+          debugPrint('❌ $userType user has no matching category "$selectedCategoryName" (display: "${_selectedCategory!.categoryDisplayName}") in their business categories: $businessCategories');
+        }
+        
+        if (canProvideService) {
+          count++;
+          debugPrint('✅ User ${doc.id} ($userType) CAN provide service in category $selectedCategoryName');
         } else {
-          debugPrint('🚫 Skipping test user with ${businessCategories.length} categories');
+          debugPrint('❌ User ${doc.id} ($userType) CANNOT provide service in category $selectedCategoryName');
         }
       }
       
@@ -365,21 +369,16 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
       
       setState(() {
         _availableHelpersCount = count;
-        _isCheckingHelpers = false;
       });
       
-      // הצגת דיאלוג מנומס אם אין נותני שירות בתחום
-      if (count == 0) {
-        debugPrint('❌ No helpers found, showing dialog');
-        _showNoHelpersInCategoryDialog();
-      } else {
-        debugPrint('✅ Helpers found, no dialog needed');
+      // ✅ הצגת דיאלוג עם מספר נותני שירות רק כשמשתמש בוחר "רק לנותני שירות מתחום X"
+      // לא מציגים את הדיאלוג אם סוג הבקשה הוא "בתשלום"
+      if (_selectedType != RequestType.paid) {
+        debugPrint('📊 Showing dialog with helpers count: $count');
+        _showHelpersCountDialog(count);
       }
     } catch (e) {
       debugPrint('Error checking available helpers: $e');
-      setState(() {
-        _isCheckingHelpers = false;
-      });
     }
   }
   
@@ -407,16 +406,16 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
-                color: Colors.grey[800],
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
             const SizedBox(width: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
               decoration: BoxDecoration(
-                color: color.withOpacity(0.1),
+                color: color.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: color.withOpacity(0.3)),
+                border: Border.all(color: color.withValues(alpha: 0.3)),
               ),
               child: Text(
                 '${ratingValue.toStringAsFixed(1)}+',
@@ -441,11 +440,11 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                   '0',
                   style: TextStyle(
                     fontSize: 12,
-                    color: Colors.grey[600],
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
                 Text(
-                  '${ratingValue.toStringAsFixed(1)}',
+                  ratingValue.toStringAsFixed(1),
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
@@ -456,7 +455,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                   '5',
                   style: TextStyle(
                     fontSize: 12,
-                    color: Colors.grey[600],
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
               ],
@@ -464,9 +463,9 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
             SliderTheme(
               data: SliderTheme.of(context).copyWith(
                 activeTrackColor: color,
-                inactiveTrackColor: Colors.grey[300],
+                inactiveTrackColor: Theme.of(context).colorScheme.surfaceContainerHighest,
                 thumbColor: color,
-                overlayColor: color.withOpacity(0.2),
+                overlayColor: color.withValues(alpha: 0.2),
                 trackHeight: 4,
               ),
               child: Slider(
@@ -486,6 +485,8 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
   // הצגת הודעת הדרכה למסך בקשה חדשה
   // הודעת הדרכה ספציפית לבקשה חדשה - רק כשצריך
   Future<void> _showNewRequestSpecificTutorial() async {
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context);
     // רק אם המשתמש לא ראה את ההדרכה הזו קודם
     final hasSeenTutorial = await TutorialService.hasSeenTutorial('new_request_specific_tutorial');
     if (hasSeenTutorial) return;
@@ -515,13 +516,14 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
       barrierDismissible: true,
       builder: (context) => TutorialDialog(
         tutorialKey: 'new_request_specific_tutorial',
-        title: 'יצירת בקשה חדשה',
-        message: 'כאן תוכל ליצור בקשה חדשה ולקבל עזרה מהקהילה. כתוב תיאור ברור ופרט את הפרטים החשובים.',
+        title: l10n.newRequestTutorialTitle,
+        message: l10n.newRequestTutorialMessage,
         features: [
-          '📝 כתיבת תיאור הבקשה',
-          '🏷️ בחירת קטגוריה מתאימה',
-          '📍 בחירת מיקום',
-          '📤 פרסום הבקשה',
+          '📝 ${l10n.writeRequestDescription}',
+          '🏷️ ${l10n.selectAppropriateCategory}',
+          '📍 ${l10n.selectLocationAndExposure}',
+          '💰 ${l10n.setPriceFreeOrPaid}',
+          '📤 ${l10n.publishRequest}',
         ],
       ),
     );
@@ -536,18 +538,19 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
   // בדיקת התראות סינון
   Future<void> _checkFilterNotifications(Request request) async {
     try {
+      debugPrint('🔔 ===== START _checkFilterNotifications =====');
+      debugPrint('🔔 Request: ${request.title} (ID: ${request.requestId}), Category: ${request.category.categoryDisplayName}');
+      
       final prefs = await SharedPreferences.getInstance();
       final notificationKeys = prefs.getStringList('filter_notification_keys') ?? [];
       
-      if (notificationKeys.isEmpty) {
-        debugPrint('No custom filter notifications - using default notification system');
-        return;
-      }
-      
-      debugPrint('Checking ${notificationKeys.length} custom filter notifications');
-      
       // רשימת משתמשים שקיבלו התראה מותאמת אישית
       Set<String> usersWithCustomNotifications = {};
+      
+      if (notificationKeys.isEmpty) {
+        debugPrint('🔔 No custom filter notifications found - will send default notifications to all matching users');
+      } else {
+        debugPrint('🔔 Checking ${notificationKeys.length} custom filter notifications');
       
       for (String key in notificationKeys) {
         try {
@@ -555,35 +558,39 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
           if (filterDataString == null) continue;
           
           // פענוח נתוני הסינון (זה דוגמה פשוטה - בפועל צריך JSON)
-          debugPrint('Checking filter: $key');
+            debugPrint('🔔 Checking filter: $key');
           
           // בדיקה אם הבקשה מתאימה לסינון
           bool matchesFilter = await _doesRequestMatchFilter(request, filterDataString);
           
           if (matchesFilter) {
-            debugPrint('Request matches filter: $key');
+              debugPrint('✅ Request matches filter: $key');
             // כאן אפשר לשלוח התראה למשתמש
             // await _sendFilterNotification(request, key);
             // usersWithCustomNotifications.add(userId);
           }
         } catch (e) {
-          debugPrint('Error checking filter $key: $e');
+            debugPrint('❌ Error checking filter $key: $e');
+          }
         }
       }
       
       // אם יש משתמשים עם סינון מותאם אישית, נשלח להם התראות מותאמות
       // ואחר כך נשלח התראות רגילות לשאר המשתמשים
       if (usersWithCustomNotifications.isNotEmpty) {
-        debugPrint('Sending custom notifications to ${usersWithCustomNotifications.length} users');
+        debugPrint('🔔 Sending custom notifications to ${usersWithCustomNotifications.length} users');
         await _sendCustomFilterNotifications(request, usersWithCustomNotifications);
       }
       
-      // נשלח התראות רגילות לשאר המשתמשים
-      debugPrint('Sending default notifications to remaining users');
+      // נשלח התראות רגילות לשאר המשתמשים (תמיד נקרא, גם אם אין custom filters)
+      debugPrint('🔔 Sending default notifications to all matching users');
       await _sendDefaultNotifications(request, usersWithCustomNotifications);
       
+      debugPrint('✅ ===== END _checkFilterNotifications =====');
+      
     } catch (e) {
-      debugPrint('Error in _checkFilterNotifications: $e');
+      debugPrint('❌ ===== ERROR in _checkFilterNotifications =====');
+      debugPrint('Error: $e');
       // במקרה של שגיאה, נשלח התראות רגילות
       await _sendDefaultNotifications(request, {});
     }
@@ -698,6 +705,11 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
       
       for (String userId in userIds) {
         try {
+          // לא לשלוח התראה ליוצר הבקשה עצמו
+          if (userId == request.createdBy) {
+            debugPrint('⏭️ Skipping creator $userId for custom filter notification');
+            continue;
+          }
           // קבלת פרטי המשתמש
           final userDoc = await FirebaseFirestore.instance
               .collection('users')
@@ -775,18 +787,76 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
   // שליחת התראות רגילות למשתמשים שלא קיבלו התראות מותאמות אישית
   Future<void> _sendDefaultNotifications(Request request, Set<String> usersWithCustomNotifications) async {
     try {
-      debugPrint('Sending default notifications for request: ${request.title}');
+      debugPrint('🚀 ===== START _sendDefaultNotifications =====');
+      debugPrint('📝 Request: ${request.title} (ID: ${request.requestId})');
+      debugPrint('📝 Category: ${request.category.categoryDisplayName} (${request.category.name})');
+      debugPrint('📝 Location: ${request.latitude}, ${request.longitude}');
+      debugPrint('📝 Exposure Radius: ${request.exposureRadius} km');
+      debugPrint('📝 Users with custom notifications: ${usersWithCustomNotifications.length}');
       
       // קבלת כל המשתמשים שיש להם את הקטגוריה הזו בתחומי העיסוק שלהם
-      final usersQuery = await FirebaseFirestore.instance
+      // תמיכה גם בערכים ישנים שנשמרו בשם הפנימי של ה-enum וגם בתצוגה בעברית
+      final displayName = request.category.categoryDisplayName;
+      final internalName = request.category.name;
+
+      debugPrint('🔍 Searching users with category: "$displayName" or "$internalName"');
+      
+      final queryByDisplayName = await FirebaseFirestore.instance
           .collection('users')
-          .where('businessCategories', arrayContains: request.category.categoryDisplayName)
+          .where('businessCategories', arrayContains: displayName)
           .get();
 
-      for (final userDoc in usersQuery.docs) {
+      final queryByInternalName = await FirebaseFirestore.instance
+          .collection('users')
+          .where('businessCategories', arrayContains: internalName)
+          .get();
+
+      debugPrint('🔍 Query by displayName ("$displayName") found: ${queryByDisplayName.docs.length} users');
+      debugPrint('🔍 Query by internalName ("$internalName") found: ${queryByInternalName.docs.length} users');
+
+      // מיזוג התוצאות ללא כפילויות
+      final Map<String, DocumentSnapshot<Map<String, dynamic>>> userDocs = {};
+      for (final doc in queryByDisplayName.docs) {
+        userDocs[doc.id] = doc;
+      }
+      for (final doc in queryByInternalName.docs) {
+        userDocs[doc.id] = doc;
+      }
+
+      debugPrint('📣 Candidate users for notification (unique): ${userDocs.length}');
+      debugPrint('📣 Request details: ID=${request.requestId}, Category=${request.category.categoryDisplayName}, Location=${request.latitude},${request.longitude}, ExposureRadius=${request.exposureRadius} km');
+
+      // קבלת שם מציג של יוצר הבקשה
+      String creatorDisplayName = 'משתמש';
+      try {
+        final creatorDoc = await FirebaseFirestore.instance.collection('users').doc(request.createdBy).get();
+        if (creatorDoc.exists) {
+          final cd = creatorDoc.data();
+          if (cd != null) {
+            final displayName = (cd['displayName'] as String?)?.trim();
+            final email = (cd['email'] as String?)?.trim();
+            final bool looksLikeUid = displayName != null && RegExp(r'^[A-Za-z0-9_-]{20,}$').hasMatch(displayName) && !displayName.contains(' ');
+            if (displayName != null && displayName.isNotEmpty && !looksLikeUid) {
+              creatorDisplayName = displayName;
+            } else if (email != null && email.contains('@')) {
+              creatorDisplayName = email.split('@').first;
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('⚠️ Failed to fetch creator display name, using fallback: $e');
+      }
+
+      for (final userDoc in userDocs.values) {
         final userData = userDoc.data();
+        if (userData == null) {
+          continue;
+        }
         final userId = userDoc.id;
         final userType = userData['userType'] as String? ?? 'personal';
+        debugPrint('👤 Considering user $userId (type: $userType) for request ${request.requestId}');
+        debugPrint('   User mobile location: ${userData['mobileLatitude']}, ${userData['mobileLongitude']}');
+        debugPrint('   User fixed location: ${userData['latitude']}, ${userData['longitude']}');
         
         // דילוג על משתמשים שכבר קיבלו התראה מותאמת אישית
         if (usersWithCustomNotifications.contains(userId)) {
@@ -794,29 +864,423 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
           continue;
         }
         
-        // רק משתמשים עסקיים עם מנוי פעיל או משתמשים פרטיים
-        if (userType == 'business') {
-          final isSubscriptionActive = userData['isSubscriptionActive'] as bool? ?? false;
-          if (!isSubscriptionActive) continue; // דילוג על משתמשים עסקיים ללא מנוי פעיל
+        // לא לשלוח התראה למשתמש שיצר את הבקשה
+        if (userId == FirebaseAuth.instance.currentUser?.uid) {
+          debugPrint('Skipping user $userId - is the creator of the request');
+          continue;
         }
         
-        // לא לשלוח התראה למשתמש שיצר את הבקשה
-        if (userId == FirebaseAuth.instance.currentUser?.uid) continue;
+        // בדיקה למשתמשים עסקיים - רק עם מנוי פעיל
+        if (userType == 'business') {
+          final isSubscriptionActive = userData['isSubscriptionActive'] as bool? ?? false;
+          if (!isSubscriptionActive) {
+            debugPrint('Skipping user $userId - business user without active subscription');
+            continue;
+          }
+        }
+        
+        // בדיקה למשתמשי אורח - רק אם יש להם תחומי עיסוק
+        if (userType == 'guest') {
+          final businessCategories = userData['businessCategories'] as List?;
+          if (businessCategories == null || businessCategories.isEmpty) {
+            debugPrint('Skipping user $userId - guest user without business categories');
+            continue;
+          }
+        }
+        
+        // בדיקת העדפות התראות
+        final notificationPrefs = await NotificationPreferencesService
+            .getNotificationPreferencesWithDefaults(userId);
+        
+        // בדיקה אם יש FilterPreferences עם התראות מופעלות
+        FilterPreferences? filterPrefs;
+        try {
+          filterPrefs = await FilterPreferencesService.getFilterPreferences(userId);
+        } catch (e) {
+          debugPrint('❌ Error loading filter preferences for user $userId: $e');
+        }
+        
+        // בדיקה אם המשתמש רוצה התראות על בקשות חדשות
+        // ✅ בדיקה ראשונה: העדפות מיקום רגילות (קבוע/נייד)
+        final wantsRegularNotifications = notificationPrefs.newRequestsUseFixedLocation ||
+            notificationPrefs.newRequestsUseMobileLocation ||
+            notificationPrefs.newRequestsUseBothLocations;
+        
+        // ✅ בדיקה שנייה: FilterPreferences עם התראות מופעלות (כולל מיקום נוסף)
+        final wantsFilterNotifications = filterPrefs != null && 
+            filterPrefs.isEnabled &&
+            (filterPrefs.categories.isNotEmpty ||
+             filterPrefs.maxRadius != null ||
+             filterPrefs.urgency != null ||
+             filterPrefs.requestType != null ||
+             (filterPrefs.useAdditionalLocation && 
+              filterPrefs.additionalLocationLatitude != null &&
+              filterPrefs.additionalLocationLongitude != null &&
+              filterPrefs.additionalLocationRadius != null));
+        
+        final wantsNotifications = wantsRegularNotifications || wantsFilterNotifications;
+        
+        if (!wantsNotifications) {
+          debugPrint('Skipping user $userId - notification preferences disabled');
+          continue;
+        }
+        
+        // בדיקת מיקום וטווח לפי ההעדפות
+        debugPrint('🔍 Checking notification eligibility for user $userId:');
+        debugPrint('   Notification prefs - UseFixedLocation: ${notificationPrefs.newRequestsUseFixedLocation}');
+        debugPrint('   Notification prefs - UseMobileLocation: ${notificationPrefs.newRequestsUseMobileLocation}');
+        debugPrint('   Notification prefs - UseBothLocations: ${notificationPrefs.newRequestsUseBothLocations}');
+        final shouldNotify = await _shouldNotifyUser(
+          userId: userId,
+          userData: userData,
+          request: request,
+          notificationPrefs: notificationPrefs,
+          filterPrefs: filterPrefs, // ✅ העברת FilterPreferences לפונקציה
+        );
+        
+        if (!shouldNotify) {
+          debugPrint('❌ Skipping user $userId - location/distance check failed');
+          continue;
+        } else {
+          debugPrint('✅ User $userId passed location/distance check - sending notification');
+        }
+        
+        try {
+          // חישוב מרחק מהמיקום של המשתמש לשילוב בהודעה
+          double? distanceKm;
+          String? distanceSourceHeb;
+          if (request.latitude != null && request.longitude != null) {
+            final double rLat = request.latitude!;
+            final double rLng = request.longitude!;
+
+            final double? mobileLat = (userData['mobileLatitude'] as num?)?.toDouble();
+            final double? mobileLng = (userData['mobileLongitude'] as num?)?.toDouble();
+            final double? fixedLat = (userData['latitude'] as num?)?.toDouble();
+            final double? fixedLng = (userData['longitude'] as num?)?.toDouble();
+
+            double? mobileDist;
+            double? fixedDist;
+            if (mobileLat != null && mobileLng != null) {
+              mobileDist = Geolocator.distanceBetween(mobileLat, mobileLng, rLat, rLng) / 1000.0;
+            }
+            if (fixedLat != null && fixedLng != null) {
+              fixedDist = Geolocator.distanceBetween(fixedLat, fixedLng, rLat, rLng) / 1000.0;
+            }
+
+            if (notificationPrefs.newRequestsUseBothLocations) {
+              // בחר את הקטן מבין הזמינים
+              if (mobileDist != null && fixedDist != null) {
+                if (mobileDist <= fixedDist) {
+                  distanceKm = mobileDist;
+                  distanceSourceHeb = 'מהמיקום הנייד';
+                } else {
+                  distanceKm = fixedDist;
+                  distanceSourceHeb = 'מהמיקום הקבוע';
+                }
+              } else if (mobileDist != null) {
+                distanceKm = mobileDist;
+                distanceSourceHeb = 'מהמיקום הנייד';
+              } else if (fixedDist != null) {
+                distanceKm = fixedDist;
+                distanceSourceHeb = 'מהמיקום הקבוע';
+              }
+            } else if (notificationPrefs.newRequestsUseMobileLocation && mobileDist != null) {
+              distanceKm = mobileDist;
+              distanceSourceHeb = 'מהמיקום הנייד';
+            } else if (notificationPrefs.newRequestsUseFixedLocation && fixedDist != null) {
+              distanceKm = fixedDist;
+              distanceSourceHeb = 'מהמיקום הקבוע';
+            }
+          }
         
         await NotificationService.sendNewRequestNotification(
           toUserId: userId,
           requestTitle: request.title,
           requestCategory: request.category.categoryDisplayName,
           requestId: request.requestId,
-          creatorName: request.createdBy,
-        );
-        
-        debugPrint('Default notification sent to user: $userId');
+            creatorName: creatorDisplayName,
+            distanceKm: distanceKm,
+            distanceSourceHeb: distanceSourceHeb,
+          );
+          debugPrint('✅ Default notification sent to user: $userId');
+        } catch (e) {
+          debugPrint('❌ Failed sending notification to $userId: $e');
+        }
       }
       
-      debugPrint('Default notifications sent successfully');
+      debugPrint('✅ ===== END _sendDefaultNotifications - Success =====');
+    } catch (e, stackTrace) {
+      debugPrint('❌ ===== ERROR in _sendDefaultNotifications =====');
+      debugPrint('Error: $e');
+      debugPrint('Stack trace: $stackTrace');
+    }
+  }
+
+  /// בדיקה אם צריך לשלוח התראה למשתמש לפי מיקום וטווח
+  Future<bool> _shouldNotifyUser({
+    required String userId,
+    required Map<String, dynamic> userData,
+    required Request request,
+    required NotificationPreferences notificationPrefs,
+    FilterPreferences? filterPrefs, // ✅ פרמטר נוסף ל-FilterPreferences
+  }) async {
+    try {
+      // אם אין מיקום לבקשה, תמיד לשלוח (אם לא בוטל ב-prefs)
+      if (request.latitude == null || request.longitude == null) {
+        return true;
+      }
+      
+      final requestLat = request.latitude!;
+      final requestLng = request.longitude!;
+      final exposureRadius = request.exposureRadius ?? 0.0; // קילומטרים
+
+      // טווח סינון של המשתמש (אם הגדר בהתראות/סינון בקשות)
+      double? userFilterRadiusKm;
+      List<String> userFilterCategories = const [];
+      String? userFilterRequestType; // 'paid' | 'free'
+      bool filterIsEnabled = false;
+      
+      // ✅ אם FilterPreferences לא הועבר, נטען אותו
+      FilterPreferences? finalFilterPrefs = filterPrefs;
+      if (finalFilterPrefs == null) {
+        try {
+          finalFilterPrefs = await FilterPreferencesService.getFilterPreferences(userId);
+        } catch (e) {
+          debugPrint('❌ Error loading filter preferences: $e');
+        }
+      }
+      
+      if (finalFilterPrefs != null) {
+        filterIsEnabled = finalFilterPrefs.isEnabled;
+        userFilterRadiusKm = finalFilterPrefs.maxRadius;
+        userFilterCategories = finalFilterPrefs.categories;
+        userFilterRequestType = finalFilterPrefs.requestType;
+        }
+
+      // אם המשתמש לא הפעיל התראות מסוננות – עדיין נמשיך לפי העדפות ההתראה (notificationPrefs),
+      // אך אם הוא הפעיל סינון – נדרוש התאמה גם לפילטרים שבחר.
+      
+      // בדיקת מיקום קבוע
+      bool fixedLocationMatch = false;
+      if (notificationPrefs.newRequestsUseFixedLocation || notificationPrefs.newRequestsUseBothLocations) {
+        final userFixedLat = userData['latitude']?.toDouble();
+        final userFixedLng = userData['longitude']?.toDouble();
+        
+        if (userFixedLat != null && userFixedLng != null) {
+          // בדיקה אם הבקשה נמצאת בטווח החשיפה מהמיקום הקבוע של המשתמש
+          final distanceFromFixed = Geolocator.distanceBetween(
+            userFixedLat,
+            userFixedLng,
+            requestLat,
+            requestLng,
+          ) / 1000; // המרה למטרים לקילומטרים
+          
+          // בדיקה אם הבקשה נמצאת בטווח החשיפה מהמיקום הקבוע של המשתמש
+          if (distanceFromFixed <= exposureRadius) {
+            fixedLocationMatch = true;
+            debugPrint('✅ Fixed location match for user $userId: distance = ${distanceFromFixed.toStringAsFixed(2)} km, exposure radius = ${exposureRadius.toStringAsFixed(2)} km');
+          }
+          
+          // בדיקה גם בכיוון השני - אם המיקום הקבוע של המשתמש נמצא בטווח החשיפה של הבקשה
+          // (זה לא צריך להיות כפול, אבל בואו נשמור את זה לכל מקרה)
+          // כבר בדקנו למעלה
+        }
+      }
+      
+      // בדיקת מיקום נייד - נבדוק אם נשמר ב-Firestore
+      bool mobileLocationMatch = false;
+      if (notificationPrefs.newRequestsUseMobileLocation || notificationPrefs.newRequestsUseBothLocations) {
+        double? userMobileLat = userData['mobileLatitude']?.toDouble();
+        double? userMobileLng = userData['mobileLongitude']?.toDouble();
+
+        // אם אין מיקום נייד שמור, ננסה למשוך אותו מהשרת מספר פעמים (כל 30 שנ')
+        int retries = 3; // נבדוק למשך דקה וחצי סה"כ
+        while ((userMobileLat == null || userMobileLng == null) && retries > 0) {
+          await Future.delayed(const Duration(seconds: 30));
+          try {
+            final refreshedUserDoc = await FirebaseFirestore.instance
+                .collection('users')
+                .doc(userId)
+                .get();
+            final refreshed = refreshedUserDoc.data();
+            userMobileLat = refreshed?['mobileLatitude']?.toDouble();
+            userMobileLng = refreshed?['mobileLongitude']?.toDouble();
+            if (userMobileLat != null && userMobileLng != null) {
+              debugPrint('📍 Pulled fresh mobile location for user $userId');
+              break;
+            }
+          } catch (_) {}
+          retries--;
+        }
+
+        if (userMobileLat != null && userMobileLng != null) {
+          // בדיקה אם הבקשה נמצאת בטווח החשיפה מהמיקום הנייד של המשתמש
+          final distanceFromMobile = Geolocator.distanceBetween(
+            userMobileLat,
+            userMobileLng,
+            requestLat,
+            requestLng,
+          ) / 1000; // המרה למטרים לקילומטרים
+          
+          debugPrint('📍 Checking mobile location for user $userId:');
+          debugPrint('   Mobile location: $userMobileLat, $userMobileLng');
+          debugPrint('   Request location: $requestLat, $requestLng');
+          debugPrint('   Distance: ${distanceFromMobile.toStringAsFixed(2)} km');
+          debugPrint('   Request exposure radius: ${exposureRadius.toStringAsFixed(2)} km');
+          
+          if (distanceFromMobile <= exposureRadius) {
+            mobileLocationMatch = true;
+            debugPrint('✅ Mobile location match for user $userId: distance = ${distanceFromMobile.toStringAsFixed(2)} km <= exposure radius = ${exposureRadius.toStringAsFixed(2)} km');
+          } else {
+            debugPrint('❌ Mobile location NOT in range for user $userId: distance = ${distanceFromMobile.toStringAsFixed(2)} km > exposure radius = ${exposureRadius.toStringAsFixed(2)} km');
+          }
+          
+        } else {
+          debugPrint('⚠️ No mobile location stored for user $userId (mobileLat: $userMobileLat, mobileLng: $userMobileLng) - will use fixed location if available');
+          // אם אין מיקום נייד אך יש העדפה "מיקום נייד בלבד" - ניפול חזרה למיקום קבוע כדי לא לפספס
+          // זאת בהתאם לדרישה לבדוק גם מיקום קבוע
+          if (notificationPrefs.newRequestsUseMobileLocation && !notificationPrefs.newRequestsUseBothLocations && !fixedLocationMatch) {
+            debugPrint('⚠️ User $userId prefers mobile location only, but no mobile location available and fixed location does not match');
+            return false;
+          }
+        }
+      }
+      
+      // בדיקה לפי טווח הסינון של המשתמש (אם הוגדר) מול המיקום הטוב ביותר הזמין
+      bool userFilterRadiusMatch = false;
+      if (userFilterRadiusKm != null && userFilterRadiusKm > 0) {
+        debugPrint('🔍 Checking user filter radius for user $userId: filterMaxRadius = $userFilterRadiusKm km');
+        // בחר מיקום משתמש מועדף לפי ההעדפות: נייד -> קבוע
+        double? bestLat;
+        double? bestLng;
+        String bestLocationSource = 'none';
+        if (notificationPrefs.newRequestsUseMobileLocation || notificationPrefs.newRequestsUseBothLocations) {
+          bestLat = userData['mobileLatitude']?.toDouble();
+          bestLng = userData['mobileLongitude']?.toDouble();
+          if (bestLat != null && bestLng != null) {
+            bestLocationSource = 'mobile';
+          }
+        }
+        if ((bestLat == null || bestLng == null) && (notificationPrefs.newRequestsUseFixedLocation || notificationPrefs.newRequestsUseBothLocations)) {
+          bestLat = userData['latitude']?.toDouble();
+          bestLng = userData['longitude']?.toDouble();
+          if (bestLat != null && bestLng != null) {
+            bestLocationSource = 'fixed';
+          }
+        }
+        if (bestLat != null && bestLng != null) {
+          debugPrint('   Best location source: $bestLocationSource ($bestLat, $bestLng)');
+          final distFromBest = Geolocator.distanceBetween(bestLat, bestLng, requestLat, requestLng) / 1000;
+          debugPrint('   Distance from best location: ${distFromBest.toStringAsFixed(2)} km');
+          debugPrint('   User filter max radius: $userFilterRadiusKm km');
+          if (distFromBest <= userFilterRadiusKm) {
+            userFilterRadiusMatch = true;
+            debugPrint('✅ User filter radius match: distance = ${distFromBest.toStringAsFixed(2)} km (<= $userFilterRadiusKm km)');
+          } else {
+            debugPrint('❌ User filter radius NOT in range: distance = ${distFromBest.toStringAsFixed(2)} km (> $userFilterRadiusKm km)');
+          }
+        } else {
+          debugPrint('⚠️ No location available for user filter radius check');
+        }
+      } else {
+        debugPrint('🔍 No user filter radius defined (userFilterRadiusKm: $userFilterRadiusKm)');
+      }
+      
+      // בדיקת מיקום נוסף (אם הוגדר בסינון)
+      bool additionalLocationMatch = false;
+      if (finalFilterPrefs != null &&
+          finalFilterPrefs.useAdditionalLocation == true && 
+          finalFilterPrefs.additionalLocationLatitude != null && 
+          finalFilterPrefs.additionalLocationLongitude != null && 
+          finalFilterPrefs.additionalLocationRadius != null) {
+        final additionalLat = finalFilterPrefs.additionalLocationLatitude!;
+        final additionalLng = finalFilterPrefs.additionalLocationLongitude!;
+        final additionalRadius = finalFilterPrefs.additionalLocationRadius!;
+        
+        debugPrint('🔍 Checking additional location for user $userId:');
+        debugPrint('   Additional location: $additionalLat, $additionalLng');
+        debugPrint('   Additional location radius: $additionalRadius km');
+        debugPrint('   Request location: $requestLat, $requestLng');
+        
+        final distFromAdditional = Geolocator.distanceBetween(
+          additionalLat,
+          additionalLng,
+          requestLat,
+          requestLng,
+        ) / 1000;
+        
+        debugPrint('   Distance from additional location: ${distFromAdditional.toStringAsFixed(2)} km');
+        debugPrint('   Additional location radius: $additionalRadius km');
+        
+        if (distFromAdditional <= additionalRadius) {
+          additionalLocationMatch = true;
+          debugPrint('✅ Additional location match: distance = ${distFromAdditional.toStringAsFixed(2)} km (<= $additionalRadius km)');
+        } else {
+          debugPrint('❌ Additional location NOT in range: distance = ${distFromAdditional.toStringAsFixed(2)} km (> $additionalRadius km)');
+        }
+      }
+
+      // בדיקת קטגוריה מול סינון (אם המשתמש הגדיר קטגוריות בסינון)
+      bool categoryFilterMatch = true; // ברירת מחדל – אם לא הגדיר קטגוריות
+      if (filterIsEnabled && userFilterCategories.isNotEmpty) {
+        final displayName = request.category.categoryDisplayName;
+        final internalName = request.category.name;
+        final bool filterCategoriesMatch = userFilterCategories.contains(displayName) || userFilterCategories.contains(internalName);
+
+        // התאמה מול תחומי העיסוק של המשתמש (כגיבוי אם הפילטרים מצמצמים מדי)
+        final List<dynamic> userBusinessCatsRaw = (userData['businessCategories'] as List?) ?? const [];
+        final Set<String> userBusinessCats = userBusinessCatsRaw.map((e) => e.toString()).toSet();
+        final bool businessCategoriesMatch = userBusinessCats.contains(displayName) || userBusinessCats.contains(internalName);
+
+        categoryFilterMatch = filterCategoriesMatch || businessCategoriesMatch;
+        debugPrint('   Category filter decision: filterMatch=$filterCategoriesMatch, businessMatch=$businessCategoriesMatch => final=$categoryFilterMatch');
+      }
+
+      // בדיקת סוג בקשה מול סינון (אם הוגדר)
+      bool requestTypeFilterMatch = true;
+      if (filterIsEnabled && userFilterRequestType != null) {
+        if (userFilterRequestType == 'paid') {
+          requestTypeFilterMatch = request.type == RequestType.paid;
+        } else if (userFilterRequestType == 'free') {
+          requestTypeFilterMatch = request.type == RequestType.free;
+        }
+      }
+
+      // החזרת תוצאה: התאמת מיקום לפי ההעדפות OR התאמה לטווח הסינון שהמשתמש הגדיר OR מיקום נוסף
+      debugPrint('📊 Final location check results for user $userId:');
+      debugPrint('   Fixed location match: $fixedLocationMatch');
+      debugPrint('   Mobile location match: $mobileLocationMatch');
+      debugPrint('   User filter radius match: $userFilterRadiusMatch');
+      debugPrint('   Additional location match: $additionalLocationMatch');
+      debugPrint('   Category filter match: $categoryFilterMatch');
+      debugPrint('   Request type filter match: $requestTypeFilterMatch');
+      
+      bool finalResult = false;
+      if (notificationPrefs.newRequestsUseBothLocations) {
+        finalResult = ((fixedLocationMatch || mobileLocationMatch) || userFilterRadiusMatch || additionalLocationMatch) && categoryFilterMatch && requestTypeFilterMatch;
+        debugPrint('   Using "both locations" logic: (($fixedLocationMatch || $mobileLocationMatch) || $userFilterRadiusMatch || $additionalLocationMatch) && $categoryFilterMatch && $requestTypeFilterMatch = $finalResult');
+      } else if (notificationPrefs.newRequestsUseFixedLocation) {
+        finalResult = (fixedLocationMatch || userFilterRadiusMatch || additionalLocationMatch) && categoryFilterMatch && requestTypeFilterMatch;
+        debugPrint('   Using "fixed location" logic: ($fixedLocationMatch || $userFilterRadiusMatch || $additionalLocationMatch) && $categoryFilterMatch && $requestTypeFilterMatch = $finalResult');
+      } else if (notificationPrefs.newRequestsUseMobileLocation) {
+        finalResult = (mobileLocationMatch || userFilterRadiusMatch || additionalLocationMatch) && categoryFilterMatch && requestTypeFilterMatch;
+        debugPrint('   Using "mobile location" logic: ($mobileLocationMatch || $userFilterRadiusMatch || $additionalLocationMatch) && $categoryFilterMatch && $requestTypeFilterMatch = $finalResult');
+      } else {
+        // גם אם אין העדפות מיקום, נבדוק מיקום נוסף
+        finalResult = additionalLocationMatch && categoryFilterMatch && requestTypeFilterMatch;
+        debugPrint('   Using "additional location only" logic: $additionalLocationMatch && $categoryFilterMatch && $requestTypeFilterMatch = $finalResult');
+        if (!additionalLocationMatch) {
+          debugPrint('   ⚠️ No location preference enabled and no additional location match - returning false');
+        return false;
+        }
+      }
+      
+      debugPrint('🎯 Final notification decision for user $userId: $finalResult');
+      return finalResult;
     } catch (e) {
-      debugPrint('Error sending default notifications: $e');
+      debugPrint('❌ Error checking notification location for user $userId: $e');
+      // במקרה של שגיאה, לא נשלוח התראה (זהירות)
+      return false;
     }
   }
 
@@ -825,10 +1289,12 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
     _titleController.dispose();
     _descriptionController.dispose();
     _phoneController.dispose();
+    _priceController.dispose();
     super.dispose();
   }
 
   Future<void> _pickImages() async {
+    final l10n = AppLocalizations.of(context);
     try {
       // בדיקת הרשאות
       PermissionStatus permission = PermissionStatus.denied;
@@ -870,8 +1336,8 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
       if (permission != PermissionStatus.granted) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('נדרשת הרשאת גישה לתמונות'),
+            SnackBar(
+              content: Text(l10n.permissionRequiredImages),
               duration: Duration(seconds: 2),
             ),
           );
@@ -893,8 +1359,8 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
         if (availableSlots <= 0) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('כבר יש 5 תמונות. מחק תמונות כדי להוסיף חדשות.'),
+              SnackBar(
+                content: Text(l10n.alreadyHas5Images),
                 duration: Duration(seconds: 2),
                 backgroundColor: Colors.orange,
               ),
@@ -917,7 +1383,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('נוספו $availableSlots תמונות (מגבלת 5 תמונות)'),
+                content: Text(l10n.addedImagesCount(availableSlots)),
                 duration: const Duration(seconds: 2),
                 backgroundColor: Colors.orange,
               ),
@@ -927,7 +1393,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('נוספו ${imagesToAdd.length} תמונות'),
+                content: Text(l10n.addedImagesCount(imagesToAdd.length)),
                 duration: const Duration(seconds: 1),
                 backgroundColor: Colors.green,
               ),
@@ -940,7 +1406,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('שגיאה בבחירת תמונות: $e'),
+            content: Text('${l10n.errorSelectingImages}: $e'),
             duration: const Duration(seconds: 2),
           ),
         );
@@ -949,6 +1415,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
   }
 
   Future<void> _takePhoto() async {
+    final l10n = AppLocalizations.of(context);
     try {
       // בדיקת הרשאות מצלמה
       PermissionStatus permission = await Permission.camera.status;
@@ -959,8 +1426,8 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
       if (permission != PermissionStatus.granted) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('נדרשת הרשאת גישה למצלמה'),
+          SnackBar(
+            content: Text(l10n.permissionRequiredCamera),
               duration: Duration(seconds: 2),
             ),
           );
@@ -983,8 +1450,8 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
         if (_selectedImageFiles.length >= 5) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('לא ניתן להוסיף יותר מ-5 תמונות'),
+              SnackBar(
+                content: Text(l10n.cannotAddMoreThan5Images),
                 duration: Duration(seconds: 2),
                 backgroundColor: Colors.orange,
               ),
@@ -1000,8 +1467,8 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
         // הצגת הודעה על הצלחה
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('תמונה נוספה בהצלחה'),
+            SnackBar(
+              content: Text(l10n.imageAddedSuccessfully),
               duration: Duration(seconds: 1),
               backgroundColor: Colors.green,
             ),
@@ -1013,7 +1480,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('שגיאה בצילום תמונה: $e'),
+            content: Text('${l10n.errorTakingPhoto}: $e'),
             duration: const Duration(seconds: 2),
           ),
         );
@@ -1022,6 +1489,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
   }
 
   Future<void> _takeMultiplePhotos() async {
+    final l10n = AppLocalizations.of(context);
     try {
       // בדיקת הרשאות מצלמה
       PermissionStatus permission = await Permission.camera.status;
@@ -1032,8 +1500,8 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
       if (permission != PermissionStatus.granted) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('נדרשת הרשאת גישה למצלמה'),
+          SnackBar(
+            content: Text(l10n.permissionRequiredCamera),
               duration: Duration(seconds: 2),
             ),
           );
@@ -1041,20 +1509,23 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
         return;
       }
 
+      // Guard context usage after async gap
+      if (!mounted) return;
+
       // הצגת דיאלוג לאישור
       final bool? shouldContinue = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('צילום תמונות מרובות'),
-          content: const Text('לחץ "אישור" כדי לצלם תמונה נוספת'),
+          title: Text(l10n.multiplePhotoCapture),
+          content: Text(l10n.clickOkToCapture),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('ביטול'),
+              child: Text(l10n.cancel),
             ),
             ElevatedButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('אישור'),
+              child: Text(l10n.ok),
             ),
           ],
         ),
@@ -1076,8 +1547,8 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
           if (_selectedImageFiles.length >= 5) {
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('לא ניתן להוסיף יותר מ-5 תמונות'),
+                SnackBar(
+                  content: Text(l10n.cannotAddMoreThan5Images),
                   duration: Duration(seconds: 2),
                   backgroundColor: Colors.orange,
                 ),
@@ -1093,8 +1564,8 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
           // הצגת הודעה על הצלחה
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('תמונה נוספה בהצלחה'),
+              SnackBar(
+                content: Text(l10n.imageAddedSuccessfully),
                 duration: Duration(seconds: 1),
                 backgroundColor: Colors.green,
               ),
@@ -1116,6 +1587,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
   }
 
   Future<void> _uploadImages() async {
+    final l10n = AppLocalizations.of(context);
     if (_selectedImageFiles.isEmpty) {
       debugPrint('No images to upload');
       return;
@@ -1168,7 +1640,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('שגיאה בהעלאת תמונות: $e'),
+            content: Text('${l10n.errorUploadingImages}: $e'),
             duration: const Duration(seconds: 2),
           ),
         );
@@ -1184,7 +1656,9 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
     
     // הצגת הודעת הדרכה רק כשהמשתמש נכנס למסך בקשה חדשה
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
       _showNewRequestSpecificTutorial();
+      }
     });
     
     return NetworkAwareWidget(
@@ -1215,7 +1689,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                         borderRadius: BorderRadius.circular(20),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.1),
+                            color: Colors.black.withValues(alpha: 0.1),
                             blurRadius: 10,
                             offset: const Offset(0, 5),
                           ),
@@ -1236,11 +1710,11 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                           ),
                           const SizedBox(height: 16),
                           Text(
-                            'יוצר בקשה...',
+                            l10n.creatingRequest,
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w500,
-                              color: Colors.grey[700],
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ],
@@ -1270,65 +1744,56 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                         builder: (context, snapshot) {
                           if (snapshot.hasData && snapshot.data!.exists) {
                             final data = snapshot.data!.data() as Map<String, dynamic>;
-                            final userType = data['userType'] as String?;
+                            final userType = data['userType'] as String? ?? 'personal';
                             final isSubscriptionActive = data['isSubscriptionActive'] as bool? ?? false;
-                            final recommendationsCount = data['recommendationsCount'] as int? ?? 0;
-                            final averageRating = data['averageRating'] as double? ?? 0.0;
                             
                             // חישוב הגבלות
                             int maxRequests = 1;
-                            double maxRadius = 10.0;
+                            double maxRadius = 3.0; // ברירת מחדל לפרטי חינם
                             
                             if (userType == 'business' && isSubscriptionActive) {
                               maxRequests = 10;
-                              maxRadius = 50.0;
+                              maxRadius = 8.0;
                             } else if (userType == 'personal' && isSubscriptionActive) {
                               maxRequests = 5;
-                              maxRadius = 10.0;
+                              maxRadius = 5.0;
+                            } else if (userType == 'guest') {
+                              maxRadius = 5.0;
                             }
                             
-                            // בונוסים
-                            maxRadius += (recommendationsCount * 2.0);
-                            if (averageRating >= 4.5) {
-                              maxRadius += 15.0;
-                            } else if (averageRating >= 4.0) {
-                              maxRadius += 10.0;
-                            } else if (averageRating >= 3.5) {
-                              maxRadius += 5.0;
-                            }
-                            
-                            maxRadius = maxRadius.clamp(10.0, 500.0);
+                            // הגבלת תצוגה לתוך תחום הגיוני
+                            maxRadius = maxRadius.clamp(0.1, 250.0);
                             
                             return Container(
                               margin: const EdgeInsets.only(bottom: 16),
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: Colors.blue[50],
+                                color: Theme.of(context).colorScheme.primaryContainer,
                                 borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.blue[200]!),
+                                border: Border.all(color: Theme.of(context).colorScheme.primary),
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Row(
                                     children: [
-                                      Icon(Icons.info, color: Colors.blue[700], size: 20),
+                                      Icon(Icons.info, color: Theme.of(context).colorScheme.primary, size: 20),
                                       const SizedBox(width: 8),
                                       Text(
-                                        'הגבלות הבקשות שלך',
+                                        l10n.requestLimits,
                                         style: TextStyle(
                                           fontWeight: FontWeight.bold,
-                                          color: Colors.blue[700],
+                                          color: Theme.of(context).colorScheme.primary,
                                         ),
                                       ),
                                     ],
                                   ),
                                   const SizedBox(height: 8),
                                   Text(
-                                    '• מקסימום בקשות בחודש: $maxRequests\n• טווח חיפוש מקסימלי: ${maxRadius.toStringAsFixed(0)} ק"מ',
+                                    '${l10n.maxRequestsPerMonth(maxRequests)}\n• ${l10n.maxSearchRange(maxRadius.toStringAsFixed(0))}',
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: Colors.blue[600],
+                                      color: Theme.of(context).colorScheme.primary,
                                     ),
                                   ),
                                   if (userType != 'business' || !isSubscriptionActive) ...[
@@ -1337,7 +1802,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                                       '⚠️ בקשות בתשלום זמינות רק למשתמשים עסקיים עם מנוי פעיל',
                                       style: TextStyle(
                                         fontSize: 11,
-                                        color: Colors.orange[600],
+                                        color: Theme.of(context).colorScheme.tertiary,
                                         fontWeight: FontWeight.w600,
                                       ),
                                     ),
@@ -1348,7 +1813,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                                       '💡 איך להגדיל: המלץ על האפליקציה, שפר דירוג, או הירשם כמנוי',
                                       style: TextStyle(
                                         fontSize: 11,
-                                        color: Colors.blue[500],
+                                        color: Theme.of(context).colorScheme.primary,
                                         fontStyle: FontStyle.italic,
                                       ),
                                     ),
@@ -1371,8 +1836,8 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                         child: TwoLevelCategorySelector(
                           selectedCategories: _selectedCategory != null ? [_selectedCategory!] : [],
                           maxSelections: 1,
-                          title: 'בחירת קטגוריה',
-                          instruction: 'בחר תחום ראשי ואז תחום משנה:',
+                          title: l10n.selectCategory,
+                          instruction: l10n.selectMainCategoryThenSub,
                           onSelectionChanged: (categories) {
                             if (categories.isNotEmpty) {
                               setState(() {
@@ -1391,13 +1856,13 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                       // כותרת
                       TextFormField(
                         controller: _titleController,
-                        decoration: const InputDecoration(
-                          labelText: 'כותרת',
-                          border: OutlineInputBorder(),
+                        decoration: InputDecoration(
+                          labelText: l10n.title,
+                          border: const OutlineInputBorder(),
                         ),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
-                            return 'אנא הזן כותרת';
+                            return l10n.enterTitle;
                           }
                           return null;
                         },
@@ -1407,19 +1872,90 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                       // תיאור
                       TextFormField(
                         controller: _descriptionController,
-                        decoration: const InputDecoration(
-                          labelText: 'תיאור',
-                          border: OutlineInputBorder(),
+                        decoration: InputDecoration(
+                          labelText: l10n.description,
+                          border: const OutlineInputBorder(),
                         ),
                         maxLines: 3,
-                        validator: (value) {
-                          if (value == null || value.isEmpty) {
-                            return 'אנא הזן תיאור';
-                          }
-                          return null;
-                        },
+                        // ✅ השדה "תיאור" הוא אופציונאלי - אין וולידציה
                       ),
                       const SizedBox(height: 16),
+                      
+                      // ✅ שאלה: האם להציג לכל נותני השירות מכל התחומים או רק לנותני שירות מתחום X
+                      // מופיע רק אם נבחרה קטגוריה
+                      if (_selectedCategory != null) ...[
+                        Builder(
+                          builder: (context) {
+                            final l10n = AppLocalizations.of(context);
+                            final categoryName = _selectedCategory!.categoryDisplayName;
+                            
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  l10n.showToAllUsersOrProviders(categoryName),
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                    color: _showToAllUsersError 
+                                        ? Theme.of(context).colorScheme.error
+                                        : (Theme.of(context).brightness == Brightness.dark 
+                                            ? Colors.white 
+                                            : Colors.black87),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    Radio<bool>(
+                                      value: true,
+                                      groupValue: _showToAllUsers,
+                                      onChanged: (bool? value) {
+                                        setState(() {
+                                          _showToAllUsers = value;
+                                          _showToAllUsersError = false; // הסרת שגיאה אחרי בחירה
+                                        });
+                                      },
+                                    ),
+                                    Expanded(
+                                      child: Text(l10n.yesToAllUsers),
+                                    ),
+                                    const SizedBox(width: 24),
+                                    Radio<bool>(
+                                      value: false,
+                                      groupValue: _showToAllUsers,
+                                      onChanged: (bool? value) async {
+                                        setState(() {
+                                          _showToAllUsers = value;
+                                          _showToAllUsersError = false; // הסרת שגיאה אחרי בחירה
+                                        });
+                                        // ✅ הצגת דיאלוג עם מספר נותני שירות כשמשתמש בוחר "רק לנותני שירות מתחום X"
+                                        if (value == false && _selectedCategory != null) {
+                                          await _checkAvailableHelpers();
+                                        }
+                                      },
+                                    ),
+                                    Expanded(
+                                      child: Text(l10n.onlyToProvidersInCategory(categoryName)),
+                                    ),
+                                  ],
+                                ),
+                                if (_showToAllUsersError) ...[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'אנא בחר האם להציג את הבקשה לכל נותני השירות מכל התחומים או רק לנותני שירות מתחום $categoryName',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Theme.of(context).colorScheme.error,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 16),
+                      ],
                       
                       // בחירת רמת דחיפות
                       Container(
@@ -1431,23 +1967,27 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'רמת דחיפות',
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                            Text(
+                              l10n.urgencyLevel,
+                              style: TextStyle(
+                                fontSize: 16, 
+                                fontWeight: FontWeight.bold,
+                                color: Theme.of(context).colorScheme.onSurface,
+                              ),
                             ),
                             const SizedBox(height: 12),
                             Row(
                               children: [
                                 Expanded(
-                                  child: _buildUrgencyButton(UrgencyLevel.normal, '🕓 רגיל'),
+                                  child: _buildUrgencyButton(UrgencyLevel.normal, '🕓 ${l10n.normalUrgency}'),
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
-                                  child: _buildUrgencyButton(UrgencyLevel.urgent24h, '⏰ תוך 24 שעות'),
+                                  child: _buildUrgencyButton(UrgencyLevel.urgent24h, '⏰ ${l10n.within24HoursUrgency}'),
                                 ),
                                 const SizedBox(width: 8),
                                 Expanded(
-                                  child: _buildUrgencyButton(UrgencyLevel.emergency, '🚨 עכשיו'),
+                                  child: _buildUrgencyButton(UrgencyLevel.emergency, '🚨 ${l10n.nowUrgency}'),
                                 ),
                               ],
                             ),
@@ -1472,9 +2012,9 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                                 children: [
                                   const Icon(Icons.photo_library, color: Colors.blue),
                                   const SizedBox(width: 8),
-                                  const Text(
-                                    'תמונות לבקשה',
-                                    style: TextStyle(
+                                  Text(
+                                    l10n.imagesForRequest,
+                                    style: const TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.bold,
                                     ),
@@ -1482,38 +2022,11 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                                 ],
                               ),
                               const SizedBox(height: 8),
-                              const Text(
-                                'באפשרותך להוסיף תמונות שיעזרו להבין את הבקשה טוב יותר',
-                                style: TextStyle(
+                              Text(
+                                l10n.youCanAddImages,
+                                style: const TextStyle(
                                   fontSize: 14,
                                   color: Colors.grey,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              const Text(
-                                '🗑️ תוכל למחוק תמונות על ידי לחיצה על X האדום',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.red,
-                                  fontStyle: FontStyle.italic,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              const Text(
-                                '✨ התמונות יוצגו כקטנות במסך הבית ויוכלו להגדלה',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.purple,
-                                  fontStyle: FontStyle.italic,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              const Text(
-                                '🚀 התמונות יועלו ל-Firebase Storage ויוצגו במהירות',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.blue,
-                                  fontStyle: FontStyle.italic,
                                 ),
                               ),
                               const SizedBox(height: 12),
@@ -1523,7 +2036,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                                     child: ElevatedButton.icon(
                                       onPressed: _selectedImageFiles.length >= 5 ? null : _pickImages,
                                       icon: const Icon(Icons.photo_library),
-                                      label: Text(_selectedImageFiles.length >= 5 ? 'מגבלת 5 תמונות' : 'בחר תמונות'),
+                                      label: Text(_selectedImageFiles.length >= 5 ? l10n.limit5Images : l10n.selectImages),
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: _selectedImageFiles.length >= 5 ? Colors.grey : const Color(0xFF03A9F4),
                                         foregroundColor: Colors.white,
@@ -1537,7 +2050,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                                       child: ElevatedButton.icon(
                                         onPressed: _selectedImageFiles.length >= 5 ? null : _takePhoto,
                                         icon: const Icon(Icons.camera_alt),
-                                        label: Text(_selectedImageFiles.length >= 5 ? 'מגבלת 5 תמונות' : 'צלם תמונה'),
+                                        label: Text(_selectedImageFiles.length >= 5 ? l10n.limit5Images : l10n.takePhoto),
                                         style: ElevatedButton.styleFrom(
                                           backgroundColor: _selectedImageFiles.length >= 5 ? Colors.grey : const Color(0xFFE91E63),
                                           foregroundColor: Colors.white,
@@ -1550,7 +2063,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                               if (_selectedImageFiles.isNotEmpty) ...[
                                 const SizedBox(height: 12),
                                 Text(
-                                  'נבחרו ${_selectedImageFiles.length} תמונות',
+                                  l10n.selectedImagesCount(_selectedImageFiles.length),
                                   style: const TextStyle(
                                     fontSize: 14,
                                     fontWeight: FontWeight.w500,
@@ -1627,11 +2140,11 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                           // אימות אופציונלי - רק אם הוזן חלק מהמספר
                           if (_selectedPhonePrefix.isNotEmpty || _selectedPhoneNumber.isNotEmpty) {
                             if (_selectedPhonePrefix.isEmpty || _selectedPhoneNumber.isEmpty) {
-                              return 'הזן קידומת ומספר מלאים';
+                              return l10n.enterFullPrefixAndNumber;
                             }
                             String fullNumber = '$_selectedPhonePrefix$_selectedPhoneNumber';
                             if (!PhoneValidation.isValidIsraeliPhone(fullNumber)) {
-                              return 'מספר טלפון לא תקין';
+                              return l10n.invalidPhoneNumber;
                             }
                           }
                           return null;
@@ -1655,11 +2168,11 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               DropdownButtonFormField<RequestType>(
-                                value: _selectedType,
-                                decoration: const InputDecoration(
-                                  labelText: 'סוג בקשה',
-                                  border: OutlineInputBorder(),
-                                  prefixIcon: Icon(Icons.payment),
+                                initialValue: _selectedType,
+                                decoration: InputDecoration(
+                                  labelText: l10n.requestType,
+                                  border: const OutlineInputBorder(),
+                                  prefixIcon: const Icon(Icons.payment),
                                 ),
                                 items: RequestType.values.map((type) {
                                   return DropdownMenuItem(
@@ -1682,13 +2195,13 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                                 padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(
                                   color: _selectedType == RequestType.free 
-                                      ? Colors.green[50] 
-                                      : Colors.blue[50],
+                                      ? Theme.of(context).colorScheme.primaryContainer 
+                                      : Theme.of(context).colorScheme.primaryContainer,
                                   borderRadius: BorderRadius.circular(8),
                                   border: Border.all(
                                     color: _selectedType == RequestType.free 
-                                        ? Colors.green[200]! 
-                                        : Colors.blue[200]!,
+                                        ? Theme.of(context).colorScheme.primary 
+                                        : Theme.of(context).colorScheme.primary,
                                   ),
                                 ),
                                 child: Row(
@@ -1697,22 +2210,18 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                                       _selectedType == RequestType.free 
                                           ? Icons.people 
                                           : Icons.business,
-                                      color: _selectedType == RequestType.free 
-                                          ? Colors.green[700] 
-                                          : Colors.blue[700],
+                                      color: Theme.of(context).colorScheme.onPrimaryContainer,
                                       size: 20,
                                     ),
                                     const SizedBox(width: 8),
                                     Expanded(
                                       child: Text(
                                         _selectedType == RequestType.free
-                                            ? 'בקשות חינם: כל סוגי המשתמשים יכולים לעזור (ללא הגבלת קטגוריה)'
-                                            : 'בקשות בתשלום: רק משתמשים עם קטגוריות מתאימות יכולים לעזור',
+                                            ? l10n.freeRequestsDescription
+                                            : l10n.paidRequestsDescription,
                                         style: TextStyle(
                                           fontSize: 12,
-                                          color: _selectedType == RequestType.free 
-                                              ? Colors.green[700] 
-                                              : Colors.blue[700],
+                                          color: Theme.of(context).colorScheme.onPrimaryContainer,
                                           fontWeight: FontWeight.w500,
                                         ),
                                       ),
@@ -1720,46 +2229,194 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                                   ],
                                 ),
                               ),
+                              // שדה מחיר (רק אם סוג הבקשה הוא בתשלום)
+                              if (_selectedType == RequestType.paid) ...[
+                                const SizedBox(height: 16),
+                                TextFormField(
+                                  controller: _priceController,
+                                  decoration: InputDecoration(
+                                    labelText: l10n.howMuchWillingToPay,
+                                    hintText: 'לדוגמה: 100',
+                                    border: const OutlineInputBorder(),
+                                    suffixText: '₪',
+                                  ),
+                                  keyboardType: TextInputType.numberWithOptions(decimal: true),
+                                  onChanged: (value) {
+                                    if (value.isEmpty) {
+                                      setState(() {
+                                        _price = null;
+                                      });
+                                    } else {
+                                      final parsedPrice = double.tryParse(value);
+                                      setState(() {
+                                        _price = parsedPrice;
+                                      });
+                                    }
+                                  },
+                                  validator: (value) {
+                                    if (value != null && value.isNotEmpty) {
+                                      final parsedPrice = double.tryParse(value);
+                                      if (parsedPrice == null || parsedPrice < 0) {
+                                        return 'אנא הזן מחיר תקין';
+                                      }
+                                    }
+                                    return null;
+                                  },
+                                ),
+                              ],
                             ],
                           );
                         },
                       ),
                       const SizedBox(height: 16),
                       
-                      // בחירת מיקום
+                      // בחירת מיקום - זמין רק אחרי בחירת קטגוריה
                       Card(
                         child: ListTile(
-                          leading: const Icon(Icons.location_on),
+                          leading: Icon(
+                            Icons.location_on,
+                            color: _selectedCategory == null 
+                                ? Colors.grey 
+                                : null,
+                          ),
                           title: Row(
                             children: [
                               Expanded(
-                                child: Text(_selectedAddress ?? 'בחר מיקום'),
+                                child: Text(
+                                  _selectedAddress ?? l10n.selectLocation,
+                                  style: TextStyle(
+                                    color: _selectedCategory == null 
+                                        ? Colors.grey 
+                                        : null,
+                                  ),
+                                ),
                               ),
                               GestureDetector(
                                 onTap: () => _showLocationInfoDialog(),
                                 child: Container(
                                   padding: const EdgeInsets.all(4),
                                   decoration: BoxDecoration(
-                                    color: Colors.blue[50],
+                                    color: Theme.of(context).colorScheme.primaryContainer,
                                     borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(color: Colors.blue[200]!),
+                                    border: Border.all(color: Theme.of(context).colorScheme.primary),
                                   ),
                                   child: Icon(
                                     Icons.info_outline,
-                                    color: Colors.blue[700],
+                                    color: Theme.of(context).colorScheme.primary,
                                     size: 16,
                                   ),
                                 ),
                               ),
                             ],
                           ),
-                          subtitle: _selectedLatitude != null 
-                              ? Text('${_selectedLatitude!.toStringAsFixed(4)}, ${_selectedLongitude!.toStringAsFixed(4)}${_exposureRadius != null ? ' • רדיוס: ${_exposureRadius!.toStringAsFixed(1)} ק"מ' : ''}')
-                              : const Text('לחץ לבחירת מיקום'),
-                          trailing: const Icon(Icons.arrow_forward_ios),
-                          onTap: _selectLocation,
+                          subtitle: _selectedCategory == null
+                              ? Text(
+                                  'אנא בחר תחום קודם',
+                                  style: TextStyle(
+                                    color: Theme.of(context).colorScheme.tertiary,
+                                    fontSize: 12,
+                                  ),
+                                )
+                              : (_selectedLatitude != null 
+                                  ? Text('${_selectedLatitude!.toStringAsFixed(4)}, ${_selectedLongitude!.toStringAsFixed(4)}${_exposureRadius != null ? ' • רדיוס: ${_exposureRadius!.toStringAsFixed(1)} ק"מ' : ''}')
+                                  : const Text('')),
+                          trailing: Icon(
+                            Icons.arrow_forward_ios,
+                            color: _selectedCategory == null 
+                                ? Colors.grey 
+                                : null,
+                          ),
+                          enabled: _selectedCategory != null,
+                          onTap: _selectedCategory == null 
+                              ? () {
+                                  // הצגת הודעה אם מנסים לבחור מיקום בלי קטגוריה
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(l10n.pleaseSelectCategoryFirst),
+                                      backgroundColor: Colors.orange,
+                                      duration: const Duration(seconds: 2),
+                                    ),
+                                  );
+                                }
+                              : _selectLocation,
                         ),
                       ),
+                      const SizedBox(height: 16),
+                      
+                      // ✅ האם להציג בקשה לנותני שירות שלא בטווח שהגדרת
+                      // מופיע רק אם נבחר מיקום (אפילו אם לא נבחר רדיוס חשיפה או קטגוריה)
+                      if (_selectedLatitude != null && _selectedLongitude != null) ...[
+                        Builder(
+                          builder: (context) {
+                            final l10n = AppLocalizations.of(context);
+                            // זיהוי האיזור לפי קו רוחב
+                            final region = getGeographicRegion(_selectedLatitude);
+                            final regionName = region.getDisplayName(l10n);
+                            // אם יש קטגוריה נבחרת, נציג את שמה, אחרת נציג "התחום שבחרת"
+                            final categoryName = _selectedCategory?.categoryDisplayName ?? l10n.theFieldYouSelected;
+                            
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  l10n.showToProvidersOutsideRange(regionName, categoryName),
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                    color: _showToProvidersOutsideRangeError 
+                                        ? Theme.of(context).colorScheme.error
+                                        : (Theme.of(context).brightness == Brightness.dark 
+                                            ? Colors.white 
+                                            : Colors.black87),
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    Radio<bool>(
+                                      value: true,
+                                      groupValue: _showToProvidersOutsideRange,
+                                      onChanged: (bool? value) {
+                                        setState(() {
+                                          _showToProvidersOutsideRange = value;
+                                          _showToProvidersOutsideRangeError = false; // הסרת שגיאה אחרי בחירה
+                                        });
+                                      },
+                                    ),
+                                    Expanded(
+                                      child: Text(l10n.yesAllProvidersInRegion(regionName)),
+                                    ),
+                                    const SizedBox(width: 24),
+                                    Radio<bool>(
+                                      value: false,
+                                      groupValue: _showToProvidersOutsideRange,
+                                      onChanged: (bool? value) {
+                                        setState(() {
+                                          _showToProvidersOutsideRange = value;
+                                          _showToProvidersOutsideRangeError = false; // הסרת שגיאה אחרי בחירה
+                                        });
+                                      },
+                                    ),
+                                    Expanded(
+                                      child: Text(l10n.noOnlyInRange),
+                                    ),
+                                  ],
+                                ),
+                                if (_showToProvidersOutsideRangeError) ...[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'אנא בחר האם להציג את הבקשה לנותני שירות מחוץ לטווח שהגדרת',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Theme.of(context).colorScheme.error,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            );
+                          },
+                        ),
+                      ],
                       const SizedBox(height: 16),
                       
                       // תאריך יעד
@@ -1768,7 +2425,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                           leading: const Icon(Icons.schedule),
                           title: Text(_selectedDeadline != null 
                               ? 'תאריך יעד: ${_selectedDeadline!.day}/${_selectedDeadline!.month}/${_selectedDeadline!.year}'
-                              : 'בחר תאריך יעד (אופציונלי)'),
+                              : l10n.selectDeadlineOptional),
                           subtitle: Text(_getDeadlineSubtitle()),
                           trailing: const Icon(Icons.arrow_forward_ios),
                           onTap: _selectDeadline,
@@ -1781,7 +2438,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                       if (_selectedType == RequestType.paid) ...[
                         Container(
                         decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey[300]!),
+                          border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         padding: const EdgeInsets.all(16),
@@ -1790,14 +2447,14 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                           children: [
                             Row(
                               children: [
-                                Icon(Icons.star, color: Colors.amber[600], size: 20),
+                                Icon(Icons.star, color: Theme.of(context).colorScheme.tertiary, size: 20),
                                 const SizedBox(width: 8),
                                 Text(
                                   'דירוגים מינימליים של עוזרים',
                                   style: TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.bold,
-                                    color: Colors.grey[800],
+                                    color: Theme.of(context).colorScheme.onSurface,
                                   ),
                                 ),
                               ],
@@ -1807,7 +2464,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                               'הבקשה תוצג רק למשתמשים עם הדירוגים הבאים ומעלה:',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.grey[600],
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
                               ),
                             ),
                             const SizedBox(height: 16),
@@ -1827,16 +2484,16 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                                     child: Container(
                                       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                                       decoration: BoxDecoration(
-                                        color: !_useDetailedRatings ? Colors.blue[600] : Colors.grey[200],
+                                        color: !_useDetailedRatings ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.surfaceContainer,
                                         borderRadius: BorderRadius.circular(8),
                                         border: Border.all(
-                                          color: !_useDetailedRatings ? Colors.blue[600]! : Colors.grey[400]!,
+                                          color: !_useDetailedRatings ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.outlineVariant,
                                         ),
                                       ),
                                       child: Text(
                                         'כל הדירוגים',
                                         style: TextStyle(
-                                          color: !_useDetailedRatings ? Colors.white : Colors.grey[600],
+                                          color: !_useDetailedRatings ? Theme.of(context).colorScheme.onPrimary : Theme.of(context).colorScheme.onSurfaceVariant,
                                           fontWeight: FontWeight.w600,
                                         ),
                                         textAlign: TextAlign.center,
@@ -1858,16 +2515,16 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                                     child: Container(
                                       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                                       decoration: BoxDecoration(
-                                        color: _useDetailedRatings ? Colors.blue[600] : Colors.grey[200],
+                                        color: _useDetailedRatings ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.surfaceContainer,
                                         borderRadius: BorderRadius.circular(8),
                                         border: Border.all(
-                                          color: _useDetailedRatings ? Colors.blue[600]! : Colors.grey[400]!,
+                                          color: _useDetailedRatings ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.outlineVariant,
                                         ),
                                       ),
                                       child: Text(
                                         'דירוגים מפורטים',
                                         style: TextStyle(
-                                          color: _useDetailedRatings ? Colors.white : Colors.grey[600],
+                                          color: _useDetailedRatings ? Theme.of(context).colorScheme.onPrimary : Theme.of(context).colorScheme.onSurfaceVariant,
                                           fontWeight: FontWeight.w600,
                                         ),
                                         textAlign: TextAlign.center,
@@ -1951,7 +2608,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                                     valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                                   ),
                                 )
-                              : const Text('שמור'),
+                              : Text(l10n.publishRequest),
                         ),
                       ),
                     ],
@@ -1965,6 +2622,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
 
   /// הצגת דיאלוג מידע על בחירת מיקום
   void _showLocationInfoDialog() {
+    final l10n = AppLocalizations.of(context);
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1975,49 +2633,59 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
           children: [
             Icon(
               Icons.info_outline,
-              color: Colors.blue[600],
+              color: Theme.of(context).colorScheme.primary,
               size: 28,
             ),
             const SizedBox(width: 8),
-            const Text(
-              'מידע על בחירת מיקום',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
+            Expanded(
+              child: Text(
+                l10n.locationInfoTitle,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).brightness == Brightness.dark
+                      ? Colors.white
+                      : Colors.black87,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 2,
               ),
             ),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.blue[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue[200]!),
+                                    color: Theme.of(context).colorScheme.primaryContainer,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Theme.of(context).colorScheme.primary),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'איך לבחור מיקום נכון:',
+                    l10n.howToSelectLocation,
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
-                      color: Colors.blue[700],
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.white
+                          : Colors.black87,
                     ),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '📍 בחר מיקום מדויק ככל האפשר\n'
-                    '🎯 הטווח יקבע כמה אנשים יראו את הבקשה\n'
-                    '📱 השתמש במפה כדי לבחור את המיקום המדויק',
+                    l10n.selectLocationInstructions,
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.blue[600],
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.white70
+                          : Colors.black87,
                     ),
                   ),
                 ],
@@ -2027,42 +2695,48 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.green[50],
+                color: Theme.of(context).colorScheme.primaryContainer,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.green[200]!),
+                border: Border.all(color: Theme.of(context).colorScheme.primary),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'טיפים לבחירת מיקום:',
+                    l10n.locationSelectionTips,
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
-                      color: Colors.green[700],
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.white
+                          : Colors.black87,
                     ),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '🏠 בחר את הכתובת המדויקת\n'
-                    '🚗 אם זה ברחוב, בחר את הצד הנכון\n'
-                    '🏢 אם זה בבניין, בחר את הכניסה הראשית\n'
-                    '📍 השתמש בחיפוש כתובת לדיוק מקסימלי\n'
-                    '📏 הטווח המינימלי הוא 0.1 ק"מ',
+                    l10n.locationSelectionTipsDetails,
                     style: TextStyle(
                       fontSize: 12,
-                      color: Colors.green[600],
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Colors.white70
+                          : Colors.black87,
                     ),
                   ),
                 ],
               ),
             ),
           ],
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('הבנתי'),
+            child: Text(
+              l10n.understood,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
           ),
         ],
       ),
@@ -2113,18 +2787,18 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
     
     switch (_selectedUrgency) {
       case UrgencyLevel.emergency:
-        // "עכשיו" - מקסימום 3 שעות מהיום
-        lastDate = now.add(const Duration(hours: 3));
-        initialDate = now.add(const Duration(hours: 1));
+        // "עכשיו" - שבוע מהתאריך הנוכחי (כדי שהבקשה תופיע במסך הבית שבוע)
+        lastDate = now.add(const Duration(days: 7));
+        initialDate = now.add(const Duration(days: 7));
         break;
       case UrgencyLevel.urgent24h:
-        // "תוך 24 שעות" - מקסימום 24 שעות מהיום
-        lastDate = now.add(const Duration(hours: 24));
-        initialDate = now.add(const Duration(hours: 6));
+        // "תוך 24 שעות" - שבוע מהתאריך הנוכחי (כדי שהבקשה תופיע במסך הבית שבוע)
+        lastDate = now.add(const Duration(days: 7));
+        initialDate = now.add(const Duration(days: 7));
         break;
       case UrgencyLevel.normal:
-        // "רגיל" - עד שנה מהיום
-        lastDate = now.add(const Duration(days: 365));
+        // "רגיל" - עד חודש מהיום
+        lastDate = now.add(const Duration(days: 30));
         initialDate = _selectedDeadline ?? now.add(const Duration(days: 1));
         break;
     }
@@ -2145,13 +2819,14 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
   
   // פונקציה להצגת הודעת עזרה לתאריך יעד
   String _getDeadlineSubtitle() {
+    final l10n = AppLocalizations.of(context);
     switch (_selectedUrgency) {
       case UrgencyLevel.emergency:
-        return 'עד 3 שעות מהיום (בקשה דחופה)';
+        return 'תופיע במסך הבית למשך שבוע';
       case UrgencyLevel.urgent24h:
-        return 'עד 24 שעות מהיום (בקשה דחופה)';
+        return 'תופיע במסך הבית למשך שבוע';
       case UrgencyLevel.normal:
-        return 'עד שנה מהיום (בקשה רגילה)';
+        return l10n.upToOneMonth;
     }
   }
   
@@ -2164,16 +2839,16 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
     
     switch (newUrgency) {
       case UrgencyLevel.emergency:
-        // אם התאריך הוא יותר מ-3 שעות מהיום
-        shouldReset = _selectedDeadline!.isAfter(now.add(const Duration(hours: 3)));
+        // אם התאריך הוא יותר משבוע מהיום - לאפס (כי בקשות דחופות אמורות להופיע שבוע)
+        shouldReset = _selectedDeadline!.isAfter(now.add(const Duration(days: 7)));
         break;
       case UrgencyLevel.urgent24h:
-        // אם התאריך הוא יותר מ-24 שעות מהיום
-        shouldReset = _selectedDeadline!.isAfter(now.add(const Duration(hours: 24)));
+        // אם התאריך הוא יותר משבוע מהיום - לאפס (כי בקשות דחופות אמורות להופיע שבוע)
+        shouldReset = _selectedDeadline!.isAfter(now.add(const Duration(days: 7)));
         break;
       case UrgencyLevel.normal:
-        // אין הגבלה לבקשות רגילות
-        shouldReset = false;
+        // אם התאריך הוא יותר מחודש מהיום - לאפס
+        shouldReset = _selectedDeadline!.isAfter(now.add(const Duration(days: 30)));
         break;
     }
     
@@ -2199,14 +2874,22 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
       builder: (context) => AlertDialog(
         title: Row(
           children: [
-            Icon(Icons.warning, color: Colors.orange[600]),
+            Icon(Icons.warning, color: Theme.of(context).colorScheme.tertiary),
             const SizedBox(width: 8),
-            const Text('המלצה'),
+            Expanded(
+              child: const Text(
+                'המלצה',
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+            ),
           ],
         ),
-        content: Text(
-          'נמצאו רק $_availableHelpersCount נותני שירות זמינים בתחום זה.\n\n'
-          'מומלץ לבחור "כל הדירוגים" כדי להגדיל את הסיכוי לקבל עזרה.',
+        content: SingleChildScrollView(
+          child: Text(
+            'נמצאו רק $_availableHelpersCount נותני שירות זמינים בתחום זה.\n\n'
+            'מומלץ לבחור "כל הדירוגים" כדי להגדיל את הסיכוי לקבל עזרה.',
+          ),
         ),
         actions: [
           TextButton(
@@ -2225,8 +2908,11 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
     );
   }
   
-  // הצגת דיאלוג מנומס כאשר אין נותני שירות בתחום
-  void _showNoHelpersInCategoryDialog() {
+  // ✅ הצגת דיאלוג עם מספר נותני שירות בתחום
+  void _showHelpersCountDialog(int count) {
+    final l10n = AppLocalizations.of(context);
+    final hasHelpers = count > 0;
+    
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -2235,103 +2921,128 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
         ),
         title: Row(
           children: [
-            Icon(Icons.info_outline, color: Colors.blue[600], size: 28),
+            Icon(
+              hasHelpers ? Icons.check_circle_outline : Icons.info_outline,
+              color: hasHelpers ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.primary,
+              size: 28,
+            ),
             const SizedBox(width: 8),
-            const Text(
-              'אין עדיין נותני שירות בתחום זה',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
+            Expanded(
+              child: Text(
+                hasHelpers
+                    ? l10n.serviceProvidersInCategory(count)
+                    : l10n.noServiceProvidersInCategory,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 2,
               ),
             ),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.blue[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue[200]!),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'אין עדיין נותני שירות מהתחום שבחרת.',
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.blue[800],
-                    ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: hasHelpers ? Theme.of(context).colorScheme.primaryContainer : Theme.of(context).colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: hasHelpers ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.primary,
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'תמשיך ליצור את הבקשה - בעתיד יתווספו נותני שירות מתחום זה.',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Colors.blue[700],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      hasHelpers
+                          ? l10n.serviceProvidersInCategoryMessage(count)
+                          : l10n.noServiceProvidersInCategoryMessage,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: hasHelpers ? Theme.of(context).colorScheme.onPrimaryContainer : Theme.of(context).colorScheme.onPrimaryContainer,
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.green[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.green[200]!),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(Icons.share, color: Colors.green[600], size: 20),
-                      const SizedBox(width: 8),
+                    if (!hasHelpers) ...[
+                      const SizedBox(height: 8),
                       Text(
-                        'עזור לנו להגדיל את הקהילה!',
+                        l10n.continueCreatingRequestMessage,
                         style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.green[800],
+                          fontSize: 13,
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
                         ),
                       ),
                     ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'שתף את האפליקציה עם חברים ועמיתים כדי שיותר נותני שירות יוכלו להצטרף.',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Colors.green[700],
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 16),
+              // ✅ חלק "עזור לנו למצוא נותני שירות, שתף את האפליקציה"
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Theme.of(context).colorScheme.primary),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.share, color: Theme.of(context).colorScheme.primary, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            l10n.helpGrowCommunity,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Theme.of(context).colorScheme.onPrimaryContainer,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 2,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      l10n.shareAppToGrowProviders,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('הבנתי'),
+            child: Text(l10n.understood),
           ),
           ElevatedButton.icon(
             onPressed: () {
               Navigator.pop(context);
               // פתיחת מסך שיתוף
-              _openSharingOptions();
+              AppSharingService.shareApp(context);
             },
             icon: const Icon(Icons.share, size: 18),
-            label: const Text('שתף עכשיו'),
+            label: Text(l10n.shareNow),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green[600],
+              backgroundColor: Theme.of(context).colorScheme.primary,
               foregroundColor: Colors.white,
             ),
           ),
@@ -2339,21 +3050,17 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
       ),
     );
   }
-  
-  // פתיחת אפשרויות שיתוף
-  void _openSharingOptions() {
-    AppSharingService.shareApp(context);
-  }
 
 
   Future<void> _saveRequest() async {
+    final l10n = AppLocalizations.of(context);
     if (!_formKey.currentState!.validate()) return;
 
     // בדיקת קטגוריה נבחרת
     if (_selectedCategory == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('אנא בחר קטגוריה לבקשה'),
+          SnackBar(
+            content: Text(l10n.pleaseSelectCategory),
           backgroundColor: Colors.red,
         ),
       );
@@ -2366,6 +3073,11 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
       return;
     }
 
+      debugPrint('🚀 ===== START _saveRequest =====');
+      debugPrint('📝 Request title: ${_titleController.text.trim()}');
+      debugPrint('📝 Selected category: ${_selectedCategory?.categoryDisplayName}');
+      debugPrint('📝 Selected location: $_selectedLatitude, $_selectedLongitude');
+      debugPrint('📝 Exposure radius: $_exposureRadius km');
     debugPrint('Starting to save request...');
     setState(() => _isLoading = true);
 
@@ -2379,11 +3091,42 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
       // בדיקת הגבלות בקשות
       await _checkRequestLimits(user.uid);
 
+      // Guard context usage after async gap
+      if (!mounted) return;
+
       // בדיקת מיקום וטווח חשיפה
       if (_selectedLatitude == null || _selectedLongitude == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('נא לבחור מיקום לבקשה'),
+          SnackBar(
+            content: Text(l10n.pleaseSelectLocation),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+      
+      // ✅ בדיקה שהשדה showToProvidersOutsideRange נבחר (חובה)
+      if (_showToProvidersOutsideRange == null) {
+        setState(() {
+          _showToProvidersOutsideRangeError = true; // הצגת שגיאה על השדה
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('אנא בחר האם להציג את הבקשה לנותני שירות מחוץ לטווח שהגדרת'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+      
+      // ✅ בדיקה שהשדה showToAllUsers נבחר (חובה אם יש קטגוריה)
+      if (_selectedCategory != null && _showToAllUsers == null) {
+        setState(() {
+          _showToAllUsersError = true; // הצגת שגיאה על השדה
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('אנא בחר האם להציג את הבקשה לכל המשתמשים או רק לנותני שירות מתחום שבחרת'),
             backgroundColor: Colors.red,
           ),
         );
@@ -2412,6 +3155,27 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
         _selectedImages.clear();
       }
 
+      // הגדרת תאריך יעד אוטומטי לבקשות דחופות אם לא נבחר תאריך
+      DateTime? finalDeadline = _selectedDeadline;
+      if (finalDeadline == null) {
+        if (_selectedUrgency == UrgencyLevel.emergency || _selectedUrgency == UrgencyLevel.urgent24h) {
+          // בקשות דחופות - תאריך יעד שבוע מהיום
+          finalDeadline = DateTime.now().add(const Duration(days: 7));
+          debugPrint('✅ Setting automatic deadline for urgent request: ${finalDeadline.toString()}');
+        }
+      }
+
+      // בדיקת מספר טלפון לפני יצירת הבקשה
+      debugPrint('📞 _saveRequest: _selectedPhonePrefix: "$_selectedPhonePrefix"');
+      debugPrint('📞 _saveRequest: _selectedPhoneNumber: "$_selectedPhoneNumber"');
+      debugPrint('📞 _saveRequest: _selectedPhonePrefix.isNotEmpty: ${_selectedPhonePrefix.isNotEmpty}');
+      debugPrint('📞 _saveRequest: _selectedPhoneNumber.isNotEmpty: ${_selectedPhoneNumber.isNotEmpty}');
+      
+      final finalPhoneNumber = _selectedPhonePrefix.isNotEmpty && _selectedPhoneNumber.isNotEmpty 
+          ? '$_selectedPhonePrefix-$_selectedPhoneNumber' 
+          : null;
+      debugPrint('📞 _saveRequest: finalPhoneNumber: $finalPhoneNumber');
+      
       var request = Request(
         requestId: '', // יוגדר ב-Firestore
         title: _titleController.text.trim(),
@@ -2424,11 +3188,9 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
         createdBy: user.uid,
         status: RequestStatus.open,
         helpers: [],
-        phoneNumber: _selectedPhonePrefix.isNotEmpty && _selectedPhoneNumber.isNotEmpty 
-            ? '$_selectedPhonePrefix-$_selectedPhoneNumber' 
-            : null,
+        phoneNumber: finalPhoneNumber,
         type: _selectedType,
-        deadline: _selectedDeadline,
+        deadline: finalDeadline,
         targetAudience: TargetAudience.all,
         maxDistance: null,
         targetVillage: null,
@@ -2445,6 +3207,9 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
         longitude: _selectedLongitude,
         address: _selectedAddress,
         exposureRadius: _exposureRadius,
+        price: _price, // מחיר (אופציונאלי) - רק לבקשות בתשלום
+        showToProvidersOutsideRange: _showToProvidersOutsideRange,
+        showToAllUsers: _showToAllUsers, // null = לא נבחר, true = לכל המשתמשים, false = רק לנותני שירות מתחום X
       );
 
       debugPrint('Creating request in Firestore...');
@@ -2507,10 +3272,15 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
         );
         
         // בדיקת התראות סינון (כולל התראות רגילות)
+        debugPrint('📧 About to check and send notifications for request: ${request.title} (ID: ${request.requestId})');
+        debugPrint('📧 Request category: ${request.category.categoryDisplayName}');
+        debugPrint('📧 Request location: ${request.latitude}, ${request.longitude}');
+        debugPrint('📧 Request exposure radius: ${request.exposureRadius} km');
         await _checkFilterNotifications(request);
-        debugPrint('All notifications sent successfully');
-      } catch (e) {
-        debugPrint('Error sending notifications: $e');
+        debugPrint('✅ All notifications sent successfully');
+      } catch (e, stackTrace) {
+        debugPrint('❌ Error sending notifications: $e');
+        debugPrint('❌ Stack trace: $stackTrace');
         // לא נעצור את התהליך בגלל שגיאה בהתראות
       }
 
@@ -2633,53 +3403,6 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
     }
   }
   
-  // פונקציה לבדיקת התאמה בין קטגוריות (עברית/אנגלית)
-  bool _isCategoryMatch(String categoryName, String selectedCategoryName) {
-    // מיפוי קטגוריות עברית לאנגלית
-    final Map<String, String> categoryMapping = {
-      'תיקון רכב': 'carRepair',
-      'שמרטפות': 'babysitting',
-      'גינון': 'gardening',
-      'ניקיון': 'cleaningServices',
-      'צבע וטיח': 'paintingAndPlaster',
-      'ריצוף וקרמיקה': 'flooringAndCeramics',
-      'אינסטלציה': 'plumbing',
-      'חשמל': 'electrical',
-      'נגרות': 'carpentry',
-      'מעבר דירה': 'movingAndTransport',
-      'שיעורים פרטיים': 'privateLessons',
-      'שירותי משרד': 'officeServices',
-      'ייעוץ': 'consulting',
-      'אירועים': 'events',
-      'אבטחה': 'security',
-      'אמנות': 'art',
-      'מוזיקה': 'music',
-      'צילום': 'photography',
-      'עיצוב': 'design',
-      'בריאות': 'health',
-      'יופי': 'beauty',
-      'טכנולוגיה': 'technology',
-      'חינוך': 'education',
-      'ספורט': 'sports',
-      'תיירות': 'tourism',
-    };
-    
-    // בדיקה ישירה
-    if (categoryName == selectedCategoryName) {
-      return true;
-    }
-    // בדיקה דרך מיפוי עברית-אנגלית
-    else if (categoryMapping[categoryName] == selectedCategoryName) {
-      return true;
-    }
-    // בדיקה הפוכה - אנגלית לעברית
-    else if (categoryMapping.entries.any((entry) => 
-        entry.value == selectedCategoryName && entry.key == categoryName)) {
-      return true;
-    }
-    
-    return false;
-  }
   
   // פונקציה לבניית כפתור דחיפות
   Widget _buildUrgencyButton(UrgencyLevel level, String label) {
@@ -2695,10 +3418,10 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
         decoration: BoxDecoration(
-          color: isSelected ? level.color : Colors.grey[200],
+          color: isSelected ? level.color : Theme.of(context).colorScheme.surfaceContainer,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: isSelected ? level.color : Colors.grey[400]!,
+            color: isSelected ? level.color : Theme.of(context).colorScheme.outlineVariant,
             width: 2,
           ),
         ),
@@ -2706,7 +3429,9 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
           label,
           textAlign: TextAlign.center,
           style: TextStyle(
-            color: isSelected ? Colors.white : Colors.black87,
+            color: isSelected 
+                ? Colors.white 
+                : Theme.of(context).colorScheme.onSurface,
             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
             fontSize: 12,
           ),
@@ -2723,6 +3448,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
       return const SizedBox.shrink();
     }
     
+    final l10n = AppLocalizations.of(context);
     return Container(
       decoration: BoxDecoration(
         border: Border.all(color: Colors.grey),
@@ -2732,14 +3458,21 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'תגיות דחיפות',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            style: TextStyle(
+              fontSize: 16, 
+              fontWeight: FontWeight.bold,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'בחר תגיות שמתארות את המצב שלך:',
-            style: TextStyle(fontSize: 14, color: Colors.grey),
+            style: TextStyle(
+              fontSize: 14, 
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
           const SizedBox(height: 12),
           Wrap(
@@ -2760,17 +3493,19 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                 child: Container(
                   padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
                   decoration: BoxDecoration(
-                    color: isSelected ? tag.color : Colors.grey[200],
+                    color: isSelected ? tag.color : Theme.of(context).colorScheme.surfaceContainer,
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color: isSelected ? tag.color : Colors.grey[400]!,
+                      color: isSelected ? tag.color : Theme.of(context).colorScheme.outlineVariant,
                       width: 1,
                     ),
                   ),
                   child: Text(
-                    tag.displayName,
+                    tag.displayName(l10n),
                     style: TextStyle(
-                      color: isSelected ? Colors.white : Colors.black87,
+                      color: isSelected 
+                          ? Colors.white 
+                          : Theme.of(context).colorScheme.onSurface,
                       fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                       fontSize: 12,
                     ),
@@ -2782,9 +3517,13 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
           const SizedBox(height: 16),
           
           // תגית מותאמת אישית
-          const Text(
+          Text(
             'תגית מותאמת אישית',
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+            style: TextStyle(
+              fontSize: 14, 
+              fontWeight: FontWeight.w600,
+              color: Theme.of(context).colorScheme.onSurface,
+            ),
           ),
           const SizedBox(height: 8),
           TextFormField(

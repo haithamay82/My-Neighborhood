@@ -1,36 +1,45 @@
-/// הגדרות PayMe API
+/// PayMe API Configuration
+/// 
+/// Production credentials for PayMe Hosted Payment Page integration
 class PayMeConfig {
-  // TODO: החלף בערכים האמיתיים מ-PayMe
-  static const String baseUrl = 'https://api.payme.io/v1';
-  static const String apiKey = 'YOUR_PAYME_API_KEY';
-  static const String merchantId = 'YOUR_MERCHANT_ID';
-  static const String webhookSecret = 'YOUR_WEBHOOK_SECRET';
+  // Production API endpoint
+  static const String baseUrl = 'https://live.payme.io/api';
   
-  // URLs לחזרה מהתשלום
-  static const String successUrl = 'https://yourapp.com/payment/success';
-  static const String cancelUrl = 'https://yourapp.com/payment/cancel';
-  static const String webhookUrl = 'https://yourapp.com/webhook/payme';
+  // API endpoint for generating sales
+  static const String generateSaleEndpoint = '/generate-sale';
   
-  // סכומי מנוי קבועים
-  static const double personalSubscriptionAmount = 10.0;
-  static const double businessSubscriptionAmount = 50.0;
+  // Production credentials
+  static const String sellerPaymeId = 'MPL17601-96851APW-EG42UA4J-RPUPW2AZ';
   
-  // timeout
+  static const String apiKey = '0d93a2c3-827f-482e-9cb9-91c659c69e75';
+  
+  static const String returnUrl = 'https://nearme-970f3.web.app/payment/success';
+  
+  static const String callbackUrl = 'https://us-central1-nearme-970f3.cloudfunctions.net/paymeWebhook';
+  
+  // Subscription amounts (in shekels)
+  // TODO: Return to production prices after testing: personal=30.0, business=70.0
+  static const double personalSubscriptionAmount = 5.0; // Testing price (minimum)
+  static const double businessSubscriptionAmount = 5.0; // Testing price (minimum)
+  
+  // API timeout
   static const Duration apiTimeout = Duration(seconds: 30);
   
-  /// בדיקה אם ההגדרות מוכנות
+  // Language for PayMe checkout
+  static const String language = 'he';
+  
+  // Currency
+  static const String currency = 'ILS';
+  
+  /// Check if configuration is ready
   static bool get isConfigured {
-    return apiKey != 'YOUR_PAYME_API_KEY' && 
-           merchantId != 'YOUR_MERCHANT_ID' &&
-           webhookSecret != 'YOUR_WEBHOOK_SECRET';
+    return sellerPaymeId.isNotEmpty &&
+           apiKey.isNotEmpty &&
+           returnUrl.isNotEmpty &&
+           callbackUrl.isNotEmpty;
   }
   
-  /// הודעת שגיאה אם ההגדרות לא מוכנות
-  static String get configurationErrorMessage {
-    return 'PayMe לא מוגדר. אנא הגדר את המפתחות ב-PayMeConfig';
-  }
-  
-  /// קבלת סכום לפי סוג מנוי
+  /// Get subscription amount based on type
   static double getSubscriptionAmount(String subscriptionType) {
     switch (subscriptionType.toLowerCase()) {
       case 'business':
@@ -39,5 +48,15 @@ class PayMeConfig {
       default:
         return personalSubscriptionAmount;
     }
+  }
+  
+  /// Convert shekels to agorot (multiply by 100)
+  static int shekelsToAgorot(double shekels) {
+    return (shekels * 100).round();
+  }
+  
+  /// Configuration error message
+  static String get configurationErrorMessage {
+    return 'תשלום אונליין לא זמין כרגע. אנא פנה למנהל המערכת או השתמש בתשלום ידני.';
   }
 }

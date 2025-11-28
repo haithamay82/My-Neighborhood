@@ -28,6 +28,8 @@ class TikTokAuthService {
       if (await canLaunchUrl(authUrl)) {
         await launchUrl(authUrl, mode: LaunchMode.externalApplication);
         
+        // Guard context usage after async gap
+        if (!context.mounted) return true;
         // הצג הודעה למשתמש
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -43,6 +45,8 @@ class TikTokAuthService {
       }
     } catch (e) {
       debugPrint('TikTok login error: $e');
+      // Guard context usage after async gap
+      if (!context.mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('שגיאה בפתיחת TikTok: $e'),
@@ -186,6 +190,8 @@ class TikTokAuthService {
         await launchUrl(webUrl, mode: LaunchMode.externalApplication);
       }
       
+      // Guard context usage after async gap
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('פתח את TikTok והתחבר לחשבון שלך'),
@@ -195,6 +201,8 @@ class TikTokAuthService {
       );
     } catch (e) {
       debugPrint('Open TikTok app error: $e');
+      // Guard context usage after async gap
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('שגיאה בפתיחת TikTok: $e'),

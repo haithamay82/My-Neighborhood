@@ -2,121 +2,180 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../l10n/app_localizations.dart';
 
+// איזורים גאוגרפיים בישראל
+enum GeographicRegion {
+  north,    // צפון: latitude ≥ 32.4
+  center,   // מרכז: 31.75 < latitude < 32.4
+  south,    // דרום: latitude ≤ 31.75
+}
+
+extension GeographicRegionExtension on GeographicRegion {
+  String getDisplayName(AppLocalizations l10n) {
+    switch (this) {
+      case GeographicRegion.north:
+        return l10n.northRegion;
+      case GeographicRegion.center:
+        return l10n.centerRegion;
+      case GeographicRegion.south:
+        return l10n.southRegion;
+    }
+  }
+  
+  String getDisplayNameHebrew() {
+    switch (this) {
+      case GeographicRegion.north:
+        return 'צפון';
+      case GeographicRegion.center:
+        return 'מרכז';
+      case GeographicRegion.south:
+        return 'דרום';
+    }
+  }
+}
+
+/// פונקציה לזיהוי איזור גאוגרפי לפי קו רוחב
+GeographicRegion getGeographicRegion(double? latitude) {
+  if (latitude == null) {
+    return GeographicRegion.center; // ברירת מחדל
+  }
+  
+  if (latitude >= 32.4) {
+    return GeographicRegion.north;
+  } else if (latitude > 31.75) {
+    return GeographicRegion.center;
+  } else {
+    return GeographicRegion.south;
+  }
+}
+
 // תחומים ראשיים
 enum MainCategory {
-  constructionAndRepairs,
-  transportation,
-  familyAndChildren,
-  businessAndServices,
-  artsAndCrafts,
-  healthAndWellness,
-  technicalServices,
-  educationAndTraining,
-  eventsAndEntertainment,
-  gardeningAndEnvironment,
-  foodAndCooking,
-  sportsAndFitness,
+  constructionAndMaintenance,      // 🏠 בנייה, תיקונים ותחזוקה
+  deliveriesAndMoving,             // 🚚 שליחויות, הובלות ושירותים מהירים
+  beautyAndCosmetics,              // 🧖‍♀️ יופי, טיפוח וקוסמטיקה
+  marketingAndSales,               // 🛒 שיווק ומכירות
+  technologyAndComputers,          // 🛠️ טכנולוגיה, מחשבים ואפליקציות
+  vehicles,                        // 🚗 כלי תחבורה
+  gardeningAndCleaning,            // 🌱 גינון, ניקיון וסביבה
+  educationAndTraining,            // 🎓 חינוך, לימודים והדרכה
+  professionalConsulting,          // 🧭 ייעוץ והכוונה מקצועית
+  artsAndMedia,                    // 🎨 יצירה, אומנות ומדיה
+  specialServices,                 // 💡 שירותים מיוחדים ופתוחים
 }
 
 // תחומי משנה
 enum RequestCategory {
-  // בנייה ותיקונים
-  flooringAndCeramics,
-  paintingAndPlaster,
-  plumbing,
-  electrical,
-  carpentry,
-  roofsAndWalls,
-  elevatorsAndStairs,
+  // 🏠 בנייה, תיקונים ותחזוקה
+  plumbing,                    // אינסטלציה
+  electrical,                  // חשמל
+  renovations,                 // שיפוצים
+  airConditioning,             // מזגנים
+  carpentry,                   // נגרות
+  drywall,                     // גבס
+  painting,                    // צבע
+  flooring,                    // ריצוף
+  frames,                      // מסגרות
+  waterproofing,               // איטום
+  doorsAndWindows,             // דלתות וחלונות
   
-  // רכב ותחבורה
-  carRepair,
-  carServices,
-  movingAndTransport,
-  ridesAndShuttles,
-  bicyclesAndScooters,
-  heavyVehicles,
+  // 🚚 שליחויות, הובלות ושירותים מהירים
+  foodDelivery,                // משלוחי אוכל
+  groceryDelivery,             // משלוחי קניות מהסופר
+  smallMoving,                 // הובלות קטנות
+  largeMoving,                 // הובלות גדולות
   
-  // משפחה וילדים
-  babysitting,
-  privateLessons,
-  childrenActivities,
-  childrenHealth,
-  birthAndParenting,
-  specialEducation,
+  // 🧖‍♀️ יופי, טיפוח וקוסמטיקה
+  manicurePedicure,            // מניקור/פדיקור
+  nailExtension,              // בניית ציפורניים
+  hairstyling,                // תסרוקות
+  makeup,                      // איפור
+  eyebrowDesign,               // עיצוב גבות
+  facialTreatments,            // טיפולי פנים
+  massages,                    // עיסויים
+  hairRemoval,                 // הסרת שיער
+  beautyTreatments,            // טיפולים
   
-  // עסקים ושירותים
-  officeServices,
-  marketingAndAdvertising,
-  consulting,
-  businessEvents,
-  cleaningServices,
-  security,
+  // 🛒 שיווק ומכירות
+  // אוכל מהיר
+  shawarma,                    // שווארמה
+  falafel,                     // פלאפל
+  hamburger,                   // המבורגר
+  pizza,                       // פיצה
+  toast,                       // טוסט
+  sandwiches,                  // סנדוויץ'
+  // אוכל ביתי
+  homeFood,                    // אוכל ביתי
+  // מאפים וקינוחים
+  pastriesAndDesserts,         // מאפים וקינוחים
+  // אלקטרוניקה
+  electronicsSales,            // אלקטרוניקה
+  // כלי תחבורה (מכירה)
+  vehiclesSales,               // כלי תחבורה
+  // ריהוט
+  furniture,                   // ריהוט
+  // אופנה
+  fashion,                     // אופנה
+  // גיימינג
+  gaming,                      // גיימינג
+  // ילדים ותינוקות
+  kidsAndBabies,               // ילדים ותינוקות
+  // ציוד לבית ולגן
+  homeAndGardenEquipment,      // ציוד לבית ולגן
+  // חיות מחמד (מכירה)
+  petsSales,                   // חיות מחמד
+  // מוצרים מיוחדים
+  specialProducts,             // מוצרים מיוחדים
   
-  // יצירה ואומנות
-  paintingAndSculpture,
-  handicrafts,
-  music,
-  photography,
-  design,
-  performingArts,
+  // 🛠️ טכנולוגיה, מחשבים ואפליקציות
+  computerPhoneRepair,         // תיקוני מחשבים וטלפונים
+  networksAndInternet,         // רשתות ואינטרנט
+  smartHomeInstallation,       // התקנות בית חכם
+  camerasAndAlarms,            // מצלמות ואזעקות
+  webAppDevelopment,           // פיתוח אתרים ואפליקציות
   
-  // בריאות ורווחה
-  physiotherapy,
-  yogaAndPilates,
-  nutrition,
-  mentalHealth,
-  alternativeMedicine,
-  beautyAndCosmetics,
+  // 🚗 כלי תחבורה
+  carMechanic,                 // מכונאי רכב
+  carElectrician,              // חשמלאי רכב
+  motorcycles,                 // אופנועים
+  bicycles,                    // אופניים
+  scooters,                    // קורקינטים
+  towingServices,              // שירותי גרירה
   
-  // מקצועות טכניים
-  computersAndTechnology,
-  electricalAndElectronics,
-  internetAndCommunication,
-  appsAndDevelopment,
-  smartSystems,
-  medicalEquipment,
+  // 🌱 גינון, ניקיון וסביבה
+  homeGardening,               // גינון ביתי
+  yardCleaning,                // ניקוי חצרות
+  postRenovationCleaning,      // ניקוי בתים אחרי שיפוץ
+  plantsAndPets,               // טיפול בצמחים ובעלי חיים
   
-  // חינוך והכשרה
-  privateLessonsEducation,
-  languages,
-  professionalTraining,
-  lifeSkills,
-  higherEducation,
-  vocationalTraining,
+  // 🎓 חינוך, לימודים והדרכה
+  privateTutoring,             // שיעורים פרטיים
+  coursesAndAssignments,       // קורסים ועבודות
+  translation,                 // תרגום
+  languageLearning,            // לימודי שפות
   
-  // אירועים ובידור
-  events,
-  entertainment,
-  sports,
-  tourism,
-  partiesAndEvents,
-  photographyAndVideo,
+  // 🧭 ייעוץ והכוונה מקצועית
+  nutritionConsulting,         // יועץ תזונה
+  careerConsulting,            // יועץ קריירה
+  travelConsulting,            // יועץ טיולים
+  financialConsulting,        // יועץ פיננסי
+  educationConsulting,         // יועץ לימודים
+  personalTrainer,             // מאמן אישי
+  familyCoupleCounseling,      // ייעוץ זוגי או משפחתי
   
-  // גינון וסביבה
-  gardening,
-  environmentalCleaning,
-  cleaningServicesEnv,
-  environmentalQuality,
-  pets,
-  maintenance,
+  // 🎨 יצירה, אומנות ומדיה
+  eventPhotography,            // צילום אירועים
+  graphics,                    // גרפיקה
+  video,                       // וידאו
+  logoDesign,                  // עיצוב לוגו
+  smallEventProduction,        // הפקת אירועים קטנים
   
-  // מזון ובישול
-  cooking,
-  healthyFood,
-  foodEvents,
-  fastFood,
-  restaurants,
-  baking,
-  nutritionalConsulting,
-  
-  // ספורט וכושר
-  personalTraining,
-  teamSports,
-  martialArts,
-  dance,
-  extremeSports,
-  sportsRehabilitation,
+  // 💡 שירותים מיוחדים ופתוחים
+  elderlyAssistance,           // עזרה לקשישים
+  youthMentoring,              // חונכות לנוער
+  formFillingHelp,             // עזרה במילוי טפסים
+  donations,                   // תרומות
+  volunteering,                // התנדבות
+  petsCare,                    // בעלי חיים
 }
 enum RequestLocation { custom }
 enum RequestStatus { open, inProgress, completed, cancelled }
@@ -127,7 +186,7 @@ enum TargetAudience { all, distance, village, category }
 enum UrgencyLevel {
   normal,      // 🕓 רגיל
   urgent24h,   // ⏰ תוך 24 שעות  
-  emergency,   // 🚨 עכשיו
+  emergency,   // 🚨 דחוף
 }
 
 // תגיות דחיפות לפי קטגוריות
@@ -203,6 +262,37 @@ enum RequestTag {
   competitionPrep,      // הכנה לתחרות
   injuryRecovery,       // החלמה מפציעה
   urgentCoaching,       // אימון דחוף
+  
+  // יופי, טיפוח וקוסמטיקה (תגיות נוספות)
+  eventToday,           // אירוע היום
+  urgentBeforeEvent,    // דחוף לפני אירוע
+  urgentBeautyFix,      // תיקון יופי דחוף
+  
+  // שיווק ומכירות
+  urgentPurchase,       // קנייה דחופה
+  urgentSale,           // מכירה דחופה
+  eventShopping,        // קניות לאירוע היום
+  urgentProduct,        // מוצר דחוף
+  
+  // שליחויות, הובלות ושירותים מהירים (תגיות נוספות)
+  urgentDeliveryToday,  // משלוח דחוף היום
+  urgentMoving,         // הובלה דחופה
+  
+  // כלי תחבורה (תגיות נוספות)
+  urgentRoadRepair,     // תיקון דחוף בדרך
+  urgentTowing,         // גרירה דחופה
+  
+  // גינון, ניקיון וסביבה (תגיות נוספות)
+  urgentPostRenovation, // ניקיון דחוף אחרי שיפוץ
+  
+  // ייעוץ והכוונה מקצועית (תגיות נוספות)
+  urgentConsultation,   // ייעוץ דחוף
+  urgentMeeting,        // פגישה דחופה
+  
+  // שירותים מיוחדים ופתוחים (תגיות נוספות)
+  urgentElderlyHelp,    // עזרה דחופה לקשיש
+  urgentVolunteering,   // התנדבות דחופה
+  urgentPetCare,        // טיפול דחוף בבעלי חיים
 }
 
 class Request {
@@ -240,6 +330,13 @@ class Request {
   final double? longitude;
   final String? address;
   final double? exposureRadius; // רדיוס חשיפה בקילומטרים
+  
+  // מחיר (אופציונאלי) - רק לבקשות בתשלום
+  final double? price; // המחיר שהמשתמש חושב שישלם עבור השירות
+  
+  // האם להציג בקשה לנותני שירות שלא בטווח שהגדרת
+  final bool? showToProvidersOutsideRange; // null = לא נבחר, true = כן, false = לא
+  final bool? showToAllUsers; // null = לא נבחר, true = לכל המשתמשים, false = רק לנותני שירות מתחום X
 
   Request({
     required this.requestId,
@@ -272,7 +369,69 @@ class Request {
     this.longitude,
     this.address,
     this.exposureRadius,
+    this.price,
+    this.showToProvidersOutsideRange,
+    this.showToAllUsers,
   });
+
+  // ⬇️ Lightweight factory - only loads essential fields for initial list view
+  factory Request.fromFirestoreLightweight(DocumentSnapshot doc) {
+    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+    final images = List<String>.from(data['images'] ?? []);
+    
+    return Request(
+      requestId: doc.id,
+      title: data['title'] ?? '',
+      description: data['description'] ?? '', // Keep description for card preview
+      category: RequestCategory.values.firstWhere(
+        (e) => e.name == data['category'],
+        orElse: () => RequestCategory.plumbing,
+      ),
+      location: null, // Skip location parsing for lightweight
+      isUrgent: data['isUrgent'] ?? false,
+      images: images,
+      createdAt: data['createdAt'] != null && data['createdAt'] is Timestamp ? (data['createdAt'] as Timestamp).toDate() : DateTime.now(),
+      createdBy: data['createdBy'] ?? '',
+      status: RequestStatus.values.firstWhere(
+        (e) => e.name == data['status'],
+        orElse: () => RequestStatus.open,
+      ),
+      helpers: List<String>.from(data['helpers'] ?? []),
+      phoneNumber: data['phoneNumber'] as String?, // Load phoneNumber for display
+      type: RequestType.values.firstWhere(
+        (e) => e.name == data['type'],
+        orElse: () => RequestType.free,
+      ),
+      deadline: data['deadline'] != null && data['deadline'] is Timestamp ? (data['deadline'] as Timestamp).toDate() : null,
+      targetAudience: TargetAudience.all, // Default for lightweight
+      maxDistance: null, // Skip for lightweight
+      targetVillage: null, // Skip for lightweight
+      targetCategories: null, // Skip for lightweight
+      minRating: null, // Skip for lightweight
+      minReliability: null, // Skip for lightweight
+      minAvailability: null, // Skip for lightweight
+      minAttitude: null, // Skip for lightweight
+      minFairPrice: null, // Skip for lightweight
+      urgencyLevel: UrgencyLevel.values.firstWhere(
+        (e) => e.name == data['urgencyLevel'],
+        orElse: () => UrgencyLevel.normal,
+      ),
+      tags: data['tags'] != null 
+          ? (data['tags'] as List).map((e) => RequestTag.values.firstWhere(
+              (tag) => tag.name == e,
+              orElse: () => RequestTag.carStuck,
+            )).toList()
+          : [],
+      customTag: data['customTag'],
+      latitude: data['latitude']?.toDouble(), // Keep for distance calculation
+      longitude: data['longitude']?.toDouble(), // Keep for distance calculation
+      address: data['address'], // Keep address for display
+      exposureRadius: data['exposureRadius']?.toDouble(),
+      price: data['price']?.toDouble(), // Keep price for display // Keep for filtering
+      showToProvidersOutsideRange: data['showToProvidersOutsideRange'] as bool?,
+      showToAllUsers: data['showToAllUsers'] as bool?,
+    );
+  }
 
   factory Request.fromFirestore(DocumentSnapshot doc) {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
@@ -282,7 +441,7 @@ class Request {
       description: data['description'] ?? '',
       category: RequestCategory.values.firstWhere(
         (e) => e.name == data['category'],
-        orElse: () => RequestCategory.maintenance,
+        orElse: () => RequestCategory.plumbing,
       ),
       location: data['location'] != null 
           ? RequestLocation.values.firstWhere(
@@ -292,7 +451,7 @@ class Request {
           : null,
       isUrgent: data['isUrgent'] ?? false,
       images: List<String>.from(data['images'] ?? []),
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
+      createdAt: data['createdAt'] != null ? (data['createdAt'] as Timestamp).toDate() : DateTime.now(),
       createdBy: data['createdBy'] ?? '',
       status: RequestStatus.values.firstWhere(
         (e) => e.name == data['status'],
@@ -304,7 +463,7 @@ class Request {
         (e) => e.name == data['type'],
         orElse: () => RequestType.free,
       ),
-      deadline: data['deadline'] != null ? (data['deadline'] as Timestamp).toDate() : null,
+      deadline: data['deadline'] != null && data['deadline'] is Timestamp ? (data['deadline'] as Timestamp).toDate() : null,
       targetAudience: TargetAudience.values.firstWhere(
         (e) => e.name == data['targetAudience'],
         orElse: () => TargetAudience.all,
@@ -314,7 +473,7 @@ class Request {
       targetCategories: data['targetCategories'] != null 
           ? (data['targetCategories'] as List).map((e) => RequestCategory.values.firstWhere(
               (cat) => cat.name == e,
-              orElse: () => RequestCategory.maintenance,
+              orElse: () => RequestCategory.plumbing,
             )).toList()
           : null,
       minRating: data['minRating']?.toDouble(),
@@ -337,6 +496,9 @@ class Request {
       longitude: data['longitude']?.toDouble(),
       address: data['address'],
       exposureRadius: data['exposureRadius']?.toDouble(),
+      price: data['price']?.toDouble(),
+      showToProvidersOutsideRange: data['showToProvidersOutsideRange'] as bool?,
+      showToAllUsers: data['showToAllUsers'] as bool?,
     );
   }
 
@@ -371,182 +533,203 @@ class Request {
       'longitude': longitude,
       'address': address,
       'exposureRadius': exposureRadius,
+      'price': price,
+      'showToProvidersOutsideRange': showToProvidersOutsideRange,
+      'showToAllUsers': showToAllUsers,
     };
   }
 
   String get categoryDisplayName {
     switch (category) {
-      // בנייה ותיקונים
-      case RequestCategory.flooringAndCeramics:
-        return 'ריצוף וקרמיקה';
-      case RequestCategory.paintingAndPlaster:
-        return 'צבע וטיח';
+      // 🏠 בנייה, תיקונים ותחזוקה
       case RequestCategory.plumbing:
         return 'אינסטלציה';
       case RequestCategory.electrical:
         return 'חשמל';
+      case RequestCategory.renovations:
+        return 'שיפוצים';
+      case RequestCategory.airConditioning:
+        return 'מזגנים';
       case RequestCategory.carpentry:
         return 'נגרות';
-      case RequestCategory.roofsAndWalls:
-        return 'גגות וקירות';
-      case RequestCategory.elevatorsAndStairs:
-        return 'מעליות ומדרגות';
+      case RequestCategory.drywall:
+        return 'גבס';
+      case RequestCategory.painting:
+        return 'צבע';
+      case RequestCategory.flooring:
+        return 'ריצוף';
+      case RequestCategory.frames:
+        return 'מסגרות';
+      case RequestCategory.waterproofing:
+        return 'איטום';
+      case RequestCategory.doorsAndWindows:
+        return 'דלתות וחלונות';
       
-      // רכב ותחבורה
-      case RequestCategory.carRepair:
-        return 'תיקון רכב';
-      case RequestCategory.carServices:
-        return 'שירותי רכב';
-      case RequestCategory.movingAndTransport:
-        return 'הובלה ומעבר';
-      case RequestCategory.ridesAndShuttles:
-        return 'הסעות';
-      case RequestCategory.bicyclesAndScooters:
-        return 'אופניים וקורקינטים';
-      case RequestCategory.heavyVehicles:
-        return 'כלי רכב כבדים';
+      // 🚚 שליחויות, הובלות ושירותים מהירים
+      case RequestCategory.foodDelivery:
+        return 'משלוחי אוכל';
+      case RequestCategory.groceryDelivery:
+        return 'משלוחי קניות מהסופר';
+      case RequestCategory.smallMoving:
+        return 'הובלות קטנות';
+      case RequestCategory.largeMoving:
+        return 'הובלות גדולות';
       
-      // משפחה וילדים
-      case RequestCategory.babysitting:
-        return 'שמרטפות';
-      case RequestCategory.privateLessons:
+      // 🧖‍♀️ יופי, טיפוח וקוסמטיקה
+      case RequestCategory.manicurePedicure:
+        return 'מניקור/פדיקור';
+      case RequestCategory.nailExtension:
+        return 'בניית ציפורניים';
+      case RequestCategory.hairstyling:
+        return 'תסרוקות';
+      case RequestCategory.makeup:
+        return 'איפור';
+      case RequestCategory.eyebrowDesign:
+        return 'עיצוב גבות';
+      case RequestCategory.facialTreatments:
+        return 'טיפולי פנים';
+      case RequestCategory.massages:
+        return 'עיסויים';
+      case RequestCategory.hairRemoval:
+        return 'הסרת שיער';
+      case RequestCategory.beautyTreatments:
+        return 'טיפולים';
+      
+      // 🛒 שיווק ומכירות
+      // אוכל מהיר
+      case RequestCategory.shawarma:
+        return 'שווארמה';
+      case RequestCategory.falafel:
+        return 'פלאפל';
+      case RequestCategory.hamburger:
+        return 'המבורגר';
+      case RequestCategory.pizza:
+        return 'פיצה';
+      case RequestCategory.toast:
+        return 'טוסט';
+      case RequestCategory.sandwiches:
+        return 'סנדוויץ\'';
+      // אוכל ביתי
+      case RequestCategory.homeFood:
+        return 'אוכל ביתי';
+      // מאפים וקינוחים
+      case RequestCategory.pastriesAndDesserts:
+        return 'מאפים וקינוחים';
+      // אלקטרוניקה
+      case RequestCategory.electronicsSales:
+        return 'אלקטרוניקה';
+      // כלי תחבורה (מכירה)
+      case RequestCategory.vehiclesSales:
+        return 'כלי תחבורה';
+      // ריהוט
+      case RequestCategory.furniture:
+        return 'ריהוט';
+      // אופנה
+      case RequestCategory.fashion:
+        return 'אופנה';
+      // גיימינג
+      case RequestCategory.gaming:
+        return 'גיימינג';
+      // ילדים ותינוקות
+      case RequestCategory.kidsAndBabies:
+        return 'ילדים ותינוקות';
+      // ציוד לבית ולגן
+      case RequestCategory.homeAndGardenEquipment:
+        return 'ציוד לבית ולגן';
+      // חיות מחמד (מכירה)
+      case RequestCategory.petsSales:
+        return 'חיות מחמד';
+      // מוצרים מיוחדים
+      case RequestCategory.specialProducts:
+        return 'מוצרים מיוחדים';
+      
+      // 🛠️ טכנולוגיה, מחשבים ואפליקציות
+      case RequestCategory.computerPhoneRepair:
+        return 'תיקוני מחשבים וטלפונים';
+      case RequestCategory.networksAndInternet:
+        return 'רשתות ואינטרנט';
+      case RequestCategory.smartHomeInstallation:
+        return 'התקנות בית חכם';
+      case RequestCategory.camerasAndAlarms:
+        return 'מצלמות ואזעקות';
+      case RequestCategory.webAppDevelopment:
+        return 'פיתוח אתרים ואפליקציות';
+      
+      // 🚗 כלי תחבורה
+      case RequestCategory.carMechanic:
+        return 'מכונאי רכב';
+      case RequestCategory.carElectrician:
+        return 'חשמלאי רכב';
+      case RequestCategory.motorcycles:
+        return 'אופנועים';
+      case RequestCategory.bicycles:
+        return 'אופניים';
+      case RequestCategory.scooters:
+        return 'קורקינטים';
+      case RequestCategory.towingServices:
+        return 'שירותי גרירה';
+      
+      // 🌱 גינון, ניקיון וסביבה
+      case RequestCategory.homeGardening:
+        return 'גינון ביתי';
+      case RequestCategory.yardCleaning:
+        return 'ניקוי חצרות';
+      case RequestCategory.postRenovationCleaning:
+        return 'ניקוי בתים אחרי שיפוץ';
+      case RequestCategory.plantsAndPets:
+        return 'טיפול בצמחים ובעלי חיים';
+      
+      // 🎓 חינוך, לימודים והדרכה
+      case RequestCategory.privateTutoring:
         return 'שיעורים פרטיים';
-      case RequestCategory.childrenActivities:
-        return 'פעילויות ילדים';
-      case RequestCategory.childrenHealth:
-        return 'בריאות ילדים';
-      case RequestCategory.birthAndParenting:
-        return 'לידה והורות';
-      case RequestCategory.specialEducation:
-        return 'חינוך מיוחד';
+      case RequestCategory.coursesAndAssignments:
+        return 'קורסים ועבודות';
+      case RequestCategory.translation:
+        return 'תרגום';
+      case RequestCategory.languageLearning:
+        return 'לימודי שפות';
       
-      // עסקים ושירותים
-      case RequestCategory.officeServices:
-        return 'שירותי משרד';
-      case RequestCategory.marketingAndAdvertising:
-        return 'שיווק ופרסום';
-      case RequestCategory.consulting:
-        return 'ייעוץ';
-      case RequestCategory.businessEvents:
-        return 'אירועים עסקיים';
-      case RequestCategory.cleaningServices:
-        return 'שירותי ניקיון';
-      case RequestCategory.security:
-        return 'אבטחה';
+      // 🧭 ייעוץ והכוונה מקצועית
+      case RequestCategory.nutritionConsulting:
+        return 'יועץ תזונה';
+      case RequestCategory.careerConsulting:
+        return 'יועץ קריירה';
+      case RequestCategory.travelConsulting:
+        return 'יועץ טיולים';
+      case RequestCategory.financialConsulting:
+        return 'יועץ פיננסי';
+      case RequestCategory.educationConsulting:
+        return 'יועץ לימודים';
+      case RequestCategory.personalTrainer:
+        return 'מאמן אישי';
+      case RequestCategory.familyCoupleCounseling:
+        return 'ייעוץ זוגי או משפחתי';
       
-      // יצירה ואומנות
-      case RequestCategory.paintingAndSculpture:
-        return 'ציור ופיסול';
-      case RequestCategory.handicrafts:
-        return 'מלאכת יד';
-      case RequestCategory.music:
-        return 'מוזיקה';
-      case RequestCategory.photography:
-        return 'צילום';
-      case RequestCategory.design:
-        return 'עיצוב';
-      case RequestCategory.performingArts:
-        return 'אומנויות הבמה';
+      // 🎨 יצירה, אומנות ומדיה
+      case RequestCategory.eventPhotography:
+        return 'צילום אירועים';
+      case RequestCategory.graphics:
+        return 'גרפיקה';
+      case RequestCategory.video:
+        return 'וידאו';
+      case RequestCategory.logoDesign:
+        return 'עיצוב לוגו';
+      case RequestCategory.smallEventProduction:
+        return 'הפקת אירועים קטנים';
       
-      // בריאות ורווחה
-      case RequestCategory.physiotherapy:
-        return 'פיזיותרפיה';
-      case RequestCategory.yogaAndPilates:
-        return 'יוגה ופילאטיס';
-      case RequestCategory.nutrition:
-        return 'תזונה';
-      case RequestCategory.mentalHealth:
-        return 'בריאות הנפש';
-      case RequestCategory.alternativeMedicine:
-        return 'רפואה משלימה';
-      case RequestCategory.beautyAndCosmetics:
-        return 'קוסמטיקה ויופי';
-      
-      // מקצועות טכניים
-      case RequestCategory.computersAndTechnology:
-        return 'מחשבים וטכנולוגיה';
-      case RequestCategory.electricalAndElectronics:
-        return 'חשמל ואלקטרוניקה';
-      case RequestCategory.internetAndCommunication:
-        return 'אינטרנט ותקשורת';
-      case RequestCategory.appsAndDevelopment:
-        return 'אפליקציות ופיתוח';
-      case RequestCategory.smartSystems:
-        return 'מערכות חכמות';
-      case RequestCategory.medicalEquipment:
-        return 'מכשור רפואי';
-      
-      // חינוך והכשרה
-      case RequestCategory.privateLessonsEducation:
-        return 'שיעורים פרטיים';
-      case RequestCategory.languages:
-        return 'שפות';
-      case RequestCategory.professionalTraining:
-        return 'מקצועות';
-      case RequestCategory.lifeSkills:
-        return 'כישורי חיים';
-      case RequestCategory.higherEducation:
-        return 'לימודים גבוהים';
-      case RequestCategory.vocationalTraining:
-        return 'הכשרה מקצועית';
-      
-      // אירועים ובידור
-      case RequestCategory.events:
-        return 'אירועים';
-      case RequestCategory.entertainment:
-        return 'בידור';
-      case RequestCategory.sports:
-        return 'ספורט';
-      case RequestCategory.tourism:
-        return 'תיירות';
-      case RequestCategory.partiesAndEvents:
-        return 'מסיבות ואירועים';
-      case RequestCategory.photographyAndVideo:
-        return 'צילום ווידאו';
-      
-      // גינון וסביבה
-      case RequestCategory.gardening:
-        return 'גינון';
-      case RequestCategory.environmentalCleaning:
-        return 'ניקיון סביבתי';
-      case RequestCategory.cleaningServicesEnv:
-        return 'שירותי ניקיון';
-      case RequestCategory.environmentalQuality:
-        return 'איכות הסביבה';
-      case RequestCategory.pets:
+      // 💡 שירותים מיוחדים ופתוחים
+      case RequestCategory.elderlyAssistance:
+        return 'עזרה לקשישים';
+      case RequestCategory.youthMentoring:
+        return 'חונכות לנוער';
+      case RequestCategory.formFillingHelp:
+        return 'עזרה במילוי טפסים';
+      case RequestCategory.donations:
+        return 'תרומות';
+      case RequestCategory.volunteering:
+        return 'התנדבות';
+      case RequestCategory.petsCare:
         return 'בעלי חיים';
-      case RequestCategory.maintenance:
-        return 'תחזוקה';
-      
-      // מזון ובישול
-      case RequestCategory.cooking:
-        return 'בישול';
-      case RequestCategory.healthyFood:
-        return 'מזון בריא';
-      case RequestCategory.foodEvents:
-        return 'אירועי מזון';
-      case RequestCategory.fastFood:
-        return 'אוכל מהיר';
-      case RequestCategory.restaurants:
-        return 'מסעדות';
-      case RequestCategory.baking:
-        return 'מאפים';
-      case RequestCategory.nutritionalConsulting:
-        return 'ייעוץ תזונתי';
-      
-      // ספורט וכושר
-      case RequestCategory.personalTraining:
-        return 'אימונים אישיים';
-      case RequestCategory.teamSports:
-        return 'ספורט קבוצתי';
-      case RequestCategory.martialArts:
-        return 'אומנויות לחימה';
-      case RequestCategory.dance:
-        return 'ריקוד';
-      case RequestCategory.extremeSports:
-        return 'ספורט אתגרי';
-      case RequestCategory.sportsRehabilitation:
-        return 'שיקום ספורט';
     }
   }
 
@@ -561,292 +744,311 @@ class Request {
 extension RequestCategoryExtension on RequestCategory {
   String get categoryDisplayName {
     switch (this) {
-      // בנייה ותיקונים
-      case RequestCategory.flooringAndCeramics:
-        return 'ריצוף וקרמיקה';
-      case RequestCategory.paintingAndPlaster:
-        return 'צבע וטיח';
+      // 🏠 בנייה, תיקונים ותחזוקה
       case RequestCategory.plumbing:
         return 'אינסטלציה';
       case RequestCategory.electrical:
         return 'חשמל';
+      case RequestCategory.renovations:
+        return 'שיפוצים';
+      case RequestCategory.airConditioning:
+        return 'מזגנים';
       case RequestCategory.carpentry:
         return 'נגרות';
-      case RequestCategory.roofsAndWalls:
-        return 'גגות וקירות';
-      case RequestCategory.elevatorsAndStairs:
-        return 'מעליות ומדרגות';
+      case RequestCategory.drywall:
+        return 'גבס';
+      case RequestCategory.painting:
+        return 'צבע';
+      case RequestCategory.flooring:
+        return 'ריצוף';
+      case RequestCategory.frames:
+        return 'מסגרות';
+      case RequestCategory.waterproofing:
+        return 'איטום';
+      case RequestCategory.doorsAndWindows:
+        return 'דלתות וחלונות';
       
-      // רכב ותחבורה
-      case RequestCategory.carRepair:
-        return 'תיקון רכב';
-      case RequestCategory.carServices:
-        return 'שירותי רכב';
-      case RequestCategory.movingAndTransport:
-        return 'הובלה ומעבר';
-      case RequestCategory.ridesAndShuttles:
-        return 'הסעות';
-      case RequestCategory.bicyclesAndScooters:
-        return 'אופניים וקורקינטים';
-      case RequestCategory.heavyVehicles:
-        return 'כלי רכב כבדים';
+      // 🚚 שליחויות, הובלות ושירותים מהירים
+      case RequestCategory.foodDelivery:
+        return 'משלוחי אוכל';
+      case RequestCategory.groceryDelivery:
+        return 'משלוחי קניות מהסופר';
+      case RequestCategory.smallMoving:
+        return 'הובלות קטנות';
+      case RequestCategory.largeMoving:
+        return 'הובלות גדולות';
       
-      // משפחה וילדים
-      case RequestCategory.babysitting:
-        return 'שמרטפות';
-      case RequestCategory.privateLessons:
+      // 🧖‍♀️ יופי, טיפוח וקוסמטיקה
+      case RequestCategory.manicurePedicure:
+        return 'מניקור/פדיקור';
+      case RequestCategory.nailExtension:
+        return 'בניית ציפורניים';
+      case RequestCategory.hairstyling:
+        return 'תסרוקות';
+      case RequestCategory.makeup:
+        return 'איפור';
+      case RequestCategory.eyebrowDesign:
+        return 'עיצוב גבות';
+      case RequestCategory.facialTreatments:
+        return 'טיפולי פנים';
+      case RequestCategory.massages:
+        return 'עיסויים';
+      case RequestCategory.hairRemoval:
+        return 'הסרת שיער';
+      case RequestCategory.beautyTreatments:
+        return 'טיפולים';
+      
+      // 🛒 שיווק ומכירות
+      // אוכל מהיר
+      case RequestCategory.shawarma:
+        return 'שווארמה';
+      case RequestCategory.falafel:
+        return 'פלאפל';
+      case RequestCategory.hamburger:
+        return 'המבורגר';
+      case RequestCategory.pizza:
+        return 'פיצה';
+      case RequestCategory.toast:
+        return 'טוסט';
+      case RequestCategory.sandwiches:
+        return 'סנדוויץ\'';
+      // אוכל ביתי
+      case RequestCategory.homeFood:
+        return 'אוכל ביתי';
+      // מאפים וקינוחים
+      case RequestCategory.pastriesAndDesserts:
+        return 'מאפים וקינוחים';
+      // אלקטרוניקה
+      case RequestCategory.electronicsSales:
+        return 'אלקטרוניקה';
+      // כלי תחבורה (מכירה)
+      case RequestCategory.vehiclesSales:
+        return 'כלי תחבורה';
+      // ריהוט
+      case RequestCategory.furniture:
+        return 'ריהוט';
+      // אופנה
+      case RequestCategory.fashion:
+        return 'אופנה';
+      // גיימינג
+      case RequestCategory.gaming:
+        return 'גיימינג';
+      // ילדים ותינוקות
+      case RequestCategory.kidsAndBabies:
+        return 'ילדים ותינוקות';
+      // ציוד לבית ולגן
+      case RequestCategory.homeAndGardenEquipment:
+        return 'ציוד לבית ולגן';
+      // חיות מחמד (מכירה)
+      case RequestCategory.petsSales:
+        return 'חיות מחמד';
+      // מוצרים מיוחדים
+      case RequestCategory.specialProducts:
+        return 'מוצרים מיוחדים';
+      
+      // 🛠️ טכנולוגיה, מחשבים ואפליקציות
+      case RequestCategory.computerPhoneRepair:
+        return 'תיקוני מחשבים וטלפונים';
+      case RequestCategory.networksAndInternet:
+        return 'רשתות ואינטרנט';
+      case RequestCategory.smartHomeInstallation:
+        return 'התקנות בית חכם';
+      case RequestCategory.camerasAndAlarms:
+        return 'מצלמות ואזעקות';
+      case RequestCategory.webAppDevelopment:
+        return 'פיתוח אתרים ואפליקציות';
+      
+      // 🚗 כלי תחבורה
+      case RequestCategory.carMechanic:
+        return 'מכונאי רכב';
+      case RequestCategory.carElectrician:
+        return 'חשמלאי רכב';
+      case RequestCategory.motorcycles:
+        return 'אופנועים';
+      case RequestCategory.bicycles:
+        return 'אופניים';
+      case RequestCategory.scooters:
+        return 'קורקינטים';
+      case RequestCategory.towingServices:
+        return 'שירותי גרירה';
+      
+      // 🌱 גינון, ניקיון וסביבה
+      case RequestCategory.homeGardening:
+        return 'גינון ביתי';
+      case RequestCategory.yardCleaning:
+        return 'ניקוי חצרות';
+      case RequestCategory.postRenovationCleaning:
+        return 'ניקוי בתים אחרי שיפוץ';
+      case RequestCategory.plantsAndPets:
+        return 'טיפול בצמחים ובעלי חיים';
+      
+      // 🎓 חינוך, לימודים והדרכה
+      case RequestCategory.privateTutoring:
         return 'שיעורים פרטיים';
-      case RequestCategory.childrenActivities:
-        return 'פעילויות ילדים';
-      case RequestCategory.childrenHealth:
-        return 'בריאות ילדים';
-      case RequestCategory.birthAndParenting:
-        return 'לידה והורות';
-      case RequestCategory.specialEducation:
-        return 'חינוך מיוחד';
+      case RequestCategory.coursesAndAssignments:
+        return 'קורסים ועבודות';
+      case RequestCategory.translation:
+        return 'תרגום';
+      case RequestCategory.languageLearning:
+        return 'לימודי שפות';
       
-      // עסקים ושירותים
-      case RequestCategory.officeServices:
-        return 'שירותי משרד';
-      case RequestCategory.marketingAndAdvertising:
-        return 'שיווק ופרסום';
-      case RequestCategory.consulting:
-        return 'ייעוץ';
-      case RequestCategory.businessEvents:
-        return 'אירועים עסקיים';
-      case RequestCategory.cleaningServices:
-        return 'שירותי ניקיון';
-      case RequestCategory.security:
-        return 'אבטחה';
+      // 🧭 ייעוץ והכוונה מקצועית
+      case RequestCategory.nutritionConsulting:
+        return 'יועץ תזונה';
+      case RequestCategory.careerConsulting:
+        return 'יועץ קריירה';
+      case RequestCategory.travelConsulting:
+        return 'יועץ טיולים';
+      case RequestCategory.financialConsulting:
+        return 'יועץ פיננסי';
+      case RequestCategory.educationConsulting:
+        return 'יועץ לימודים';
+      case RequestCategory.personalTrainer:
+        return 'מאמן אישי';
+      case RequestCategory.familyCoupleCounseling:
+        return 'ייעוץ זוגי או משפחתי';
       
-      // יצירה ואומנות
-      case RequestCategory.paintingAndSculpture:
-        return 'ציור ופיסול';
-      case RequestCategory.handicrafts:
-        return 'מלאכת יד';
-      case RequestCategory.music:
-        return 'מוזיקה';
-      case RequestCategory.photography:
-        return 'צילום';
-      case RequestCategory.design:
-        return 'עיצוב';
-      case RequestCategory.performingArts:
-        return 'אומנויות הבמה';
+      // 🎨 יצירה, אומנות ומדיה
+      case RequestCategory.eventPhotography:
+        return 'צילום אירועים';
+      case RequestCategory.graphics:
+        return 'גרפיקה';
+      case RequestCategory.video:
+        return 'וידאו';
+      case RequestCategory.logoDesign:
+        return 'עיצוב לוגו';
+      case RequestCategory.smallEventProduction:
+        return 'הפקת אירועים קטנים';
       
-      // בריאות ורווחה
-      case RequestCategory.physiotherapy:
-        return 'פיזיותרפיה';
-      case RequestCategory.yogaAndPilates:
-        return 'יוגה ופילאטיס';
-      case RequestCategory.nutrition:
-        return 'תזונה';
-      case RequestCategory.mentalHealth:
-        return 'בריאות הנפש';
-      case RequestCategory.alternativeMedicine:
-        return 'רפואה משלימה';
-      case RequestCategory.beautyAndCosmetics:
-        return 'קוסמטיקה ויופי';
-      
-      // מקצועות טכניים
-      case RequestCategory.computersAndTechnology:
-        return 'מחשבים וטכנולוגיה';
-      case RequestCategory.electricalAndElectronics:
-        return 'חשמל ואלקטרוניקה';
-      case RequestCategory.internetAndCommunication:
-        return 'אינטרנט ותקשורת';
-      case RequestCategory.appsAndDevelopment:
-        return 'אפליקציות ופיתוח';
-      case RequestCategory.smartSystems:
-        return 'מערכות חכמות';
-      case RequestCategory.medicalEquipment:
-        return 'מכשור רפואי';
-      
-      // חינוך והכשרה
-      case RequestCategory.privateLessonsEducation:
-        return 'שיעורים פרטיים';
-      case RequestCategory.languages:
-        return 'שפות';
-      case RequestCategory.professionalTraining:
-        return 'מקצועות';
-      case RequestCategory.lifeSkills:
-        return 'כישורי חיים';
-      case RequestCategory.higherEducation:
-        return 'לימודים גבוהים';
-      case RequestCategory.vocationalTraining:
-        return 'הכשרה מקצועית';
-      
-      // אירועים ובידור
-      case RequestCategory.events:
-        return 'אירועים';
-      case RequestCategory.entertainment:
-        return 'בידור';
-      case RequestCategory.sports:
-        return 'ספורט';
-      case RequestCategory.tourism:
-        return 'תיירות';
-      case RequestCategory.partiesAndEvents:
-        return 'מסיבות ואירועים';
-      case RequestCategory.photographyAndVideo:
-        return 'צילום ווידאו';
-      
-      // גינון וסביבה
-      case RequestCategory.gardening:
-        return 'גינון';
-      case RequestCategory.environmentalCleaning:
-        return 'ניקיון סביבתי';
-      case RequestCategory.cleaningServicesEnv:
-        return 'שירותי ניקיון';
-      case RequestCategory.environmentalQuality:
-        return 'איכות הסביבה';
-      case RequestCategory.pets:
+      // 💡 שירותים מיוחדים ופתוחים
+      case RequestCategory.elderlyAssistance:
+        return 'עזרה לקשישים';
+      case RequestCategory.youthMentoring:
+        return 'חונכות לנוער';
+      case RequestCategory.formFillingHelp:
+        return 'עזרה במילוי טפסים';
+      case RequestCategory.donations:
+        return 'תרומות';
+      case RequestCategory.volunteering:
+        return 'התנדבות';
+      case RequestCategory.petsCare:
         return 'בעלי חיים';
-      case RequestCategory.maintenance:
-        return 'תחזוקה';
-      
-      // מזון ובישול
-      case RequestCategory.cooking:
-        return 'בישול';
-      case RequestCategory.healthyFood:
-        return 'מזון בריא';
-      case RequestCategory.foodEvents:
-        return 'אירועי מזון';
-      case RequestCategory.fastFood:
-        return 'אוכל מהיר';
-      case RequestCategory.restaurants:
-        return 'מסעדות';
-      case RequestCategory.baking:
-        return 'מאפים';
-      case RequestCategory.nutritionalConsulting:
-        return 'ייעוץ תזונתי';
-      
-      // ספורט וכושר
-      case RequestCategory.personalTraining:
-        return 'אימונים אישיים';
-      case RequestCategory.teamSports:
-        return 'ספורט קבוצתי';
-      case RequestCategory.martialArts:
-        return 'אומנויות לחימה';
-      case RequestCategory.dance:
-        return 'ריקוד';
-      case RequestCategory.extremeSports:
-        return 'ספורט אתגרי';
-      case RequestCategory.sportsRehabilitation:
-        return 'שיקום ספורט';
     }
   }
 
   // פונקציה לקבלת התחום הראשי
   MainCategory get mainCategory {
     switch (this) {
-      // בנייה ותיקונים
-      case RequestCategory.flooringAndCeramics:
-      case RequestCategory.paintingAndPlaster:
+      // 🏠 בנייה, תיקונים ותחזוקה
       case RequestCategory.plumbing:
       case RequestCategory.electrical:
+      case RequestCategory.renovations:
+      case RequestCategory.airConditioning:
       case RequestCategory.carpentry:
-      case RequestCategory.roofsAndWalls:
-      case RequestCategory.elevatorsAndStairs:
-        return MainCategory.constructionAndRepairs;
+      case RequestCategory.drywall:
+      case RequestCategory.painting:
+      case RequestCategory.flooring:
+      case RequestCategory.frames:
+      case RequestCategory.waterproofing:
+      case RequestCategory.doorsAndWindows:
+        return MainCategory.constructionAndMaintenance;
       
-      // רכב ותחבורה
-      case RequestCategory.carRepair:
-      case RequestCategory.carServices:
-      case RequestCategory.movingAndTransport:
-      case RequestCategory.ridesAndShuttles:
-      case RequestCategory.bicyclesAndScooters:
-      case RequestCategory.heavyVehicles:
-        return MainCategory.transportation;
+      // 🚚 שליחויות, הובלות ושירותים מהירים
+      case RequestCategory.foodDelivery:
+      case RequestCategory.groceryDelivery:
+      case RequestCategory.smallMoving:
+      case RequestCategory.largeMoving:
+        return MainCategory.deliveriesAndMoving;
       
-      // משפחה וילדים
-      case RequestCategory.babysitting:
-      case RequestCategory.privateLessons:
-      case RequestCategory.childrenActivities:
-      case RequestCategory.childrenHealth:
-      case RequestCategory.birthAndParenting:
-      case RequestCategory.specialEducation:
-        return MainCategory.familyAndChildren;
+      // 🧖‍♀️ יופי, טיפוח וקוסמטיקה
+      case RequestCategory.manicurePedicure:
+      case RequestCategory.nailExtension:
+      case RequestCategory.hairstyling:
+      case RequestCategory.makeup:
+      case RequestCategory.eyebrowDesign:
+      case RequestCategory.facialTreatments:
+      case RequestCategory.massages:
+      case RequestCategory.hairRemoval:
+      case RequestCategory.beautyTreatments:
+        return MainCategory.beautyAndCosmetics;
       
-      // עסקים ושירותים
-      case RequestCategory.officeServices:
-      case RequestCategory.marketingAndAdvertising:
-      case RequestCategory.consulting:
-      case RequestCategory.businessEvents:
-      case RequestCategory.cleaningServices:
-      case RequestCategory.security:
-        return MainCategory.businessAndServices;
+      // 🛒 שיווק ומכירות
+      case RequestCategory.shawarma:
+      case RequestCategory.falafel:
+      case RequestCategory.hamburger:
+      case RequestCategory.pizza:
+      case RequestCategory.toast:
+      case RequestCategory.sandwiches:
+      case RequestCategory.homeFood:
+      case RequestCategory.pastriesAndDesserts:
+      case RequestCategory.electronicsSales:
+      case RequestCategory.vehiclesSales:
+      case RequestCategory.furniture:
+      case RequestCategory.fashion:
+      case RequestCategory.gaming:
+      case RequestCategory.kidsAndBabies:
+      case RequestCategory.homeAndGardenEquipment:
+      case RequestCategory.petsSales:
+      case RequestCategory.specialProducts:
+        return MainCategory.marketingAndSales;
       
-      // יצירה ואומנות
-      case RequestCategory.paintingAndSculpture:
-      case RequestCategory.handicrafts:
-      case RequestCategory.music:
-      case RequestCategory.photography:
-      case RequestCategory.design:
-      case RequestCategory.performingArts:
-        return MainCategory.artsAndCrafts;
+      // 🛠️ טכנולוגיה, מחשבים ואפליקציות
+      case RequestCategory.computerPhoneRepair:
+      case RequestCategory.networksAndInternet:
+      case RequestCategory.smartHomeInstallation:
+      case RequestCategory.camerasAndAlarms:
+      case RequestCategory.webAppDevelopment:
+        return MainCategory.technologyAndComputers;
       
-      // בריאות ורווחה
-      case RequestCategory.physiotherapy:
-      case RequestCategory.yogaAndPilates:
-      case RequestCategory.nutrition:
-      case RequestCategory.mentalHealth:
-      case RequestCategory.alternativeMedicine:
-      case RequestCategory.beautyAndCosmetics:
-        return MainCategory.healthAndWellness;
+      // 🚗 כלי תחבורה
+      case RequestCategory.carMechanic:
+      case RequestCategory.carElectrician:
+      case RequestCategory.motorcycles:
+      case RequestCategory.bicycles:
+      case RequestCategory.scooters:
+      case RequestCategory.towingServices:
+        return MainCategory.vehicles;
       
-      // מקצועות טכניים
-      case RequestCategory.computersAndTechnology:
-      case RequestCategory.electricalAndElectronics:
-      case RequestCategory.internetAndCommunication:
-      case RequestCategory.appsAndDevelopment:
-      case RequestCategory.smartSystems:
-      case RequestCategory.medicalEquipment:
-        return MainCategory.technicalServices;
+      // 🌱 גינון, ניקיון וסביבה
+      case RequestCategory.homeGardening:
+      case RequestCategory.yardCleaning:
+      case RequestCategory.postRenovationCleaning:
+      case RequestCategory.plantsAndPets:
+        return MainCategory.gardeningAndCleaning;
       
-      // חינוך והכשרה
-      case RequestCategory.privateLessonsEducation:
-      case RequestCategory.languages:
-      case RequestCategory.professionalTraining:
-      case RequestCategory.lifeSkills:
-      case RequestCategory.higherEducation:
-      case RequestCategory.vocationalTraining:
+      // 🎓 חינוך, לימודים והדרכה
+      case RequestCategory.privateTutoring:
+      case RequestCategory.coursesAndAssignments:
+      case RequestCategory.translation:
+      case RequestCategory.languageLearning:
         return MainCategory.educationAndTraining;
       
-      // אירועים ובידור
-      case RequestCategory.events:
-      case RequestCategory.entertainment:
-      case RequestCategory.sports:
-      case RequestCategory.tourism:
-      case RequestCategory.partiesAndEvents:
-      case RequestCategory.photographyAndVideo:
-        return MainCategory.eventsAndEntertainment;
+      // 🧭 ייעוץ והכוונה מקצועית
+      case RequestCategory.nutritionConsulting:
+      case RequestCategory.careerConsulting:
+      case RequestCategory.travelConsulting:
+      case RequestCategory.financialConsulting:
+      case RequestCategory.educationConsulting:
+      case RequestCategory.personalTrainer:
+      case RequestCategory.familyCoupleCounseling:
+        return MainCategory.professionalConsulting;
       
-      // גינון וסביבה
-      case RequestCategory.gardening:
-      case RequestCategory.environmentalCleaning:
-      case RequestCategory.cleaningServicesEnv:
-      case RequestCategory.environmentalQuality:
-      case RequestCategory.pets:
-      case RequestCategory.maintenance:
-        return MainCategory.gardeningAndEnvironment;
+      // 🎨 יצירה, אומנות ומדיה
+      case RequestCategory.eventPhotography:
+      case RequestCategory.graphics:
+      case RequestCategory.video:
+      case RequestCategory.logoDesign:
+      case RequestCategory.smallEventProduction:
+        return MainCategory.artsAndMedia;
       
-      // מזון ובישול
-      case RequestCategory.cooking:
-      case RequestCategory.healthyFood:
-      case RequestCategory.foodEvents:
-      case RequestCategory.fastFood:
-      case RequestCategory.restaurants:
-      case RequestCategory.baking:
-      case RequestCategory.nutritionalConsulting:
-        return MainCategory.foodAndCooking;
-      
-      // ספורט וכושר
-      case RequestCategory.personalTraining:
-      case RequestCategory.teamSports:
-      case RequestCategory.martialArts:
-      case RequestCategory.dance:
-      case RequestCategory.extremeSports:
-      case RequestCategory.sportsRehabilitation:
-        return MainCategory.sportsAndFitness;
+      // 💡 שירותים מיוחדים ופתוחים
+      case RequestCategory.elderlyAssistance:
+      case RequestCategory.youthMentoring:
+      case RequestCategory.formFillingHelp:
+      case RequestCategory.donations:
+      case RequestCategory.volunteering:
+      case RequestCategory.petsCare:
+        return MainCategory.specialServices;
     }
   }
 }
@@ -854,59 +1056,55 @@ extension RequestCategoryExtension on RequestCategory {
 extension MainCategoryExtension on MainCategory {
   String get displayName {
     switch (this) {
-      case MainCategory.constructionAndRepairs:
-        return 'בנייה ותיקונים';
-      case MainCategory.transportation:
-        return 'רכב ותחבורה';
-      case MainCategory.familyAndChildren:
-        return 'משפחה וילדים';
-      case MainCategory.businessAndServices:
-        return 'עסקים ושירותים';
-      case MainCategory.artsAndCrafts:
-        return 'יצירה ואומנות';
-      case MainCategory.healthAndWellness:
-        return 'בריאות ורווחה';
-      case MainCategory.technicalServices:
-        return 'מקצועות טכניים';
+      case MainCategory.constructionAndMaintenance:
+        return 'בנייה, תיקונים ותחזוקה';
+      case MainCategory.deliveriesAndMoving:
+        return 'שליחויות, הובלות ושירותים מהירים';
+      case MainCategory.beautyAndCosmetics:
+        return 'יופי, טיפוח וקוסמטיקה';
+      case MainCategory.marketingAndSales:
+        return 'שיווק ומכירות';
+      case MainCategory.technologyAndComputers:
+        return 'טכנולוגיה, מחשבים ואפליקציות';
+      case MainCategory.vehicles:
+        return 'כלי תחבורה';
+      case MainCategory.gardeningAndCleaning:
+        return 'גינון, ניקיון וסביבה';
       case MainCategory.educationAndTraining:
-        return 'חינוך והכשרה';
-      case MainCategory.eventsAndEntertainment:
-        return 'אירועים ובידור';
-      case MainCategory.gardeningAndEnvironment:
-        return 'גינון וסביבה';
-      case MainCategory.foodAndCooking:
-        return 'מזון ובישול';
-      case MainCategory.sportsAndFitness:
-        return 'ספורט וכושר';
+        return 'חינוך, לימודים והדרכה';
+      case MainCategory.professionalConsulting:
+        return 'ייעוץ והכוונה מקצועית';
+      case MainCategory.artsAndMedia:
+        return 'יצירה, אומנות ומדיה';
+      case MainCategory.specialServices:
+        return 'שירותים מיוחדים ופתוחים';
     }
   }
 
   String get icon {
     switch (this) {
-      case MainCategory.constructionAndRepairs:
+      case MainCategory.constructionAndMaintenance:
         return '🏠';
-      case MainCategory.transportation:
-        return '🚗';
-      case MainCategory.familyAndChildren:
-        return '👶';
-      case MainCategory.businessAndServices:
-        return '💼';
-      case MainCategory.artsAndCrafts:
-        return '🎨';
-      case MainCategory.healthAndWellness:
-        return '🏥';
-      case MainCategory.technicalServices:
+      case MainCategory.deliveriesAndMoving:
+        return '🚚';
+      case MainCategory.beautyAndCosmetics:
+        return '🧖‍♀️';
+      case MainCategory.marketingAndSales:
+        return '🛒';
+      case MainCategory.technologyAndComputers:
         return '🛠️';
+      case MainCategory.vehicles:
+        return '🚗';
+      case MainCategory.gardeningAndCleaning:
+        return '🌱';
       case MainCategory.educationAndTraining:
         return '🎓';
-      case MainCategory.eventsAndEntertainment:
-        return '🎉';
-      case MainCategory.gardeningAndEnvironment:
-        return '🌱';
-      case MainCategory.foodAndCooking:
-        return '🍽️';
-      case MainCategory.sportsAndFitness:
-        return '🏃‍♂️';
+      case MainCategory.professionalConsulting:
+        return '🧭';
+      case MainCategory.artsAndMedia:
+        return '🎨';
+      case MainCategory.specialServices:
+        return '💡';
     }
   }
 }
@@ -922,6 +1120,7 @@ extension RequestLocationExtension on RequestLocation {
 
 extension RequestStatusExtension on RequestStatus {
   String statusDisplayName(AppLocalizations l10n) {
+    // ✅ Safe: All status getters now use _safeGet with fallbacks
     switch (this) {
       case RequestStatus.open:
         return l10n.open;
@@ -937,24 +1136,83 @@ extension RequestStatusExtension on RequestStatus {
 
 extension RequestPhoneExtension on Request {
   String? get formattedPhoneNumber {
-    if (phoneNumber == null || phoneNumber!.isEmpty) return null;
+    if (phoneNumber == null || phoneNumber!.isEmpty) {
+      debugPrint('📞 formattedPhoneNumber: phoneNumber is null or empty');
+      return null;
+    }
     
-    final phone = phoneNumber!;
+    final phone = phoneNumber!.trim();
+    if (phone.isEmpty) {
+      debugPrint('📞 formattedPhoneNumber: phone is empty after trim');
+      return null;
+    }
+    
+    debugPrint('📞 formattedPhoneNumber: Processing phone: $phone');
+    
+    // אם המספר כבר בפורמט prefix-number (למשל 050-1234567), נהפוך אותו לפורמט 050-123-4567
+    if (phone.contains('-')) {
+      final parts = phone.split('-');
+      
+      // אם המספר כבר בפורמט הנכון (למשל 050-123-4567), נחזיר אותו כפי שהוא
+      if (parts.length == 3) {
+        return phone;
+      }
+      
+      if (parts.length == 2) {
+        final prefix = parts[0].trim();
+        final number = parts[1].trim();
+        
+        // אם הקידומת היא 3 ספרות והמספר הוא 7 ספרות (למשל 050-1234567), נהפוך אותו לפורמט 050-123-4567
+        if (prefix.length == 3 && number.length == 7) {
+          return '$prefix-${number.substring(0, 3)}-${number.substring(3)}';
+        }
+        
+        // אם הקידומת היא 2 ספרות והמספר הוא 6 ספרות (למשל 02-123456), נהפוך אותו לפורמט 02-123-456
+        if (prefix.length == 2 && number.length == 6) {
+          return '$prefix-${number.substring(0, 3)}-${number.substring(3)}';
+        }
+        
+        // אם הקידומת היא 2 ספרות והמספר הוא 7 ספרות (למשל 04-1234567), נהפוך אותו לפורמט 04-123-4567
+        if (prefix.length == 2 && number.length == 7) {
+          return '$prefix-${number.substring(0, 3)}-${number.substring(3)}';
+        }
+        
+        // אם הקידומת היא 3 ספרות והמספר הוא 6 ספרות (למשל 050-123456), נהפוך אותו לפורמט 050-123-456
+        if (prefix.length == 3 && number.length == 6) {
+          return '$prefix-${number.substring(0, 3)}-${number.substring(3)}';
+        }
+        
+        // אם הקידומת והמספר לא ריקים, נחזיר אותם בפורמט prefix-number (לפחות יש מספר)
+        if (prefix.isNotEmpty && number.isNotEmpty) {
+          debugPrint('📞 formattedPhoneNumber: Returning phone as-is: $phone');
+          return phone; // נחזיר את המספר כפי שהוא (לפחות יש מספר)
+        }
+      }
+    }
+    
+    // הסרת מקפים קיימים לטיפול
+    final cleanPhone = phone.replaceAll('-', '').replaceAll(' ', '');
     
     // פורמט למספרי סלולר (05X-XXX-XXXX)
-    if (phone.length == 10 && phone.startsWith('05')) {
-      return '${phone.substring(0, 3)}-${phone.substring(3, 6)}-${phone.substring(6)}';
+    if (cleanPhone.length == 10 && cleanPhone.startsWith('05')) {
+      return '${cleanPhone.substring(0, 3)}-${cleanPhone.substring(3, 6)}-${cleanPhone.substring(6)}';
     }
     
     // פורמט למספרי קווי (0XX-XXX-XXXX או 0XXX-XXX-XXX)
-    if (phone.length == 9) {
-      return '${phone.substring(0, 3)}-${phone.substring(3, 6)}-${phone.substring(6)}';
-    } else if (phone.length == 10) {
-      return '${phone.substring(0, 3)}-${phone.substring(3, 6)}-${phone.substring(6)}';
+    if (cleanPhone.length == 9) {
+      return '${cleanPhone.substring(0, 3)}-${cleanPhone.substring(3, 6)}-${cleanPhone.substring(6)}';
+    } else if (cleanPhone.length == 10) {
+      return '${cleanPhone.substring(0, 3)}-${cleanPhone.substring(3, 6)}-${cleanPhone.substring(6)}';
     }
     
-    // אם לא מתאים לאף פורמט, החזר כפי שהוא
-    return phone;
+    // אם לא מתאים לאף פורמט, אבל יש תוכן, נחזיר אותו (לפחות יש מספר)
+    if (phone.isNotEmpty) {
+      debugPrint('📞 formattedPhoneNumber: Returning phone as fallback: $phone');
+      return phone;
+    }
+    
+    debugPrint('📞 formattedPhoneNumber: Returning null');
+    return null;
   }
 }
 
@@ -993,7 +1251,7 @@ extension UrgencyLevelExtension on UrgencyLevel {
       case UrgencyLevel.urgent24h:
         return '⏰ תוך 24 שעות';
       case UrgencyLevel.emergency:
-        return '🚨 עכשיו';
+        return '🚨 דחוף';
     }
   }
   
@@ -1010,127 +1268,175 @@ extension UrgencyLevelExtension on UrgencyLevel {
 }
 
 extension RequestTagExtension on RequestTag {
-  String get displayName {
+  String displayName(AppLocalizations l10n) {
     switch (this) {
       // בנייה ותיקונים
       case RequestTag.suddenLeak:
-        return '❗ נזילה פתאומית';
+        return l10n.tagSuddenLeak;
       case RequestTag.powerOutage:
-        return '⚡ הפסקת חשמל';
+        return l10n.tagPowerOutage;
       case RequestTag.lockedOut:
-        return '🔒 תקוע מחוץ לבית';
+        return l10n.tagLockedOut;
       case RequestTag.urgentBeforeShabbat:
-        return '🔧 תיקון דחוף לפני שבת';
+        return l10n.tagUrgentBeforeShabbat;
       
       // רכב ותחבורה
       case RequestTag.carStuck:
-        return '🚨 רכב נתקע בדרך';
+        return l10n.tagCarStuck;
       case RequestTag.jumpStart:
-        return '🔋 התנעה / כבלים';
+        return l10n.tagJumpStart;
       case RequestTag.quickParkingRepair:
-        return '🧰 תיקון מהיר בחניה';
+        return l10n.tagQuickParkingRepair;
       case RequestTag.movingToday:
-        return '🧳 עזרה במעבר דירה היום';
+        return l10n.tagMovingToday;
       
       // משפחה וילדים
       case RequestTag.urgentBabysitter:
-        return '🍼 בייביסיטר דחוף';
+        return l10n.tagUrgentBabysitter;
       case RequestTag.examTomorrow:
-        return '📚 שיעור לפני מבחן מחר';
+        return l10n.tagExamTomorrow;
       case RequestTag.sickChild:
-        return '🧸 עזרה עם ילד חולה';
+        return l10n.tagSickChild;
       case RequestTag.zoomLessonNow:
-        return '👩‍🏫 שיעור בזום עכשיו';
+        return l10n.tagZoomLessonNow;
       
       // עסקים ושירותים
       case RequestTag.urgentDocument:
-        return '📄 מסמך דחוף';
+        return l10n.tagUrgentDocument;
       case RequestTag.meetingToday:
-        return '🤝 פגישה היום';
+        return l10n.tagMeetingToday;
       case RequestTag.presentationTomorrow:
-        return '📊 מצגת מחר';
+        return l10n.tagPresentationTomorrow;
       case RequestTag.urgentTranslation:
-        return '🌐 תרגום דחוף';
+        return l10n.tagUrgentTranslation;
       
       // אומנות ומלאכה
       case RequestTag.weddingToday:
-        return '💒 חתונה היום';
+        return l10n.tagWeddingToday;
       case RequestTag.urgentGift:
-        return '🎁 מתנה דחופה';
+        return l10n.tagUrgentGift;
       case RequestTag.eventTomorrow:
-        return '🎉 אירוע מחר';
+        return l10n.tagEventTomorrow;
       case RequestTag.urgentCraftRepair:
-        return '🔧 תיקון מלאכה דחוף';
+        return l10n.tagUrgentCraftRepair;
       
       // בריאות ורווחה
       case RequestTag.urgentAppointment:
-        return '🏥 תור דחוף';
+        return l10n.tagUrgentAppointment;
       case RequestTag.emergencyCare:
-        return '🚑 טיפול חירום';
+        return l10n.tagEmergencyCare;
       case RequestTag.urgentTherapy:
-        return '💆 טיפול דחוף';
+        return l10n.tagUrgentTherapy;
       case RequestTag.healthEmergency:
-        return '⚕️ חירום בריאותי';
+        return l10n.tagHealthEmergency;
       
       // שירותים טכניים
       case RequestTag.urgentITSupport:
-        return '💻 תמיכה טכנית דחופה';
+        return l10n.tagUrgentITSupport;
       case RequestTag.systemDown:
-        return '🖥️ מערכת לא עובדת';
+        return l10n.tagSystemDown;
       case RequestTag.urgentTechRepair:
-        return '🔧 תיקון טכני דחוף';
+        return l10n.tagUrgentTechRepair;
       case RequestTag.dataRecovery:
-        return '💾 שחזור נתונים';
+        return l10n.tagDataRecovery;
       
       // חינוך והכשרה
       case RequestTag.urgentTutoring:
-        return '📖 שיעור דחוף';
+        return l10n.tagUrgentTutoring;
       case RequestTag.examPreparation:
-        return '📝 הכנה למבחן';
+        return l10n.tagExamPreparation;
       case RequestTag.urgentCourse:
-        return '🎓 קורס דחוף';
+        return l10n.tagUrgentCourse;
       case RequestTag.certificationUrgent:
-        return '🏆 הסמכה דחופה';
+        return l10n.tagCertificationUrgent;
       
       // אירועים ובידור
       case RequestTag.partyToday:
-        return '🎊 מסיבה היום';
+        return l10n.tagPartyToday;
       case RequestTag.urgentEntertainment:
-        return '🎭 בידור דחוף';
+        return l10n.tagUrgentEntertainment;
       case RequestTag.eventSetup:
-        return '🎪 הכנת אירוע';
+        return l10n.tagEventSetup;
       case RequestTag.urgentPhotography:
-        return '📸 צילום דחוף';
+        return l10n.tagUrgentPhotography;
       
       // גינון וסביבה
       case RequestTag.urgentGardenCare:
-        return '🌱 טיפול בגן דחוף';
+        return l10n.tagUrgentGardenCare;
       case RequestTag.treeEmergency:
-        return '🌳 חירום עץ';
+        return l10n.tagTreeEmergency;
       case RequestTag.urgentCleaning:
-        return '🧹 ניקיון דחוף';
+        return l10n.tagUrgentCleaning;
       case RequestTag.pestControl:
-        return '🐛 הדברת מזיקים';
+        return l10n.tagPestControl;
       
       // אוכל ובישול
       case RequestTag.urgentCatering:
-        return '🍽️ קייטרינג דחוף';
+        return l10n.tagUrgentCatering;
       case RequestTag.partyFood:
-        return '🍕 אוכל למסיבה';
+        return l10n.tagPartyFood;
       case RequestTag.urgentDelivery:
-        return '🚚 משלוח דחוף';
+        return l10n.tagUrgentDelivery;
       case RequestTag.specialDiet:
-        return '🥗 דיאטה מיוחדת';
+        return l10n.tagSpecialDiet;
       
       // ספורט וכושר
       case RequestTag.urgentTraining:
-        return '💪 אימון דחוף';
+        return l10n.tagUrgentTraining;
       case RequestTag.competitionPrep:
-        return '🏆 הכנה לתחרות';
+        return l10n.tagCompetitionPrep;
       case RequestTag.injuryRecovery:
-        return '🩹 החלמה מפציעה';
+        return l10n.tagInjuryRecovery;
       case RequestTag.urgentCoaching:
-        return '🏃 אימון דחוף';
+        return l10n.tagUrgentCoaching;
+      
+      // יופי, טיפוח וקוסמטיקה (תגיות נוספות)
+      case RequestTag.eventToday:
+        return l10n.tagEventToday;
+      case RequestTag.urgentBeforeEvent:
+        return l10n.tagUrgentBeforeEvent;
+      case RequestTag.urgentBeautyFix:
+        return l10n.tagUrgentBeautyFix;
+      
+      // שיווק ומכירות
+      case RequestTag.urgentPurchase:
+        return l10n.tagUrgentPurchase;
+      case RequestTag.urgentSale:
+        return l10n.tagUrgentSale;
+      case RequestTag.eventShopping:
+        return l10n.tagEventShopping;
+      case RequestTag.urgentProduct:
+        return l10n.tagUrgentProduct;
+      
+      // שליחויות, הובלות ושירותים מהירים (תגיות נוספות)
+      case RequestTag.urgentDeliveryToday:
+        return l10n.tagUrgentDeliveryToday;
+      case RequestTag.urgentMoving:
+        return l10n.tagUrgentMoving;
+      
+      // כלי תחבורה (תגיות נוספות)
+      case RequestTag.urgentRoadRepair:
+        return l10n.tagUrgentRoadRepair;
+      case RequestTag.urgentTowing:
+        return l10n.tagUrgentTowing;
+      
+      // גינון, ניקיון וסביבה (תגיות נוספות)
+      case RequestTag.urgentPostRenovation:
+        return l10n.tagUrgentPostRenovation;
+      
+      // ייעוץ והכוונה מקצועית (תגיות נוספות)
+      case RequestTag.urgentConsultation:
+        return l10n.tagUrgentConsultation;
+      case RequestTag.urgentMeeting:
+        return l10n.tagUrgentMeeting;
+      
+      // שירותים מיוחדים ופתוחים (תגיות נוספות)
+      case RequestTag.urgentElderlyHelp:
+        return l10n.tagUrgentElderlyHelp;
+      case RequestTag.urgentVolunteering:
+        return l10n.tagUrgentVolunteering;
+      case RequestTag.urgentPetCare:
+        return l10n.tagUrgentPetCare;
     }
   }
   
@@ -1219,60 +1525,101 @@ extension RequestTagExtension on RequestTag {
       case RequestTag.injuryRecovery:
       case RequestTag.urgentCoaching:
         return Colors.red[400]!;
+      
+      // יופי, טיפוח וקוסמטיקה - ורוד בהיר
+      case RequestTag.eventToday:
+      case RequestTag.urgentBeforeEvent:
+      case RequestTag.urgentBeautyFix:
+        return Colors.pink[400]!;
+      
+      // שיווק ומכירות - כתום בהיר
+      case RequestTag.urgentPurchase:
+      case RequestTag.urgentSale:
+      case RequestTag.eventShopping:
+      case RequestTag.urgentProduct:
+        return Colors.deepOrange[300]!;
+      
+      // שליחויות, הובלות ושירותים מהירים - חום
+      case RequestTag.urgentDeliveryToday:
+      case RequestTag.urgentMoving:
+        return Colors.brown[400]!;
+      
+      // כלי תחבורה - כתום
+      case RequestTag.urgentRoadRepair:
+      case RequestTag.urgentTowing:
+        return Colors.orange[400]!;
+      
+      // גינון, ניקיון וסביבה - ירוק כהה
+      case RequestTag.urgentPostRenovation:
+        return Colors.lightGreen[700]!;
+      
+      // ייעוץ והכוונה מקצועית - כחול
+      case RequestTag.urgentConsultation:
+      case RequestTag.urgentMeeting:
+        return Colors.blue[400]!;
+      
+      // שירותים מיוחדים ופתוחים - סגול
+      case RequestTag.urgentElderlyHelp:
+      case RequestTag.urgentVolunteering:
+      case RequestTag.urgentPetCare:
+        return Colors.purple[400]!;
     }
   }
   
   // פונקציה לקבלת תגיות לפי קטגוריה
   static List<RequestTag> getTagsForCategory(RequestCategory category) {
     switch (category.mainCategory) {
-      case MainCategory.constructionAndRepairs:
+      case MainCategory.constructionAndMaintenance:
         return [
           RequestTag.suddenLeak,
           RequestTag.powerOutage,
           RequestTag.lockedOut,
           RequestTag.urgentBeforeShabbat,
         ];
-      case MainCategory.transportation:
+      case MainCategory.deliveriesAndMoving:
         return [
-          RequestTag.carStuck,
-          RequestTag.jumpStart,
-          RequestTag.quickParkingRepair,
           RequestTag.movingToday,
+          RequestTag.urgentDelivery,
+          RequestTag.urgentDeliveryToday,
+          RequestTag.urgentMoving,
         ];
-      case MainCategory.familyAndChildren:
-        return [
-          RequestTag.urgentBabysitter,
-          RequestTag.examTomorrow,
-          RequestTag.sickChild,
-          RequestTag.zoomLessonNow,
-        ];
-      case MainCategory.businessAndServices:
-        return [
-          RequestTag.urgentDocument,
-          RequestTag.meetingToday,
-          RequestTag.presentationTomorrow,
-          RequestTag.urgentTranslation,
-        ];
-      case MainCategory.artsAndCrafts:
-        return [
-          RequestTag.weddingToday,
-          RequestTag.urgentGift,
-          RequestTag.eventTomorrow,
-          RequestTag.urgentCraftRepair,
-        ];
-      case MainCategory.healthAndWellness:
+      case MainCategory.beautyAndCosmetics:
         return [
           RequestTag.urgentAppointment,
-          RequestTag.emergencyCare,
-          RequestTag.urgentTherapy,
-          RequestTag.healthEmergency,
+          RequestTag.eventToday,
+          RequestTag.urgentBeforeEvent,
+          RequestTag.urgentBeautyFix,
         ];
-      case MainCategory.technicalServices:
+      case MainCategory.marketingAndSales:
+        return [
+          RequestTag.urgentDelivery,
+          RequestTag.urgentPurchase,
+          RequestTag.urgentSale,
+          RequestTag.eventShopping,
+          RequestTag.urgentProduct,
+        ];
+      case MainCategory.technologyAndComputers:
         return [
           RequestTag.urgentITSupport,
           RequestTag.systemDown,
           RequestTag.urgentTechRepair,
           RequestTag.dataRecovery,
+        ];
+      case MainCategory.vehicles:
+        return [
+          RequestTag.carStuck,
+          RequestTag.jumpStart,
+          RequestTag.quickParkingRepair,
+          RequestTag.urgentRoadRepair,
+          RequestTag.urgentTowing,
+        ];
+      case MainCategory.gardeningAndCleaning:
+        return [
+          RequestTag.urgentGardenCare,
+          RequestTag.urgentCleaning,
+          RequestTag.pestControl,
+          RequestTag.treeEmergency,
+          RequestTag.urgentPostRenovation,
         ];
       case MainCategory.educationAndTraining:
         return [
@@ -1281,36 +1628,29 @@ extension RequestTagExtension on RequestTag {
           RequestTag.urgentCourse,
           RequestTag.certificationUrgent,
         ];
-      case MainCategory.eventsAndEntertainment:
+      case MainCategory.professionalConsulting:
         return [
-          RequestTag.partyToday,
-          RequestTag.urgentEntertainment,
-          RequestTag.eventSetup,
+          RequestTag.urgentDocument,
+          RequestTag.meetingToday,
+          RequestTag.presentationTomorrow,
+          RequestTag.urgentConsultation,
+          RequestTag.urgentMeeting,
+        ];
+      case MainCategory.artsAndMedia:
+        return [
+          RequestTag.weddingToday,
+          RequestTag.urgentGift,
+          RequestTag.eventTomorrow,
           RequestTag.urgentPhotography,
         ];
-      case MainCategory.gardeningAndEnvironment:
+      case MainCategory.specialServices:
         return [
-          RequestTag.urgentGardenCare,
-          RequestTag.treeEmergency,
-          RequestTag.urgentCleaning,
-          RequestTag.pestControl,
+          RequestTag.urgentBabysitter,
+          RequestTag.sickChild,
+          RequestTag.urgentElderlyHelp,
+          RequestTag.urgentVolunteering,
+          RequestTag.urgentPetCare,
         ];
-      case MainCategory.foodAndCooking:
-        return [
-          RequestTag.urgentCatering,
-          RequestTag.partyFood,
-          RequestTag.urgentDelivery,
-          RequestTag.specialDiet,
-        ];
-      case MainCategory.sportsAndFitness:
-        return [
-          RequestTag.urgentTraining,
-          RequestTag.competitionPrep,
-          RequestTag.injuryRecovery,
-          RequestTag.urgentCoaching,
-        ];
-      default:
-        return [];
     }
   }
 }

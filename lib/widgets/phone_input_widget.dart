@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../utils/phone_validation.dart';
+import '../l10n/app_localizations.dart';
 
 class PhoneInputWidget extends StatefulWidget {
   final String? initialPrefix;
@@ -148,6 +149,7 @@ class _PhoneInputWidgetState extends State<PhoneInputWidget> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final groupedPrefixes = PhoneValidation.getGroupedPrefixes();
     
     return Row(
@@ -160,7 +162,7 @@ class _PhoneInputWidgetState extends State<PhoneInputWidget> {
             controller: _numberController,
             focusNode: _numberFocusNode,
             decoration: InputDecoration(
-              labelText: 'מספר טלפון',
+              labelText: l10n.phoneNumberLabel,
               border: const OutlineInputBorder(),
               hintText: _selectedPrefix.isNotEmpty 
                   ? '0' * PhoneValidation.israeliPhoneLength 
@@ -186,11 +188,11 @@ class _PhoneInputWidgetState extends State<PhoneInputWidget> {
           Expanded(
             flex: 2,
             child: DropdownButtonFormField<String>(
-            value: _selectedPrefix.isEmpty ? null : _selectedPrefix,
-            decoration: const InputDecoration(
-              labelText: 'קידומת',
-              border: OutlineInputBorder(),
-              prefixIcon: Icon(Icons.phone),
+            initialValue: _selectedPrefix.isEmpty ? null : _selectedPrefix,
+            decoration: InputDecoration(
+              labelText: l10n.prefix,
+              border: const OutlineInputBorder(),
+              prefixIcon: const Icon(Icons.phone),
             ),
             hint: const Text('בחר'),
             items: groupedPrefixes.entries.expand((group) {

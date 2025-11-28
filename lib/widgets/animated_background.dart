@@ -87,15 +87,15 @@ class _AnimatedBackgroundState extends State<AnimatedBackground>
                             shape: BoxShape.circle,
                             gradient: RadialGradient(
                               colors: [
-                                Colors.purple.withOpacity(0.4),
-                                Colors.blue.withOpacity(0.3),
-                                Colors.pink.withOpacity(0.2),
+                                Colors.purple.withValues(alpha: 0.4),
+                                Colors.blue.withValues(alpha: 0.3),
+                                Colors.pink.withValues(alpha: 0.2),
                                 Colors.transparent,
                               ],
                             ),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.purple.withOpacity(0.3),
+                                color: Colors.purple.withValues(alpha: 0.3),
                                 blurRadius: 20,
                                 spreadRadius: 5,
                               ),
@@ -122,8 +122,8 @@ class _AnimatedBackgroundState extends State<AnimatedBackground>
                             shape: BoxShape.circle,
                             gradient: LinearGradient(
                               colors: [
-                                Colors.cyan.withOpacity(0.2),
-                                Colors.pink.withOpacity(0.1),
+                                Colors.cyan.withValues(alpha: 0.2),
+                                Colors.pink.withValues(alpha: 0.1),
                                 Colors.transparent,
                               ],
                             ),

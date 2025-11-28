@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/request.dart';
+import '../l10n/app_localizations.dart';
 
 class TwoLevelCategorySelector extends StatefulWidget {
   final List<RequestCategory>? selectedCategories;
@@ -9,13 +10,13 @@ class TwoLevelCategorySelector extends StatefulWidget {
   final String instruction;
 
   const TwoLevelCategorySelector({
-    Key? key,
+    super.key,
     this.selectedCategories,
     this.maxSelections = 2,
     required this.onSelectionChanged,
     required this.title,
     required this.instruction,
-  }) : super(key: key);
+  });
 
   @override
   State<TwoLevelCategorySelector> createState() => _TwoLevelCategorySelectorState();
@@ -32,6 +33,7 @@ class _TwoLevelCategorySelectorState extends State<TwoLevelCategorySelector> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -48,7 +50,9 @@ class _TwoLevelCategorySelectorState extends State<TwoLevelCategorySelector> {
           children: [
             Expanded(
               child: Text(
-                'בחר תחומי משנה (עד ${widget.maxSelections} מכל התחומים):',
+                widget.maxSelections >= 999
+                    ? 'בחר תחומי משנה:'
+                    : l10n.selectSubCategoriesUpTo(widget.maxSelections),
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
@@ -62,7 +66,7 @@ class _TwoLevelCategorySelectorState extends State<TwoLevelCategorySelector> {
                 widget.onSelectionChanged(_selectedCategories);
               },
               icon: const Icon(Icons.clear, size: 16),
-              label: const Text('נקה בחירה'),
+              label: Text(l10n.clearSelection),
               style: TextButton.styleFrom(
                 foregroundColor: Colors.red,
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -73,13 +77,14 @@ class _TwoLevelCategorySelectorState extends State<TwoLevelCategorySelector> {
         const SizedBox(height: 8),
         
         // רשימת כל התחומים הראשיים עם תחומי המשנה שלהם
-        Container(
-          height: 300, // גובה גדול יותר לכל התחומים
-          decoration: BoxDecoration(
-            border: Border.all(color: Colors.grey),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: ListView.builder(
+        SizedBox(
+          height: 400,
+          child: Container(
+            decoration: BoxDecoration(
+              border: Border.all(color: Colors.grey),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: ListView.builder(
             padding: const EdgeInsets.all(8),
             itemCount: MainCategory.values.length,
             itemBuilder: (context, mainIndex) {
@@ -87,9 +92,21 @@ class _TwoLevelCategorySelectorState extends State<TwoLevelCategorySelector> {
               final subCategories = _getSubCategoriesForMainCategory(mainCategory);
               
               return ExpansionTile(
-                title: Text(
-                  mainCategory.displayName,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
+                title: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        mainCategory.displayName,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    // אייקון הקטגוריה מצד ימין
+                    Text(
+                      mainCategory.icon,
+                      style: const TextStyle(fontSize: 20),
+                    ),
+                  ],
                 ),
                 children: subCategories.map((category) {
                   final isSelected = _selectedCategories.contains(category);
@@ -114,6 +131,7 @@ class _TwoLevelCategorySelectorState extends State<TwoLevelCategorySelector> {
               );
             },
           ),
+        ),
         ),
       ],
     );

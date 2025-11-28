@@ -40,6 +40,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
   double _exposureRadius = 0.2; // קילומטרים (ברירת מחדל)
   final double _minRadius = 0.1; // 0.1 ק"מ
   double _maxRadius = 5.0; // 5 ק"מ מקסימום
+  bool _sliderChanged = false; // האם המשתמש שינה את הסליידר
   
   // הגבלת טווח לגבולות ישראל
   double _maxRadiusInIsrael = 0.0; // יוחלט דינמית לפי המיקום
@@ -120,9 +121,24 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
     if (widget.initialExposureRadius != null) {
       _exposureRadius = widget.initialExposureRadius!.clamp(_minRadius, _maxRadius);
       debugPrint('Initial exposure radius: ${widget.initialExposureRadius} -> $_exposureRadius km');
+      // אם הטווח הראשוני הוא 0.1, נסמן שהסליידר לא שונה
+      if (_exposureRadius == _minRadius) {
+        _sliderChanged = false;
+      }
+    } else {
+      // אם אין טווח ראשוני, נבדוק אם הטווח הנוכחי הוא המינימום
+      if (_exposureRadius == _minRadius) {
+        _sliderChanged = false;
+      }
     }
     
     _initializeLocation();
+    
+    // חישוב טווח מקסימלי לפי סוג המשתמש אם לא סופק מבחוץ
+    // מבטיח שמסך זה יכבד את ההגבלות הקשיחות לכל מקום בו הוא משומש
+    if (widget.maxExposureRadius == null) {
+      _calculateMaxRadiusForUser();
+    }
     
     // בדיקה אם Google Maps API זמין
     Future.delayed(const Duration(seconds: 8), () {
@@ -313,19 +329,15 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
     if (_selectedLocation != null) {
       debugPrint('Confirming location: ${_selectedLocation!.latitude}, ${_selectedLocation!.longitude}');
       
-      final result = {
-        'latitude': _selectedLocation!.latitude,
-        'longitude': _selectedLocation!.longitude,
-        'address': _selectedAddress,
-      };
-      
-      // הוספת רדיוס החשיפה רק אם צריך להציג מעגל חשיפה
-      if (_shouldShowExposureCircle) {
-        debugPrint('Exposure radius: $_exposureRadius km');
-        result['exposureRadius'] = _exposureRadius;
+      // ✅ בדיקה אם הטווח הוא המינימום (0.1 ק"מ) והסליידר לא שונה
+      if (_shouldShowExposureCircle && _exposureRadius == _minRadius && !_sliderChanged) {
+        // הצגת דיאלוג אישור לטווח מינימלי
+        _showMinimalRadiusConfirmationDialog();
+        return;
       }
       
-      Navigator.pop(context, result);
+      // אם הטווח גדול מ-0.1 או שהסליידר שונה, להמשיך כרגיל
+      _doConfirmLocation();
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -334,6 +346,76 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
         ),
       );
     }
+  }
+  
+  /// אישור המיקום בפועל
+  void _doConfirmLocation() {
+    final result = {
+      'latitude': _selectedLocation!.latitude,
+      'longitude': _selectedLocation!.longitude,
+      'address': _selectedAddress,
+    };
+    
+    // הוספת רדיוס החשיפה רק אם צריך להציג מעגל חשיפה
+    if (_shouldShowExposureCircle) {
+      debugPrint('Exposure radius: $_exposureRadius km');
+      result['exposureRadius'] = _exposureRadius;
+    }
+    
+    Navigator.pop(context, result);
+  }
+  
+  /// הצגת דיאלוג אישור לטווח מינימלי
+  void _showMinimalRadiusConfirmationDialog() {
+    final l10n = AppLocalizations.of(context);
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(
+              Icons.info_outline,
+              color: Theme.of(context).colorScheme.tertiary,
+              size: 28,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                l10n.confirmMinimalRadius,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          l10n.minimalRadiusWarning,
+          style: const TextStyle(fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              l10n.cancel,
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _doConfirmLocation();
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.tertiary,
+              foregroundColor: Colors.white,
+            ),
+            child: Text(l10n.confirm),
+          ),
+        ],
+      ),
+    );
   }
 
   void _selectLocationManually() {
@@ -369,6 +451,8 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                 // חיפוש מיקום לפי כתובת
                 try {
                   final position = await LocationService.getCoordinatesFromAddress(_selectedAddress!);
+                  // Guard context usage after async gap
+                  if (!context.mounted) return;
                   if (position != null) {
                     setState(() {
                       _selectedLocation = LatLng(position.latitude, position.longitude);
@@ -384,6 +468,8 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                     );
                   }
                 } catch (e) {
+                  // Guard context usage after async gap
+                  if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                       content: Text('שגיאה בחיפוש מיקום: $e'),
@@ -415,17 +501,17 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
       textDirection: l10n.isRTL ? TextDirection.rtl : TextDirection.ltr,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('בחירת מיקום'),
+          title: Text(l10n.selectLocationTitle),
           backgroundColor: Theme.of(context).brightness == Brightness.dark 
-    ? const Color(0xFFFF9800) // כתום ענתיק
+    ? const Color(0xFF9C27B0) // סגול יפה
     : Theme.of(context).colorScheme.primary,
           foregroundColor: Colors.white,
           actions: [
             TextButton(
               onPressed: _confirmLocation,
-              child: const Text(
-                'אישור',
-                style: TextStyle(color: Colors.white, fontSize: 16),
+              child: Text(
+                l10n.confirm,
+                style: const TextStyle(color: Colors.white, fontSize: 16),
               ),
             ),
           ],
@@ -452,10 +538,10 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                                           child: CircularProgressIndicator(strokeWidth: 2),
                                         )
                                       : const Icon(Icons.my_location),
-                                  label: Text(_isGettingCurrentLocation ? 'מקבל מיקום...' : 'מיקום נוכחי'),
+                                  label: Text(_isGettingCurrentLocation ? l10n.gettingLocation : l10n.currentLocation),
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: Theme.of(context).brightness == Brightness.dark 
-        ? const Color(0xFFFF9800) // כתום ענתיק
+        ? const Color(0xFF9C27B0) // סגול יפה
         : Theme.of(context).colorScheme.primary,
                                     foregroundColor: Colors.white,
                                   ),
@@ -478,7 +564,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                                       const Icon(Icons.radio_button_unchecked, color: Colors.blue),
                                       const SizedBox(width: 8),
                                       Text(
-                                        'מעגל חשיפה: ${_getCurrentRadius().toStringAsFixed(1)} ק"מ',
+                                        '${l10n.exposureCircle}: ${_getCurrentRadius().toStringAsFixed(1)} ${l10n.kilometers}',
                                         style: const TextStyle(
                                           fontSize: 16,
                                           fontWeight: FontWeight.w600,
@@ -489,13 +575,13 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                                   const SizedBox(height: 12),
                                   
                                   // יחידות מידה - קילומטרים בלבד
-                                  const Row(
+                                  Row(
                                     children: [
-                                      Icon(Icons.straighten, color: Colors.grey, size: 16),
-                                      SizedBox(width: 8),
+                                      const Icon(Icons.straighten, color: Colors.grey, size: 16),
+                                      const SizedBox(width: 8),
                                       Text(
-                                        'קילומטרים',
-                                        style: TextStyle(
+                                        l10n.kilometers,
+                                        style: const TextStyle(
                                           fontSize: 14,
                                           color: Colors.grey,
                                         ),
@@ -513,7 +599,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                                           max: _maxRadius,
                                           divisions: ((_maxRadius - _minRadius) * 10).round(), // קפיצות של 0.1 ק"מ
                                           activeColor: Colors.blue,
-                                          inactiveColor: Colors.blue.withOpacity(0.3),
+                                          inactiveColor: Colors.blue.withValues(alpha: 0.3),
                                           onChanged: (value) {
                                             setState(() {
                                               // עיגול לקפיצות של 0.1 ק"מ
@@ -522,6 +608,8 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                                               if (_exposureRadius < 0.1) {
                                                 _exposureRadius = 0.1;
                                               }
+                                              // ✅ סימון שהסליידר שונה
+                                              _sliderChanged = true;
                                               debugPrint('Slider changed: $value -> $_exposureRadius km');
                                             });
                                           },
@@ -532,28 +620,28 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                                   ),
                                   const SizedBox(height: 8),
                                   Text(
-                                    'גרור את הסליידר כדי לשנות את גודל מעגל החשיפה',
+                                    l10n.dragSliderToChange,
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: Colors.grey[600],
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
                                     ),
                                   ),
                                   if (_maxRadiusInIsrael > 0) ...[
                                     const SizedBox(height: 4),
                                     Text(
-                                      'טווח מקסימלי: ${_maxRadiusInIsrael.toStringAsFixed(1)} ק"מ (כולל בונוסים)',
+                                      l10n.maxRangeWithBonuses(_maxRadiusInIsrael.toStringAsFixed(1)),
                                       style: TextStyle(
                                         fontSize: 11,
-                                        color: Colors.blue[700],
+                                        color: Theme.of(context).colorScheme.primary,
                                         fontWeight: FontWeight.w500,
                                       ),
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
-                                      'התראות יישלחו רק למשתמשים שמיקום הסינון שלהם בתוך ישראל ובטווח',
+                                      l10n.notificationsWillBeSent,
                                       style: TextStyle(
                                         fontSize: 10,
-                                        color: Colors.grey[600],
+                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                                         fontStyle: FontStyle.italic,
                                       ),
                                     ),
@@ -597,7 +685,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                                 Icon(
                                   Icons.error_outline,
                                   size: 64,
-                                  color: Colors.red[300],
+                                  color: Theme.of(context).colorScheme.error,
                                 ),
                                 const SizedBox(height: 16),
                                 Text(
@@ -605,7 +693,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                                   style: TextStyle(
                                     fontSize: 18,
                                     fontWeight: FontWeight.bold,
-                                    color: Colors.red[700],
+                                    color: Theme.of(context).colorScheme.error,
                                   ),
                                 ),
                                 const SizedBox(height: 8),
@@ -613,7 +701,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                                   _mapError!,
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
-                                    color: Colors.red[600],
+                                    color: Theme.of(context).colorScheme.error,
                                     fontSize: 14,
                                   ),
                                 ),
@@ -670,7 +758,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                                           markerId: const MarkerId('selected_location'),
                                           position: _selectedLocation!,
                                           infoWindow: InfoWindow(
-                                            title: 'מיקום נבחר',
+                                            title: l10n.selectedLocation,
                                             snippet: _selectedAddress,
                                           ),
                                         ),
@@ -682,7 +770,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                                           circleId: const CircleId('exposure_circle'),
                                           center: _selectedLocation!,
                                           radius: _getRadiusInMeters(), // שימוש בפונקציה החדשה
-                                          fillColor: Colors.blue.withOpacity(0.2),
+                                          fillColor: Colors.blue.withValues(alpha: 0.2),
                                           strokeColor: Colors.blue,
                                           strokeWidth: 2,
                                         ),
@@ -716,7 +804,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                               // אינדיקטור טעינה
                               if (_isLoading)
                                 Container(
-                                  color: Colors.white.withOpacity(0.8),
+                                  color: Colors.white.withValues(alpha: 0.8),
                                   child: const Center(
                                     child: Column(
                                       mainAxisAlignment: MainAxisAlignment.center,
@@ -737,7 +825,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                                   child: Container(
                                     padding: const EdgeInsets.all(12),
                                     decoration: BoxDecoration(
-                                      color: Colors.orange.withOpacity(0.9),
+                                      color: Colors.orange.withValues(alpha: 0.9),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: const Text(
@@ -755,7 +843,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                                   child: Container(
                                     padding: const EdgeInsets.all(12),
                                     decoration: BoxDecoration(
-                                      color: Colors.red.withOpacity(0.9),
+                                      color: Colors.red.withValues(alpha: 0.9),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Text(
@@ -773,19 +861,19 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                     Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.grey[100],
+                        color: Theme.of(context).colorScheme.surfaceContainer,
                         border: Border(
-                          top: BorderSide(color: Colors.grey[300]!),
+                          top: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                         ),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'מיקום נבחר:',
+                            l10n.selectedLocationLabel,
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
-                              color: Colors.grey[700],
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
                             ),
                           ),
                           const SizedBox(height: 8),
@@ -798,7 +886,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                             'קואורדינטות: ${_selectedLocation!.latitude.toStringAsFixed(6)}, ${_selectedLocation!.longitude.toStringAsFixed(6)}',
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.grey[600],
+                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ],

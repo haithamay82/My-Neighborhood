@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/request.dart';
@@ -52,7 +51,7 @@ class _RateUserScreenState extends State<RateUserScreen> {
         appBar: AppBar(
           title: const Text('דרג משתמש'),
           backgroundColor: Theme.of(context).brightness == Brightness.dark 
-    ? const Color(0xFFFF9800) // כתום ענתיק
+    ? const Color(0xFF9C27B0) // סגול יפה
     : Theme.of(context).colorScheme.primary,
           foregroundColor: Colors.white,
         ),
@@ -101,7 +100,7 @@ class _RateUserScreenState extends State<RateUserScreen> {
                 children: [
                   CircleAvatar(
                     backgroundColor: Theme.of(context).brightness == Brightness.dark 
-    ? const Color(0xFFFF9800) // כתום ענתיק
+    ? const Color(0xFF9C27B0) // סגול יפה
     : Theme.of(context).colorScheme.primary,
                     child: Text(
                       widget.helper['displayName'][0].toUpperCase(),
@@ -126,7 +125,7 @@ class _RateUserScreenState extends State<RateUserScreen> {
                         Text(
                           widget.helper['email'],
                           style: TextStyle(
-                            color: Colors.grey[600],
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
                             fontSize: 14,
                           ),
                         ),
@@ -158,7 +157,7 @@ class _RateUserScreenState extends State<RateUserScreen> {
                   child: Icon(
                     index < _rating ? Icons.star : Icons.star_border,
                     size: 40,
-                    color: index < _rating ? Colors.amber : Colors.grey[400],
+                    color: index < _rating ? Theme.of(context).colorScheme.tertiary : Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 );
               }),
@@ -171,7 +170,7 @@ class _RateUserScreenState extends State<RateUserScreen> {
             child: Text(
               _getRatingDescription(_rating),
               style: TextStyle(
-                color: _rating > 0 ? Colors.grey[700] : Colors.grey[500],
+                color: _rating > 0 ? Theme.of(context).colorScheme.onSurfaceVariant : Theme.of(context).colorScheme.onSurfaceVariant,
                 fontSize: 16,
                 fontWeight: FontWeight.w500,
               ),
@@ -233,7 +232,7 @@ class _RateUserScreenState extends State<RateUserScreen> {
               onPressed: _rating > 0 ? _saveRating : null,
               style: ElevatedButton.styleFrom(
                 backgroundColor: Theme.of(context).brightness == Brightness.dark 
-    ? const Color(0xFFFF9800) // כתום ענתיק
+    ? const Color(0xFF9C27B0) // סגול יפה
     : Theme.of(context).colorScheme.primary,
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 16),

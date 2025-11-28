@@ -38,12 +38,12 @@ dependencies:
   cupertino_icons: ^1.0.8
   
   # Firebase dependencies
-  firebase_core: ^4.2.0
-  firebase_auth: ^6.1.1
-  cloud_firestore: ^6.0.3
-  firebase_messaging: ^16.0.3
-  firebase_storage: ^13.0.3
-  cloud_functions: ^6.0.3
+  firebase_core: ^4.2.1
+  firebase_auth: ^6.1.2
+  cloud_firestore: ^6.1.0
+  firebase_messaging: ^16.0.4
+  firebase_storage: ^13.0.4
+  cloud_functions: ^6.0.4
   
   # Google Sign-In
   google_sign_in: ^6.1.5
@@ -54,10 +54,23 @@ dependencies:
   # Social Media Sign-In
   sign_in_with_apple: ^7.0.1
   flutter_facebook_auth: ^7.1.2
-  oauth2: ^2.0.2
+  oauth2: ^2.0.5
   
   # Audio
   audioplayers: ^6.1.0
+  just_audio: ^0.9.36
+  record: ^6.1.2
+  
+  # State Management
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+  
+  # Image Caching
+  cached_network_image: ^3.3.1
+  
+  # Local Storage
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
   
   # Permissions
   permission_handler: ^12.0.1
@@ -66,7 +79,7 @@ dependencies:
   flutter_local_notifications: ^19.5.0
   
   # Payment processing
-  http: ^1.2.2
+  http: ^1.6.0
   url_launcher: ^6.3.1
   app_links: ^6.3.2
   image_picker: ^1.0.7
@@ -79,15 +92,17 @@ dependencies:
   connectivity_plus: ^7.0.0
   
   # App sharing
-  share_plus: ^12.0.0
+  share_plus: ^12.0.1
   
   # Maps
-  google_maps_flutter: ^2.8.0
+  google_maps_flutter: ^2.9.0
   
   # Local storage
   shared_preferences: ^2.2.2
   twilio_flutter: ^0.9.0
   device_info_plus: ^12.2.0
+  package_info_plus: ^8.3.1
+  path_provider: ^2.1.2
 
 dev_dependencies:
   flutter_test:
@@ -100,6 +115,8 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
   flutter_launcher_icons: ^0.14.4
+  riverpod_generator: ^2.3.9
+  build_runner: ^2.4.8
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -116,6 +133,7 @@ flutter:
   assets:
     - assets/images/
     - assets/sounds/
+    - assets/legal/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
@@ -144,8 +162,13 @@ flutter:
   # see https://flutter.dev/to/font-from-package
 
 # Configuration for flutter_launcher_icons
+# הערה: יש לשים את קובץ הלוגו החדש בתיקייה assets/images/ בשם logo_new.png
+# ואז להריץ: flutter pub run flutter_launcher_icons
 flutter_launcher_icons:
   android: "ic_launcher"
   ios: true
-  image_path: "assets/images/logolarge.png"
+  image_path: "assets/images/new_logo.png"  # שנה את זה לשם הקובץ שלך
   min_sdk_android: 21
+  # הגדרות נוספות לאייקונים
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/images/new_logo.png"

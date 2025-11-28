@@ -105,16 +105,6 @@
       ]
     },
     {
-      "collectionGroup": "messages",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "sentAt",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
       "collectionGroup": "requests",
       "queryScope": "COLLECTION",
       "fields": [
@@ -147,6 +137,72 @@
         {
           "fieldPath": "__name__",
           "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "notifications",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "toUserId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "type",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "data.requestId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "DESCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "userType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "guestTrialEndDate",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "users",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "userType",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "isSubscriptionActive",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "subscriptionExpiry",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "ASCENDING"
         }
       ]
     }

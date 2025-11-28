@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/user_profile.dart';
 import '../services/app_sharing_service.dart';
+import '../l10n/app_localizations.dart';
 
 class TrialExtensionProcessDialog extends StatefulWidget {
   final UserProfile userProfile;
@@ -100,8 +100,6 @@ class _TrialExtensionProcessDialogState extends State<TrialExtensionProcessDialo
       if (_actualStartTime == null) {
         await _loadActualStartTime();
       }
-
-      final startTime = _actualStartTime ?? widget.startTime;
       
       // בדיקת בקשות שפורסמו - נבדוק בקשות מהיום (לא מתחילת הטיימר)
       final now = DateTime.now();
@@ -125,7 +123,7 @@ class _TrialExtensionProcessDialogState extends State<TrialExtensionProcessDialo
         }
         final requestDate = createdAt.toDate();
         final isToday = requestDate.isAfter(startOfDay);
-        debugPrint('  - Request ${doc.id}: ${requestDate} vs ${startOfDay} = $isToday');
+        debugPrint('  - Request ${doc.id}: $requestDate vs $startOfDay = $isToday');
         return isToday;
       }).length;
       
@@ -186,10 +184,13 @@ class _TrialExtensionProcessDialogState extends State<TrialExtensionProcessDialo
   void _grantExtension() async {
     if (_isProcessing) return;
     
+    if (mounted) {
+      final l10n = AppLocalizations.of(context);
     setState(() {
       _isProcessing = true;
-      _statusMessage = 'מעניק הארכה של 14 ימים...';
+        _statusMessage = l10n.granting14DayExtension;
     });
+    }
 
     try {
       final user = FirebaseAuth.instance.currentUser;
@@ -207,23 +208,54 @@ class _TrialExtensionProcessDialogState extends State<TrialExtensionProcessDialo
         'guestTrialExtensionReceived': true,
       });
 
+      // שליחת התראה על הארכת תקופת אורח בשבועיים
+      if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
+      await FirebaseFirestore.instance.collection('push_notifications').add({
+        'userId': user.uid,
+        'title': l10n.guestPeriodExtendedTwoWeeks,
+        'body': l10n.thankYouForActions,
+        'payload': {
+          'type': 'trial_extension',
+          'screen': 'profile',
+        },
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      await FirebaseFirestore.instance.collection('notifications').add({
+        'toUserId': user.uid,
+        'title': l10n.guestPeriodExtendedTwoWeeks,
+        'message': l10n.thankYouForActions,
+        'type': 'trial_extension',
+        'read': false,
+        'data': {
+          'extensionDays': 14,
+          'newEndDate': newEndDate.toIso8601String(),
+        },
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
       // ניקוי זמן ההתחלה מ-SharedPreferences
       await _clearTrialExtensionStartTime();
 
       if (mounted) {
+        final l10n = AppLocalizations.of(context);
         setState(() {
-          _statusMessage = 'הארכה של 14 ימים ניתנה בהצלחה!';
+          _statusMessage = l10n.extensionGrantedSuccessfully;
         });
 
         // סגירת הדיאלוג אחרי 2 שניות
         await Future.delayed(const Duration(seconds: 2));
+        // Guard context usage after async gap
+        if (!mounted) return;
         Navigator.pop(context);
         widget.onExtensionGranted();
       }
     } catch (e) {
       if (mounted) {
+        final l10n = AppLocalizations.of(context);
         setState(() {
-          _statusMessage = 'שגיאה במתן הארכה: $e';
+          _statusMessage = '${l10n.errorGrantingExtension}: $e';
         });
       }
     }
@@ -232,7 +264,7 @@ class _TrialExtensionProcessDialogState extends State<TrialExtensionProcessDialo
   void _shareApp() {
     AppSharingService.shareAppForTrialExtension(context);
     // לא נסמן כמושלם - נחכה לבדיקה האמיתית
-    _showMessage('שיתוף האפליקציה נפתח. אנא שתף ל-5 חברים כדי להשלים את הדרישה.');
+    _showMessage(AppLocalizations.of(context).shareAppOpened);
     
     // בדיקה מחדש אחרי 2 שניות (כדי לתת זמן לעדכון)
     Future.delayed(const Duration(seconds: 2), () {
@@ -245,7 +277,8 @@ class _TrialExtensionProcessDialogState extends State<TrialExtensionProcessDialo
   void _rateApp() async {
     // פתיחת חנות האפליקציות לדירוג
     await _openAppStore();
-    _showMessage('חנות האפליקציות נפתחה. אנא דרג 5 כוכבים כדי להשלים את הדרישה.');
+    if (!mounted) return;
+    _showMessage(AppLocalizations.of(context).appStoreOpened);
     
     // בדיקה מחדש אחרי 2 שניות (כדי לתת זמן לעדכון)
     Future.delayed(const Duration(seconds: 2), () {
@@ -281,7 +314,7 @@ class _TrialExtensionProcessDialogState extends State<TrialExtensionProcessDialo
     // ניווט למסך יצירת בקשה חדשה
     Navigator.pop(context); // סגירת הדיאלוג הנוכחי
     // כאן צריך להוסיף ניווט למסך יצירת בקשה חדשה
-    _showMessage('מעבר למסך יצירת בקשה. אנא פרסם בקשה כדי להשלים את הדרישה.');
+    _showMessage(AppLocalizations.of(context).navigateToNewRequest);
     
     // בדיקה מחדש אחרי 3 שניות (כדי לתת זמן ליצירת הבקשה)
     Future.delayed(const Duration(seconds: 3), () {
@@ -318,7 +351,7 @@ class _TrialExtensionProcessDialogState extends State<TrialExtensionProcessDialo
         children: [
           Icon(Icons.schedule, color: Colors.orange[600], size: 28),
           const SizedBox(width: 8),
-          const Text('הארכת תקופת ניסיון'),
+          Text(AppLocalizations.of(context).extendTrialPeriod),
         ],
       ),
       content: Column(
@@ -326,20 +359,31 @@ class _TrialExtensionProcessDialogState extends State<TrialExtensionProcessDialo
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (_statusMessage.isNotEmpty) ...[
-            Container(
+            Builder(
+              builder: (context) {
+                // בדיקה אם ה-widget עדיין פעיל לפני גישה ל-context
+                if (!mounted) return const SizedBox.shrink();
+                final isDark = Theme.of(context).brightness == Brightness.dark;
+                return Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: _isProcessing ? Colors.blue[50] : Colors.green[50],
+                    color: _isProcessing 
+                        ? (isDark ? Colors.blue[800] : Colors.blue[50])
+                        : (isDark ? Colors.green[800] : Colors.green[50]),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: _isProcessing ? Colors.blue[200]! : Colors.green[200]!,
+                      color: _isProcessing 
+                          ? (isDark ? Colors.blue[600]! : Colors.blue[200]!)
+                          : (isDark ? Colors.green[600]! : Colors.green[200]!),
                 ),
               ),
               child: Row(
                 children: [
                   Icon(
                     _isProcessing ? Icons.hourglass_empty : Icons.check_circle,
-                    color: _isProcessing ? Colors.blue[600] : Colors.green[600],
+                        color: _isProcessing 
+                            ? (isDark ? Colors.blue[200] : Colors.blue[800])
+                            : (isDark ? Colors.green[200] : Colors.green[800]),
                     size: 20,
                   ),
                   const SizedBox(width: 8),
@@ -349,12 +393,16 @@ class _TrialExtensionProcessDialogState extends State<TrialExtensionProcessDialo
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
-                        color: _isProcessing ? Colors.blue[700] : Colors.green[700],
+                            color: _isProcessing 
+                                ? (isDark ? Colors.blue[200] : Colors.blue[800])
+                                : (isDark ? Colors.green[200] : Colors.green[800]),
                       ),
                     ),
                   ),
                 ],
               ),
+                );
+              },
             ),
             const SizedBox(height: 16),
           ],
@@ -362,8 +410,8 @@ class _TrialExtensionProcessDialogState extends State<TrialExtensionProcessDialo
           // דרישה 1: שיתוף
           _buildRequirementCard(
             icon: Icons.share,
-            title: 'שתף את האפליקציה ל-5 חברים',
-            description: 'WhatsApp, SMS, Email (${_sharingCount}/5)',
+            title: AppLocalizations.of(context).shareAppTo5FriendsForTrial,
+            description: 'WhatsApp, SMS, Email ($_sharingCount/5)',
             isCompleted: _sharingCompleted,
             onTap: _shareApp,
             color: Colors.blue,
@@ -373,8 +421,8 @@ class _TrialExtensionProcessDialogState extends State<TrialExtensionProcessDialo
           // דרישה 2: דירוג
           _buildRequirementCard(
             icon: Icons.star,
-            title: 'דרג את האפליקציה בחנות 5 כוכבים',
-            description: 'עזור לנו לשפר את האפליקציה',
+            title: AppLocalizations.of(context).rateApp5StarsForTrial,
+            description: AppLocalizations.of(context).helpUsImproveApp,
             isCompleted: _ratingCompleted,
             onTap: _rateApp,
             color: Colors.amber,
@@ -384,8 +432,8 @@ class _TrialExtensionProcessDialogState extends State<TrialExtensionProcessDialo
           // דרישה 3: פרסום בקשה
           _buildRequirementCard(
             icon: Icons.add_circle,
-            title: 'פרסם בקשה חדשה',
-            description: 'בכל תחום שתרצה (${_requestCount > 0 ? 'הושלם' : 'לא הושלם'})',
+            title: AppLocalizations.of(context).publishNewRequestForTrial,
+            description: '${AppLocalizations.of(context).publishNewRequestForTrial} (${_requestCount > 0 ? AppLocalizations.of(context).completed : AppLocalizations.of(context).notCompleted})',
             isCompleted: _requestPublished,
             onTap: _publishRequest,
             color: Colors.green,
@@ -393,36 +441,47 @@ class _TrialExtensionProcessDialogState extends State<TrialExtensionProcessDialo
           const SizedBox(height: 16),
           
           // טיימר
-          Container(
+          Builder(
+            builder: (context) {
+              final isDark = Theme.of(context).brightness == Brightness.dark;
+              return Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.orange[50],
+                  color: isDark ? Colors.orange[900] : Colors.orange[50],
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.orange[200]!),
+                  border: Border.all(
+                    color: isDark ? Colors.orange[700]! : Colors.orange[200]!,
+                  ),
             ),
             child: Row(
               children: [
-                Icon(Icons.access_time, color: Colors.orange[600], size: 20),
+                    Icon(
+                      Icons.access_time, 
+                      color: isDark ? Colors.orange[200] : Colors.orange[800], 
+                      size: 20,
+                    ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'נותר זמן: ${_getRemainingTime()}',
+                    '${AppLocalizations.of(context).remainingTime} ${_getRemainingTime()}',
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
-                      color: Colors.orange[700],
+                          color: isDark ? Colors.orange[100] : Colors.orange[900],
                     ),
                   ),
                 ),
               ],
             ),
+              );
+            },
           ),
         ],
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('סגור'),
+          child: Text(AppLocalizations.of(context).close),
         ),
       ],
     );
@@ -436,22 +495,34 @@ class _TrialExtensionProcessDialogState extends State<TrialExtensionProcessDialo
     required VoidCallback onTap,
     required Color color,
   }) {
+    // בדיקה אם ה-widget עדיין פעיל לפני גישה ל-context
+    if (!mounted) return const SizedBox.shrink();
+    
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
     return GestureDetector(
       onTap: isCompleted ? null : onTap,
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: isCompleted ? Colors.green[200] : Colors.grey[100],
+          // רקעים נייטרליים עם ניגודיות גבוהה
+          color: isCompleted 
+              ? (isDark ? Colors.green[800] : Colors.green[100])
+              : (isDark ? Colors.black : Colors.white),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
-            color: isCompleted ? Colors.green[400]! : Colors.grey[300]!,
+            color: isCompleted 
+                ? (isDark ? Colors.green[600]! : Colors.green[300]!)
+                : (isDark ? Colors.white24 : Colors.grey[300]!),
           ),
         ),
         child: Row(
           children: [
             Icon(
               isCompleted ? Icons.check_circle : icon,
-              color: isCompleted ? Colors.green[700] : Colors.grey[700],
+              color: isCompleted 
+                  ? (isDark ? Colors.green[200] : Colors.green[800])
+                  : (isDark ? Colors.white : Colors.black),
               size: 20,
             ),
             const SizedBox(width: 8),
@@ -464,14 +535,14 @@ class _TrialExtensionProcessDialogState extends State<TrialExtensionProcessDialo
                     style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
-                      color: isCompleted ? Colors.green[800] : Colors.grey[800],
+                      color: isDark ? Colors.white : Colors.black,
                     ),
                   ),
                   Text(
                     description,
                     style: TextStyle(
                       fontSize: 12,
-                      color: isCompleted ? Colors.green[700] : Colors.grey[600],
+                      color: isDark ? Colors.white70 : Colors.black87,
                     ),
                   ),
                 ],
@@ -480,7 +551,7 @@ class _TrialExtensionProcessDialogState extends State<TrialExtensionProcessDialo
             if (!isCompleted)
               Icon(
                 Icons.arrow_forward_ios,
-                color: Colors.grey[700],
+                color: isDark ? Colors.white : Colors.black,
                 size: 16,
               ),
           ],
@@ -495,7 +566,7 @@ class _TrialExtensionProcessDialogState extends State<TrialExtensionProcessDialo
     final remaining = const Duration(hours: 1) - elapsed;
     
     if (remaining.isNegative) {
-      return 'הזמן הסתיים';
+      return AppLocalizations.of(context).timeExpired;
     }
     
     final minutes = remaining.inMinutes;

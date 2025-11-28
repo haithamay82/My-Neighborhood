@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/audio_service.dart';
+import '../l10n/app_localizations.dart';
 
 class ContactScreen extends StatefulWidget {
   const ContactScreen({super.key});
@@ -63,11 +64,12 @@ class _ContactScreenState extends State<ContactScreen> with AudioMixin {
 
       // הצגת הודעת הצלחה
       if (mounted) {
+        final l10n = AppLocalizations.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('הפנייה נשלחה בהצלחה! נחזור אליך בהקדם'),
+          SnackBar(
+            content: Text(l10n.contactSuccess),
             backgroundColor: Colors.green,
-            duration: Duration(seconds: 3),
+            duration: const Duration(seconds: 3),
           ),
         );
 
@@ -77,9 +79,10 @@ class _ContactScreenState extends State<ContactScreen> with AudioMixin {
     } catch (e) {
       debugPrint('Error submitting contact form: $e');
       if (mounted) {
+        final l10n = AppLocalizations.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('שגיאה בשליחת הפנייה: $e'),
+            content: Text(l10n.contactError(e.toString())),
             backgroundColor: Colors.red,
           ),
         );
@@ -95,7 +98,7 @@ class _ContactScreenState extends State<ContactScreen> with AudioMixin {
 
   @override
   Widget build(BuildContext context) {
-    // final l10n = AppLocalizations.of(context);
+    final l10n = AppLocalizations.of(context);
     
     return Scaffold(
       backgroundColor: Colors.white,
@@ -110,9 +113,9 @@ class _ContactScreenState extends State<ContactScreen> with AudioMixin {
             Navigator.pop(context);
           },
         ),
-        title: const Text(
-          'יצירת קשר',
-          style: TextStyle(
+        title: Text(
+          l10n.contactScreenTitle,
+          style: const TextStyle(
             fontSize: 18,
             fontWeight: FontWeight.w600,
           ),
@@ -135,9 +138,9 @@ class _ContactScreenState extends State<ContactScreen> with AudioMixin {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // כותרת ראשית
-              const Text(
-                'יצירת קשר',
-                style: TextStyle(
+              Text(
+                l10n.contactScreenTitle,
+                style: const TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.bold,
                   color: Color(0xFF03A9F4),
@@ -150,16 +153,16 @@ class _ContactScreenState extends State<ContactScreen> with AudioMixin {
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF03A9F4).withOpacity(0.1),
+                  color: const Color(0xFF03A9F4).withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: const Color(0xFF03A9F4).withOpacity(0.3),
+                    color: const Color(0xFF03A9F4).withValues(alpha: 0.3),
                     width: 1,
                   ),
                 ),
-                child: const Text(
-                  'נותרת עם שאלות? משהו לא ברור? נשמח לשמוע ממך',
-                  style: TextStyle(
+                child: Text(
+                  l10n.contactScreenSubtitle,
+                  style: const TextStyle(
                     fontSize: 16,
                     color: Color(0xFF03A9F4),
                     fontWeight: FontWeight.w500,
@@ -167,12 +170,36 @@ class _ContactScreenState extends State<ContactScreen> with AudioMixin {
                   textAlign: TextAlign.center,
                 ),
               ),
+              const SizedBox(height: 16),
+              
+              // מידע על המפעיל
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surfaceContainer,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.outlineVariant,
+                    width: 1,
+                  ),
+                ),
+                child: Text(
+                  l10n.contactOperatorInfo,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w400,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
               const SizedBox(height: 30),
 
               // שדה שם
-              const Text(
-                'שם',
-                style: TextStyle(
+              Text(
+                l10n.contactName,
+                style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                   color: Colors.black87,
@@ -181,18 +208,18 @@ class _ContactScreenState extends State<ContactScreen> with AudioMixin {
               const SizedBox(height: 8),
               TextFormField(
                 controller: _nameController,
-                decoration: const InputDecoration(
-                  hintText: 'הזן את שמך',
-                  border: UnderlineInputBorder(
+                decoration: InputDecoration(
+                  hintText: l10n.contactNameHint,
+                  border: const UnderlineInputBorder(
                     borderSide: BorderSide(color: Colors.grey),
                   ),
-                  focusedBorder: UnderlineInputBorder(
+                  focusedBorder: const UnderlineInputBorder(
                     borderSide: BorderSide(color: Color(0xFF03A9F4), width: 2),
                   ),
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
-                    return 'אנא הזן את שמך';
+                    return l10n.contactNameRequired;
                   }
                   return null;
                 },
@@ -200,9 +227,9 @@ class _ContactScreenState extends State<ContactScreen> with AudioMixin {
               const SizedBox(height: 20),
 
               // שדה אימייל
-              const Text(
-                'אימייל',
-                style: TextStyle(
+              Text(
+                l10n.contactEmail,
+                style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                   color: Colors.black87,
@@ -212,21 +239,21 @@ class _ContactScreenState extends State<ContactScreen> with AudioMixin {
               TextFormField(
                 controller: _emailController,
                 keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
-                  hintText: 'הזן את כתובת האימייל שלך',
-                  border: UnderlineInputBorder(
+                decoration: InputDecoration(
+                  hintText: l10n.contactEmailHint,
+                  border: const UnderlineInputBorder(
                     borderSide: BorderSide(color: Colors.grey),
                   ),
-                  focusedBorder: UnderlineInputBorder(
+                  focusedBorder: const UnderlineInputBorder(
                     borderSide: BorderSide(color: Color(0xFF03A9F4), width: 2),
                   ),
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
-                    return 'אנא הזן את כתובת האימייל';
+                    return l10n.contactEmailRequired;
                   }
                   if (!value.contains('@')) {
-                    return 'אנא הזן כתובת אימייל תקינה';
+                    return l10n.contactEmailInvalid;
                   }
                   return null;
                 },
@@ -234,9 +261,9 @@ class _ContactScreenState extends State<ContactScreen> with AudioMixin {
               const SizedBox(height: 20),
 
               // שדה הודעה
-              const Text(
-                'הודעה',
-                style: TextStyle(
+              Text(
+                l10n.contactMessage,
+                style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                   color: Colors.black87,
@@ -247,7 +274,7 @@ class _ContactScreenState extends State<ContactScreen> with AudioMixin {
                 controller: _messageController,
                 maxLines: 6,
                 decoration: InputDecoration(
-                  hintText: 'טקסט חופשי',
+                  hintText: l10n.contactMessageHint,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                     borderSide: const BorderSide(color: Colors.grey),
@@ -260,10 +287,10 @@ class _ContactScreenState extends State<ContactScreen> with AudioMixin {
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
-                    return 'אנא הזן את הודעתך';
+                    return l10n.contactMessageRequired;
                   }
                   if (value.trim().length < 10) {
-                    return 'אנא הזן הודעה מפורטת יותר (לפחות 10 תווים)';
+                    return l10n.contactMessageTooShort;
                   }
                   return null;
                 },
@@ -287,9 +314,9 @@ class _ContactScreenState extends State<ContactScreen> with AudioMixin {
                           borderRadius: BorderRadius.circular(8),
                         ),
                       ),
-                      child: const Text(
-                        'ביטול',
-                        style: TextStyle(
+                      child: Text(
+                        l10n.cancel,
+                        style: const TextStyle(
                           color: Color(0xFF03A9F4),
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
@@ -321,9 +348,9 @@ class _ContactScreenState extends State<ContactScreen> with AudioMixin {
                                 valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                               ),
                             )
-                          : const Text(
-                              'שליחה',
-                              style: TextStyle(
+                          : Text(
+                              l10n.contactSend,
+                              style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w600,
                               ),
