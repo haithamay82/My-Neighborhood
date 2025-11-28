@@ -42,11 +42,10 @@ android {
         // Enable multidex support
         multiDexEnabled = true
         
-        // Fix CMake RC compiler issue - only build for specific ABIs if needed
-        // Note: This might not be needed if no native code is used
-        // ndk {
-        //     abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86_64")
-        // }
+        // Fix ABI overload - only build for specific ABIs
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
     }
     
     packaging {
