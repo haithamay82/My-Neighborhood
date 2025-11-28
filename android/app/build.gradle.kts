@@ -39,6 +39,9 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         
+        // Enable multidex support
+        multiDexEnabled = true
+        
         // Fix CMake RC compiler issue - only build for specific ABIs if needed
         // Note: This might not be needed if no native code is used
         // ndk {
@@ -69,7 +72,10 @@ android {
     configurations.all {
         resolutionStrategy {
             // Force specific versions to avoid conflicts
-            force("androidx.core:core:1.12.0")
+            force("androidx.core:core:1.13.1")
+            force("androidx.core:core-ktx:1.13.1")
+            force("androidx.activity:activity:1.9.0")
+            force("androidx.activity:activity-ktx:1.9.0")
             // Prefer project dependencies over transitive ones
             preferProjectModules()
         }
@@ -97,13 +103,20 @@ dependencies {
     implementation("com.google.firebase:firebase-firestore")
     implementation("com.google.firebase:firebase-auth")
     
-    // Notification dependencies
-    implementation("androidx.core:core:1.12.0")
-    implementation("androidx.core:core-ktx:1.12.0")
+    // Core dependencies - updated to 1.13.1 for OnUserLeaveHintProvider support
+    implementation("androidx.core:core:1.13.1")
+    implementation("androidx.core:core-ktx:1.13.1")
     
     // Activity dependency required by flutter_facebook_auth
-    implementation("androidx.activity:activity:1.8.2")
-    implementation("androidx.activity:activity-ktx:1.8.2")
+    implementation("androidx.activity:activity:1.9.0")
+    implementation("androidx.activity:activity-ktx:1.9.0")
+    
+    // Fragment dependency (may be required by activity)
+    implementation("androidx.fragment:fragment:1.6.2")
+    implementation("androidx.fragment:fragment-ktx:1.6.2")
+    
+    // Multidex support
+    implementation("androidx.multidex:multidex:2.0.1")
     
     // WorkManager for background tasks
     implementation("androidx.work:work-runtime-ktx:2.9.0")
