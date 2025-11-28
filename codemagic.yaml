@@ -8,7 +8,7 @@ workflows:
         - keystore_credentials
       vars:
         PACKAGE_NAME: "com.myneighborhood.app"
-      flutter: stable
+    flutter: stable
     scripts:
       - name: Get Flutter dependencies
         script: |
@@ -27,4 +27,3 @@ workflows:
         distribution_type: development
         bundle_identifier: com.myneighborhood.app
         team_id: # to be filled later
-
