@@ -3,24 +3,28 @@ import UIKit
 import GoogleMaps
 import CoreLocation
 import UserNotifications
-import FirebaseCore   // ← הוספנו
+import FirebaseCore   // ← חובה כדי לאפשר Firebase
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, CLLocationManagerDelegate {
   private let locationManager = CLLocationManager()
-  private let CHANNEL = "com.myneighborhood.app/location_settings"   // ← עודכן לפי ה־package החדש
+  private let CHANNEL = "com.myneighborhood.app/location_settings"
 
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
 
+    // 1️⃣ הפעלת Firebase — חייב ראשון
+    FirebaseApp.configure()
+
+    // 2️⃣ Google Maps
     GMSServices.provideAPIKey("AIzaSyDsHGnkVvAbZPPLpO04HEff1FCqBqb0JSE")
 
-    FirebaseApp.configure()   // ← הוספנו כדי להפעיל Firebase לפני Register
+    // 3️⃣ רישום פלאגינים
     GeneratedPluginRegistrant.register(with: self)
 
-    // הגדרת platform channel לפתיחת הגדרות שירות המיקום
+    // ☑️ platform channel לפתיחת הגדרות מיקום
     guard let controller = window?.rootViewController as? FlutterViewController else {
       return super.application(application, didFinishLaunchingWithOptions: launchOptions)
     }
@@ -38,17 +42,15 @@ import FirebaseCore   // ← הוספנו
       }
     }
 
-    // הגדרת location manager לבדיקת שירות המיקום
+    // ☑️ ניהול שירות מיקום
     locationManager.delegate = self
-
-    // הפעלת Significant Location Changes כדי לזהות שינויי מיקום גם כאשר האפליקציה סגורה
     locationManager.requestAlwaysAuthorization()
     locationManager.startMonitoringSignificantLocationChanges()
 
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
 
-  // פתיחת הגדרות שירות המיקום ב-iOS
+  // פתיחת הגדרות שירות המיקום
   private func openLocationSettings(result: @escaping FlutterResult) {
     if let url = URL(string: UIApplication.openSettingsURLString) {
       if UIApplication.shared.canOpenURL(url) {
@@ -62,48 +64,38 @@ import FirebaseCore   // ← הוספנו
     }
   }
 
-  // בדיקת שירות המיקום כאשר האפליקציה נכנסת לרקע
   override func applicationDidEnterBackground(_ application: UIApplication) {
     super.applicationDidEnterBackground(application)
     checkLocationService()
   }
 
-  // בדיקת שירות המיקום כאשר האפליקציה חוזרת קדימה
   override func applicationWillEnterForeground(_ application: UIApplication) {
     super.applicationWillEnterForeground(application)
     checkLocationService()
   }
 
-  // בדיקת שירות המיקום
   private func checkLocationService() {
     let isLocationEnabled = CLLocationManager.locationServicesEnabled()
     let prefs = UserDefaults.standard
 
     if !isLocationEnabled {
-      // בדיקה אם כבר נשלחה התראה
       let notificationSent = prefs.bool(forKey: "location_service_notification_sent")
-
       if !notificationSent {
-        print("📍 Location service is disabled - showing notification immediately")
+        print("📍 Location service disabled — notifying user")
         showLocationServiceNotification()
         prefs.set(true, forKey: "location_service_notification_sent")
-      } else {
-        print("📍 Location service is disabled but notification already sent - skipping")
       }
     } else {
-      // אם שירות המיקום מופעל — איפוס הדגל
-      print("📍 Location service is enabled - resetting notification flag")
       prefs.set(false, forKey: "location_service_notification_sent")
     }
   }
 
-  // הצגת התראה על שירות מיקום מבוטל
   private func showLocationServiceNotification() {
     let center = UNUserNotificationCenter.current()
 
     let content = UNMutableNotificationContent()
     content.title = "שירות המיקום כבוי"
-    content.body = "שירות המיקום במכשיר שלך כבוי. אנא הפעל אותו כדי להשתמש בתכונות מבוססות מיקום."
+    content.body = "אנא הפעל את שירות המיקום כדי להשתמש באפליקציה."
     content.sound = .default
     content.badge = 1
 
@@ -115,7 +107,7 @@ import FirebaseCore   // ← הוספנו
 
     center.add(request) { error in
       if let error = error {
-        print("Error showing location service notification: \(error.localizedDescription)")
+        print("⚠️ Notification error: \(error.localizedDescription)")
       }
     }
   }
@@ -124,20 +116,17 @@ import FirebaseCore   // ← הוספנו
   func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
     checkLocationService()
 
-    // אם למשתמש יש הרשאת "Always" — נמשיך לקבל מיקום גם ברקע
     if manager.authorizationStatus == .authorizedAlways {
       manager.startMonitoringSignificantLocationChanges()
     }
   }
 
-  // נקרא כאשר יש שינוי משמעותי במיקום (גם כשהאפליקציה סגורה)
   func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
     checkLocationService()
   }
 
-  // נקרא כאשר יש שגיאה במיקום
   func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-    if let clError = error as? CLError, clError.code == .locationUnknown {
+    if let e = error as? CLError, e.code == .locationUnknown {
       checkLocationService()
     }
   }
