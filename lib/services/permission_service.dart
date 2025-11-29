@@ -59,27 +59,55 @@ class PermissionService {
   }
   
   static Future<bool> checkNotificationPermission() async {
-    // ב-iOS, צריך לבדוק גם את הרשאות FCM, לא רק את הרשאות מערכת
+    // ב-iOS, בודקים את הרשאות מערכת - אם יש הרשאות מערכת, זה מספיק
+    // FCM יכול להיות authorized או provisional (שניהם תקינים)
     if (defaultTargetPlatform == TargetPlatform.iOS) {
       try {
-        final messaging = FirebaseMessaging.instance;
-        final settings = await messaging.getNotificationSettings();
-        // ב-iOS, FCM authorizationStatus צריך להיות authorized
-        final fcmAuthorized = settings.authorizationStatus == AuthorizationStatus.authorized;
-        
-        // גם נבדוק את הרשאות מערכת iOS
+        // בדיקה ראשונית - הרשאות מערכת iOS
         final systemStatus = await Permission.notification.status;
         final systemGranted = systemStatus.isGranted;
         
-        // צריך ששניהם יהיו מאושרים
-        final hasPermission = fcmAuthorized && systemGranted;
-        
         debugPrint('🔔 iOS Notification Permission Check:');
-        debugPrint('   FCM Status: ${settings.authorizationStatus} (authorized: $fcmAuthorized)');
         debugPrint('   System Status: $systemStatus (granted: $systemGranted)');
-        debugPrint('   Final Result: $hasPermission');
         
-        return hasPermission;
+        // אם יש הרשאות מערכת, זה מספיק
+        if (systemGranted) {
+          // נבדוק גם את FCM רק ללוג, אבל לא נדרוש אותו
+          try {
+            final messaging = FirebaseMessaging.instance;
+            final settings = await messaging.getNotificationSettings();
+            debugPrint('   FCM Status: ${settings.authorizationStatus}');
+            debugPrint('   ✅ System permission granted - notifications allowed');
+          } catch (e) {
+            debugPrint('   ⚠️ Could not check FCM status: $e');
+          }
+          return true;
+        }
+        
+        // אם אין הרשאות מערכת, נבדוק גם FCM (למקרה שהוא provisional)
+        try {
+          final messaging = FirebaseMessaging.instance;
+          final settings = await messaging.getNotificationSettings();
+          final fcmStatus = settings.authorizationStatus;
+          
+          // FCM יכול להיות authorized או provisional (שניהם תקינים)
+          final fcmAllowed = fcmStatus == AuthorizationStatus.authorized || 
+                            fcmStatus == AuthorizationStatus.provisional;
+          
+          debugPrint('   FCM Status: $fcmStatus (allowed: $fcmAllowed)');
+          debugPrint('   Final Result: $fcmAllowed (system denied, checking FCM)');
+          
+          // אם FCM מאושר (גם provisional), נחזיר true
+          if (fcmAllowed) {
+            debugPrint('   ✅ FCM permission allowed (provisional or authorized)');
+            return true;
+          }
+        } catch (e) {
+          debugPrint('   ⚠️ Could not check FCM status: $e');
+        }
+        
+        debugPrint('   ❌ No notification permissions granted');
+        return false;
       } catch (e) {
         debugPrint('❌ Error checking iOS notification permission: $e');
         // במקרה של שגיאה, נבדוק רק את הרשאות מערכת
