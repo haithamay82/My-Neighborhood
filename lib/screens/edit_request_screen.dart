@@ -262,12 +262,38 @@ class _EditRequestScreenState extends State<EditRequestScreen> {
 
       if (permission != PermissionStatus.granted) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(l10n.cameraAccessPermissionRequired),
-              duration: Duration(seconds: 2),
-            ),
-          );
+          // אם ההרשאה נדחתה לצמיתות, הצג דיאלוג עם כפתור לפתיחת הגדרות
+          if (permission == PermissionStatus.permanentlyDenied) {
+            showDialog(
+              context: context,
+              builder: (BuildContext context) {
+                return AlertDialog(
+                  title: Text(l10n.permissionsRequired),
+                  content: Text(l10n.cameraAccessPermissionRequired),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: Text(l10n.cancel),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        openAppSettings();
+                      },
+                      child: Text(l10n.openSettings),
+                    ),
+                  ],
+                );
+              },
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(l10n.cameraAccessPermissionRequired),
+                duration: Duration(seconds: 2),
+              ),
+            );
+          }
         }
         return;
       }

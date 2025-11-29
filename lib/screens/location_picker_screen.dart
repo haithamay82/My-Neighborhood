@@ -3,6 +3,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../services/location_service.dart';
 import '../l10n/app_localizations.dart';
 
@@ -156,6 +157,15 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
   Future<void> _initializeLocation() async {
     try {
       debugPrint('Initializing location...');
+      
+      // בדיקת הרשאות מיקום לפני טעינת המפה
+      final locationPermission = await Permission.location.status;
+      if (locationPermission != PermissionStatus.granted) {
+        debugPrint('⚠️ Location permission not granted: $locationPermission');
+        // לא נעצור כאן - נמשיך עם מיקום ברירת מחדל
+        // אבל נציג הודעה למשתמש
+      }
+      
       if (widget.initialLatitude != null && widget.initialLongitude != null) {
         _selectedLocation = LatLng(widget.initialLatitude!, widget.initialLongitude!);
         _selectedAddress = widget.initialAddress;
@@ -278,40 +288,57 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
 
   void _onMapCreated(GoogleMapController controller) {
     _mapController = controller;
-    debugPrint('Google Map created successfully');
+    debugPrint('✅ Google Map created successfully');
     debugPrint('Map controller: $_mapController');
     debugPrint('Selected location: $_selectedLocation');
     
-    // בדיקה שהמפה נטענה בהצלחה
-    Future.delayed(const Duration(seconds: 2), () {
+    // עדכון מיידי - המפה נטענה
+    if (mounted) {
+      setState(() {
+        _isLoading = false;
+        _mapError = null;
+      });
+    }
+    
+    // בדיקה שהמפה באמת עובדת לאחר זמן קצר
+    Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted && _mapController != null) {
-        debugPrint('Map loaded successfully after delay');
-        setState(() {
-          _mapError = null;
-          _isLoading = false;
-        });
+        debugPrint('🔍 Verifying map is working...');
         
         // בדיקה שהמפה באמת עובדת
         _mapController!.getVisibleRegion().then((region) {
-          debugPrint('Map visible region: $region');
+          debugPrint('✅ Map visible region: $region');
           if (region.northeast.latitude == region.southwest.latitude && 
               region.northeast.longitude == region.southwest.longitude) {
-            debugPrint('Map region is invalid - possible API issue');
-            setState(() {
-              _mapError = 'המפה לא נטענה כראוי - ייתכן שיש בעיה עם Google Maps API';
-            });
+            debugPrint('⚠️ Map region is invalid - possible API issue');
+            if (mounted) {
+              setState(() {
+                _mapError = 'המפה לא נטענה כראוי - ייתכן שיש בעיה עם Google Maps API או הרשאות מיקום';
+              });
+            }
+          } else {
+            debugPrint('✅ Map is working correctly');
+            if (mounted) {
+              setState(() {
+                _mapError = null;
+              });
+            }
           }
         }).catchError((error) {
-          debugPrint('Error getting visible region: $error');
-          setState(() {
-            _mapError = 'שגיאה בטעינת המפה: $error';
-          });
+          debugPrint('❌ Error getting visible region: $error');
+          if (mounted) {
+            setState(() {
+              _mapError = 'שגיאה בטעינת המפה. אנא בדוק:\n• חיבור לאינטרנט\n• הרשאות מיקום\n• נסה לבחור מיקום ידנית';
+            });
+          }
         });
       } else {
-        debugPrint('Map controller is null after delay');
-        setState(() {
-          _mapError = 'המפה לא נטענה כראוי';
-        });
+        debugPrint('⚠️ Map controller is null after delay');
+        if (mounted) {
+          setState(() {
+            _mapError = 'המפה לא נטענה כראוי. אנא נסה שוב או בחר מיקום ידנית';
+          });
+        }
       }
     });
   }
