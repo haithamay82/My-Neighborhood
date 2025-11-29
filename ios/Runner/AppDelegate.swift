@@ -42,10 +42,12 @@ import FirebaseCore   // ← חובה כדי לאפשר Firebase
       }
     }
 
-    // ☑️ ניהול שירות מיקום
+    // ☑️ ניהול שירות מיקום - נדחה עד שהאפליקציה מוכנה
+    // לא נבקש הרשאות מיד - זה יקרה מאוחר יותר דרך Flutter
     locationManager.delegate = self
-    locationManager.requestAlwaysAuthorization()
-    locationManager.startMonitoringSignificantLocationChanges()
+    // הסרת הבקשה המיידית - תתבצע מאוחר יותר דרך Flutter
+    // locationManager.requestAlwaysAuthorization()
+    // locationManager.startMonitoringSignificantLocationChanges()
 
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }

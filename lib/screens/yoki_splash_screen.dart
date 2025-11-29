@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform, debugPrint;
 import 'dart:math' as math;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -125,11 +125,24 @@ class _YokiSplashScreenState extends State<YokiSplashScreen>
     debugPrint('🔍 _initializeServices started');
     try {
       // אתחול Firebase
-      debugPrint('🔍 Initializing Firebase...');
-      await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
-      );
-      debugPrint('Firebase initialized successfully');
+      // על iOS, Firebase כבר מאותחל ב-AppDelegate.swift, אז לא צריך לאתחל שוב
+      if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
+        debugPrint('🔍 Initializing Firebase...');
+        await Firebase.initializeApp(
+          options: DefaultFirebaseOptions.currentPlatform,
+        );
+        debugPrint('Firebase initialized successfully');
+      } else {
+        // על iOS, Firebase כבר מאותחל - רק נבדוק שהוא זמין
+        debugPrint('🔍 iOS detected - Firebase already initialized in AppDelegate');
+        if (Firebase.apps.isEmpty) {
+          // אם Firebase לא מאותחל (לא אמור לקרות), נאתחל אותו
+          await Firebase.initializeApp(
+            options: DefaultFirebaseOptions.currentPlatform,
+          );
+          debugPrint('Firebase initialized as fallback on iOS');
+        }
+      }
       
       // הגדרת Firebase Messaging Background Handler (לא עובד ב-web)
       if (!kIsWeb) {

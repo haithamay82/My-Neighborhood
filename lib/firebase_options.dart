@@ -57,21 +57,21 @@ class DefaultFirebaseOptions {
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyBhAEQ7wNaBH1nmtRs51WqZPGHfPoRtFQs',
-    appId: '1:725875446445:ios:1399519fbff5bf9b0aec24',
+    apiKey: 'AIzaSyCFkJPX4SoWmtxGkg65H2Y2fqPoenPau7c',
+    appId: '1:725875446445:ios:540061ef8d3471190aec24',
     messagingSenderId: '725875446445',
     projectId: 'nearme-970f3',
     storageBucket: 'nearme-970f3.firebasestorage.app',
-    iosBundleId: 'com.example.flutter1',
+    iosBundleId: 'com.myneighborhood.app',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyBhAEQ7wNaBH1nmtRs51WqZPGHfPoRtFQs',
-    appId: '1:725875446445:ios:1399519fbff5bf9b0aec24',
+    apiKey: 'AIzaSyCFkJPX4SoWmtxGkg65H2Y2fqPoenPau7c',
+    appId: '1:725875446445:ios:540061ef8d3471190aec24',
     messagingSenderId: '725875446445',
     projectId: 'nearme-970f3',
     storageBucket: 'nearme-970f3.firebasestorage.app',
-    iosBundleId: 'com.example.flutter1',
+    iosBundleId: 'com.myneighborhood.app',
   );
 
   static const FirebaseOptions windows = FirebaseOptions(

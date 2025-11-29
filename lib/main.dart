@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform, debugPrint;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -42,9 +42,31 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
   // אתחול Firebase
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  // על iOS, Firebase כבר מאותחל ב-AppDelegate.swift, אז לא צריך לאתחל שוב
+  if (!kIsWeb && defaultTargetPlatform != TargetPlatform.iOS) {
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+  } else if (kIsWeb || defaultTargetPlatform == TargetPlatform.iOS) {
+    // על iOS, FirebaseApp.configure() נקרא ב-AppDelegate.swift
+    // על Web, צריך לאתחל
+    if (kIsWeb) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    }
+    // על iOS, Firebase כבר מאותחל - רק נבדוק שהוא זמין
+    try {
+      if (Firebase.apps.isEmpty && defaultTargetPlatform == TargetPlatform.iOS) {
+        // אם Firebase לא מאותחל (לא אמור לקרות), נאתחל אותו
+        await Firebase.initializeApp(
+          options: DefaultFirebaseOptions.currentPlatform,
+        );
+      }
+    } catch (e) {
+      debugPrint('⚠️ Firebase initialization check: $e');
+    }
+  }
   
   // Firestore offline persistence is enabled by default on mobile
   // No need to explicitly enable it - it's automatic
