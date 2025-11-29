@@ -1,5 +1,7 @@
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform, debugPrint;
+import 'package:firebase_messaging/firebase_messaging.dart';
 
 class PermissionService {
   static Future<bool> requestNotificationPermission(BuildContext context) async {
@@ -57,6 +59,36 @@ class PermissionService {
   }
   
   static Future<bool> checkNotificationPermission() async {
+    // ב-iOS, צריך לבדוק גם את הרשאות FCM, לא רק את הרשאות מערכת
+    if (defaultTargetPlatform == TargetPlatform.iOS) {
+      try {
+        final messaging = FirebaseMessaging.instance;
+        final settings = await messaging.getNotificationSettings();
+        // ב-iOS, FCM authorizationStatus צריך להיות authorized
+        final fcmAuthorized = settings.authorizationStatus == AuthorizationStatus.authorized;
+        
+        // גם נבדוק את הרשאות מערכת iOS
+        final systemStatus = await Permission.notification.status;
+        final systemGranted = systemStatus.isGranted;
+        
+        // צריך ששניהם יהיו מאושרים
+        final hasPermission = fcmAuthorized && systemGranted;
+        
+        debugPrint('🔔 iOS Notification Permission Check:');
+        debugPrint('   FCM Status: ${settings.authorizationStatus} (authorized: $fcmAuthorized)');
+        debugPrint('   System Status: $systemStatus (granted: $systemGranted)');
+        debugPrint('   Final Result: $hasPermission');
+        
+        return hasPermission;
+      } catch (e) {
+        debugPrint('❌ Error checking iOS notification permission: $e');
+        // במקרה של שגיאה, נבדוק רק את הרשאות מערכת
+        var status = await Permission.notification.status;
+        return status.isGranted;
+      }
+    }
+    
+    // ב-Android, בודקים רק את הרשאות מערכת
     var status = await Permission.notification.status;
     return status.isGranted;
   }
