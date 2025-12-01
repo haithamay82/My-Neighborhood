@@ -1,74 +1,70 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'dart:io';
 import '../models/request.dart';
 import '../models/ad.dart';
 import '../l10n/app_localizations.dart';
 import 'location_picker_screen.dart';
-import '../services/tutorial_service.dart';
-import '../widgets/tutorial_dialog.dart';
 import '../widgets/phone_input_widget.dart';
 import '../widgets/two_level_category_selector.dart';
 import '../widgets/network_aware_widget.dart';
 import '../utils/phone_validation.dart';
-import '../services/network_service.dart';
-import '../services/app_sharing_service.dart';
+import '../services/payme_payment_service.dart';
+import '../services/manual_payment_service.dart';
+import '../models/user_profile.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'profile_screen.dart';
 
-class NewAdScreen extends StatefulWidget {
-  const NewAdScreen({super.key});
+class BusinessManagementScreen extends StatefulWidget {
+  const BusinessManagementScreen({super.key});
 
   @override
-  State<NewAdScreen> createState() => _NewAdScreenState();
+  State<BusinessManagementScreen> createState() => _BusinessManagementScreenState();
 }
 
-class _NewAdScreenState extends State<NewAdScreen> with NetworkAwareMixin {
+// מודל שירות
+class _Service {
+  final TextEditingController nameController;
+  final TextEditingController priceController;
+  File? imageFile;
+  bool isCustomPrice;
+
+  _Service({
+    required this.nameController,
+    required this.priceController,
+  }) : imageFile = null,
+       isCustomPrice = false;
+
+  void dispose() {
+    nameController.dispose();
+    priceController.dispose();
+  }
+}
+
+class _BusinessManagementScreenState extends State<BusinessManagementScreen> with NetworkAwareMixin {
   final _formKey = GlobalKey<FormState>();
-  final _titleController = TextEditingController();
-  final _descriptionController = TextEditingController();
+  final _businessNameController = TextEditingController();
   final _phoneController = TextEditingController();
   
   // משתנים חדשים לטלפון
   String _selectedPhonePrefix = '';
   String _selectedPhoneNumber = '';
   
-  RequestCategory? _selectedCategory;
-  RequestLocation? _selectedLocation;
-  final List<String> _selectedImages = [];
-  final List<File> _selectedImageFiles = [];
+  final List<RequestCategory> _selectedCategories = [];
   final ImagePicker _imagePicker = ImagePicker();
-  
-  // דירוג מינימלי
-  double? _minRating;
-  
-  // דירוגים מינימליים מפורטים
-  double? _minReliability;
-  double? _minAvailability;
-  double? _minAttitude;
-  double? _minFairPrice;
   
   bool _isLoading = false;
   
-  // שדות חדשים
-  RequestType _selectedType = RequestType.free;
-  final List<RequestCategory> _selectedTargetCategories = [];
+  // רשימת שירותים
+  final List<_Service> _services = [];
   
-  // מחיר (אופציונאלי) - רק לבקשות בתשלום
-  final _priceController = TextEditingController();
-  double? _price;
-  bool _isCustomPrice = false; // מחיר בהתאמה אישית
-  
-  // בדיקת מספר נותני שירות
-  int _availableHelpersCount = 0;
   
   @override
   void initState() {
     super.initState();
-    debugPrint('🔍 NewAdScreen initState called');
+    debugPrint('🔍 BusinessManagementScreen initState called');
     // טעינת מספר הטלפון אחרי שה-widget נבנה
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -207,160 +203,6 @@ class _NewAdScreenState extends State<NewAdScreen> with NetworkAwareMixin {
     return null;
   }
   
-  // בדיקת מספר נותני שירות זמינים
-  Future<void> _checkAvailableHelpers() async {
-    if (_selectedCategory == null) return;
-    
-    debugPrint('🔍 Checking available helpers for sub-category: ${_selectedCategory.toString()}');
-    debugPrint('🔍 Looking for exact sub-category: ${_selectedCategory!.name}');
-    debugPrint('🔍 Request type: ${_selectedType.toString()}');
-    
-    try {
-      // בדיקה מקיפה - נספור כל סוגי המשתמשים שיכולים לספק שירות בתחום הרלוונטי
-      // 1. משתמשים עסקיים עם מנוי פעיל
-      final businessQuery = await FirebaseFirestore.instance
-          .collection('users')
-          .where('userType', isEqualTo: 'business')
-          .where('isSubscriptionActive', isEqualTo: true)
-          .get();
-      
-      // 2. משתמשי אורח (עם מנוי פעיל)
-      final guestQuery = await FirebaseFirestore.instance
-          .collection('users')
-          .where('userType', isEqualTo: 'guest')
-          .where('isSubscriptionActive', isEqualTo: true)
-          .get();
-      
-      // 3. מנהלים
-      final adminQuery = await FirebaseFirestore.instance
-          .collection('users')
-          .where('userType', isEqualTo: 'admin')
-          .get();
-      
-      debugPrint('📊 Found ${businessQuery.docs.length} business users with active subscription');
-      debugPrint('📊 Found ${guestQuery.docs.length} guest users with active subscription');
-      debugPrint('📊 Found ${adminQuery.docs.length} admin users');
-      
-      // איחוד כל התוצאות
-      final allUsers = [
-        ...businessQuery.docs,
-        ...guestQuery.docs,
-        ...adminQuery.docs,
-      ];
-      
-      debugPrint('📊 Total users found: ${allUsers.length}');
-      debugPrint('🔍 Filtering users for category: ${_selectedCategory!.name} (${_selectedCategory!.categoryDisplayName})');
-      debugPrint('🔍 Request type: ${_selectedType == RequestType.free ? "FREE" : "PAID"}');
-      
-      int count = 0;
-      final selectedCategoryName = _selectedCategory!.name; // שם ה-enum המדויק (למשל "plumbing")
-      
-      for (var doc in allUsers) {
-        final data = doc.data();
-        final businessCategories = data['businessCategories'] as List<dynamic>? ?? [];
-        final userType = data['userType'] as String? ?? '';
-        
-        debugPrint('👤 Checking user ${doc.id} ($userType) with categories: $businessCategories');
-        
-        // בדיקה אם המשתמש הוא משתמש אמיתי (לא משתמש בדיקה עם כל הקטגוריות)
-        bool isRealUser = businessCategories.length < 20; // משתמש אמיתי לא יהיה לו 20+ קטגוריות
-        
-        if (!isRealUser) {
-          debugPrint('🚫 Skipping test user with ${businessCategories.length} categories');
-          continue;
-        }
-        
-        bool canProvideService = false;
-        
-        // בדיקה: האם המשתמש יכול לספק שירות בקטגוריה הנבחרת
-        // תמיד צריך לבדוק אם המשתמש יש לו את הקטגוריה הנבחרת (גם לבקשות חינם)
-        if (businessCategories.isNotEmpty) {
-          // קבלת שם התצוגה של הקטגוריה הנבחרת (למשל "חשמל")
-          final selectedCategoryDisplayName = _selectedCategory!.categoryDisplayName;
-          
-          for (var category in businessCategories) {
-            bool matches = false;
-            
-            // אם category הוא Map, נגש ל'category' או 'categoryDisplayName'
-            if (category is Map) {
-              final mapCategoryName = category['category']?.toString() ?? '';
-              final mapCategoryDisplayName = category['categoryDisplayName']?.toString();
-              
-              // השוואה לפי name (למשל "electrical")
-              if (mapCategoryName == selectedCategoryName) {
-                matches = true;
-              }
-              // השוואה לפי categoryDisplayName (למשל "חשמל")
-              else if (mapCategoryDisplayName != null && mapCategoryDisplayName == selectedCategoryDisplayName) {
-                matches = true;
-              }
-            }
-            // אם category הוא String, נשווה ישירות
-            else if (category is String) {
-              final categoryStr = category;
-              
-              // השוואה ישירה לפי name (למשל "electrical")
-              if (categoryStr == selectedCategoryName) {
-                matches = true;
-              }
-              // השוואה ישירה לפי categoryDisplayName (למשל "חשמל")
-              else if (categoryStr == selectedCategoryDisplayName) {
-                matches = true;
-              }
-              // נסה למצוא את הקטגוריה לפי שם או שם תצוגה ולהשוות
-              else {
-                try {
-                  final cat = RequestCategory.values.firstWhere(
-                    (c) => c.name == categoryStr || c.categoryDisplayName == categoryStr,
-                    orElse: () => RequestCategory.plumbing,
-                  );
-                  // אם מצאנו קטגוריה, נשווה אותה לקטגוריה הנבחרת
-                  if (cat == _selectedCategory) {
-                    matches = true;
-                  }
-                } catch (e) {
-                  // אם לא מצאנו, נמשיך
-                }
-              }
-            }
-            
-            if (matches) {
-              canProvideService = true;
-              debugPrint('✅ $userType user has exact matching sub-category: "$category" matches "$selectedCategoryName" (display: "$selectedCategoryDisplayName")');
-              break;
-            }
-          }
-        }
-        
-        if (!canProvideService) {
-          debugPrint('❌ $userType user has no matching category "$selectedCategoryName" (display: "${_selectedCategory!.categoryDisplayName}") in their business categories: $businessCategories');
-        }
-        
-        if (canProvideService) {
-          count++;
-          debugPrint('✅ User ${doc.id} ($userType) CAN provide service in category $selectedCategoryName');
-        } else {
-          debugPrint('❌ User ${doc.id} ($userType) CANNOT provide service in category $selectedCategoryName');
-        }
-      }
-      
-      debugPrint('🎯 Total helpers found: $count');
-      
-      setState(() {
-        _availableHelpersCount = count;
-      });
-      
-      // ✅ הצגת דיאלוג עם מספר נותני שירות רק כשמשתמש בוחר "רק לנותני שירות מתחום X"
-      // לא מציגים את הדיאלוג אם סוג הבקשה הוא "בתשלום"
-      if (_selectedType != RequestType.paid) {
-        debugPrint('📊 Showing dialog with helpers count: $count');
-        _showHelpersCountDialog(count);
-      }
-    } catch (e) {
-      debugPrint('Error checking available helpers: $e');
-    }
-  }
-  
   // הפונקציה הוסרה - לא נדרש יותר
   // ignore: unused_element
   Widget _buildDetailedRatingField(
@@ -459,53 +301,6 @@ class _NewAdScreenState extends State<NewAdScreen> with NetworkAwareMixin {
           ],
         ),
       ],
-    );
-  }
-  
-  // הצגת הודעת הדרכה למסך בקשה חדשה
-  // הודעת הדרכה ספציפית לבקשה חדשה - רק כשצריך
-  Future<void> _showNewRequestSpecificTutorial() async {
-    if (!mounted) return;
-    final l10n = AppLocalizations.of(context);
-    // רק אם המשתמש לא ראה את ההדרכה הזו קודם
-    final hasSeenTutorial = await TutorialService.hasSeenTutorial('new_request_specific_tutorial');
-    if (hasSeenTutorial) return;
-    
-    // רק אם המשתמש חדש (פחות מ-3 ימים)
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return;
-    
-    final userDoc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
-    
-    if (!userDoc.exists) return;
-    
-    final userData = userDoc.data()!;
-    final createdAt = userData['createdAt'] as Timestamp?;
-    if (createdAt == null) return;
-    
-    final daysSinceCreation = DateTime.now().difference(createdAt.toDate()).inDays;
-    if (daysSinceCreation > 3) return;
-    
-    if (!mounted) return;
-    
-    showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (context) => TutorialDialog(
-        tutorialKey: 'new_request_specific_tutorial',
-        title: l10n.newRequestTutorialTitle,
-        message: l10n.newRequestTutorialMessage,
-        features: [
-          '📝 ${l10n.writeRequestDescription}',
-          '🏷️ ${l10n.selectAppropriateCategory}',
-          '📍 ${l10n.selectLocationAndExposure}',
-          '💰 ${l10n.setPriceFreeOrPaid}',
-          '📤 ${l10n.publishRequest}',
-        ],
-      ),
     );
   }
   
@@ -1216,406 +1011,283 @@ class _NewAdScreenState extends State<NewAdScreen> with NetworkAwareMixin {
 
   @override
   void dispose() {
-    _titleController.dispose();
-    _descriptionController.dispose();
+    _businessNameController.dispose();
     _phoneController.dispose();
-    _priceController.dispose();
+    // ניקוי כל השירותים
+    for (var service in _services) {
+      service.dispose();
+    }
     super.dispose();
   }
-
-  Future<void> _pickImages() async {
-    final l10n = AppLocalizations.of(context);
+  
+  // הוספת שירות חדש
+  void _addService() {
+    setState(() {
+      _services.add(_Service(
+        nameController: TextEditingController(),
+        priceController: TextEditingController(),
+      ));
+    });
+  }
+  
+  // הסרת שירות
+  void _removeService(int index) {
+    setState(() {
+      _services[index].dispose();
+      _services.removeAt(index);
+    });
+  }
+  
+  // בחירת תמונה לשירות
+  Future<void> _pickServiceImage(int index) async {
     try {
-      // בדיקת הרשאות
-      PermissionStatus permission = PermissionStatus.denied;
-      
-      // ננסה קודם עם photos (Android 13+)
-      try {
-        permission = await Permission.photos.status;
-        if (permission == PermissionStatus.denied) {
-          permission = await Permission.photos.request();
-        }
-      } catch (e) {
-        debugPrint('Photos permission not supported: $e');
-      }
-
-      // אם photos לא עובד, ננסה עם storage
-      if (permission != PermissionStatus.granted) {
-        try {
-          permission = await Permission.storage.status;
-          if (permission == PermissionStatus.denied) {
-            permission = await Permission.storage.request();
-          }
-        } catch (e) {
-          debugPrint('Storage permission not supported: $e');
-        }
-      }
-
-      // אם עדיין לא עובד, ננסה עם camera
-      if (permission != PermissionStatus.granted) {
-        try {
-          permission = await Permission.camera.status;
-          if (permission == PermissionStatus.denied) {
-            permission = await Permission.camera.request();
-          }
-        } catch (e) {
-          debugPrint('Camera permission not supported: $e');
-        }
-      }
-
-      if (permission != PermissionStatus.granted) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(l10n.permissionRequiredImages),
-              duration: Duration(seconds: 2),
-            ),
-          );
-        }
-        return;
-      }
-
-      // בחירת תמונות (מוגבל ל-5)
-      final List<XFile> images = await _imagePicker.pickMultiImage(
-        maxWidth: 1920,
-        maxHeight: 1080,
+      final XFile? image = await _imagePicker.pickImage(
+        source: ImageSource.gallery,
         imageQuality: 85,
       );
-
-      if (images.isNotEmpty) {
-        // בדיקה כמה תמונות ניתן להוסיף
-        final availableSlots = 5 - _selectedImageFiles.length;
-        
-        if (availableSlots <= 0) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(l10n.alreadyHas5Images),
-                duration: Duration(seconds: 2),
-                backgroundColor: Colors.orange,
-              ),
-            );
-          }
-          return;
-        }
-        
-        // הוספת תמונות חדשות (מוגבל למספר המקומות הפנויים)
-        final imagesToAdd = images.take(availableSlots).toList();
-        
+      
+      if (image != null) {
         setState(() {
-          for (var image in imagesToAdd) {
-            _selectedImageFiles.add(File(image.path));
-          }
+          _services[index].imageFile = File(image.path);
         });
-        
-        // הצגת הודעה אם נבחרו יותר תמונות ממה שאפשר
-        if (images.length > availableSlots) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(l10n.addedImagesCount(availableSlots)),
-                duration: const Duration(seconds: 2),
-                backgroundColor: Colors.orange,
-              ),
-            );
-          }
-        } else {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(l10n.addedImagesCount(imagesToAdd.length)),
-                duration: const Duration(seconds: 1),
-                backgroundColor: Colors.green,
-              ),
-            );
-          }
-        }
       }
     } catch (e) {
-      debugPrint('Error picking images: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${l10n.errorSelectingImages}: $e'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
+      debugPrint('Error picking image: $e');
     }
   }
-
-  Future<void> _takePhoto() async {
-    final l10n = AppLocalizations.of(context);
+  
+  // צילום תמונה לשירות
+  Future<void> _takeServicePhoto(int index) async {
     try {
-      // בדיקת הרשאות מצלמה
-      PermissionStatus permission = await Permission.camera.status;
-      if (permission == PermissionStatus.denied) {
-        permission = await Permission.camera.request();
-      }
-
-      if (permission != PermissionStatus.granted) {
-        if (mounted) {
-          // אם ההרשאה נדחתה לצמיתות, הצג דיאלוג עם כפתור לפתיחת הגדרות
-          if (permission == PermissionStatus.permanentlyDenied) {
-            showDialog(
-              context: context,
-              builder: (BuildContext context) {
-                return AlertDialog(
-                  title: Text(l10n.permissionsRequired),
-                  content: Text(l10n.cameraAccessPermissionRequired),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: Text(l10n.cancel),
-                    ),
-                    TextButton(
-                      onPressed: () {
-                        Navigator.of(context).pop();
-                        openAppSettings();
-                      },
-                      child: Text(l10n.openSettings),
-                    ),
-                  ],
-                );
-              },
-            );
-          } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(l10n.permissionRequiredCamera),
-                duration: Duration(seconds: 2),
-              ),
-            );
-          }
-        }
-        return;
-      }
-
-      // צילום תמונה (מצלמה אחורית)
       final XFile? image = await _imagePicker.pickImage(
         source: ImageSource.camera,
-        maxWidth: 1920,
-        maxHeight: 1080,
         imageQuality: 85,
-        preferredCameraDevice: CameraDevice.front, // מצלמה קדמית (לבדיקה)
-        requestFullMetadata: false,
       );
-
+      
       if (image != null) {
-        // בדיקה אם כבר יש 5 תמונות
-        if (_selectedImageFiles.length >= 5) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(l10n.cannotAddMoreThan5Images),
-                duration: Duration(seconds: 2),
-                backgroundColor: Colors.orange,
-              ),
-            );
-          }
-          return;
-        }
-        
         setState(() {
-          _selectedImageFiles.add(File(image.path));
+          _services[index].imageFile = File(image.path);
         });
-        
-        // הצגת הודעה על הצלחה
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(l10n.imageAddedSuccessfully),
-              duration: Duration(seconds: 1),
-              backgroundColor: Colors.green,
-            ),
-          );
-        }
       }
     } catch (e) {
       debugPrint('Error taking photo: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${l10n.errorTakingPhoto}: $e'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
     }
   }
 
-  Future<void> _takeMultiplePhotos() async {
-    final l10n = AppLocalizations.of(context);
-    try {
-      // בדיקת הרשאות מצלמה
-      PermissionStatus permission = await Permission.camera.status;
-      if (permission == PermissionStatus.denied) {
-        permission = await Permission.camera.request();
-      }
-
-      if (permission != PermissionStatus.granted) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(l10n.permissionRequiredCamera),
-              duration: Duration(seconds: 2),
+  // בניית כרטיס שירות
+  Widget _buildServiceCard(int index, _Service service) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 16),
+      elevation: 2,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // כותרת עם כפתור מחיקה
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'שירות ${index + 1}',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete, color: Colors.red),
+                  onPressed: () => _removeService(index),
+                  tooltip: 'מחק שירות',
+                ),
+              ],
             ),
-          );
-        }
-        return;
-      }
-
-      // Guard context usage after async gap
-      if (!mounted) return;
-
-      // הצגת דיאלוג לאישור
-      final bool? shouldContinue = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text(l10n.multiplePhotoCapture),
-          content: Text(l10n.clickOkToCapture),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(l10n.cancel),
+            const SizedBox(height: 16),
+            
+            // שדה שם השירות
+            TextFormField(
+              controller: service.nameController,
+              decoration: const InputDecoration(
+                labelText: 'שם השירות',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.label),
+              ),
+              validator: (value) {
+                if (value == null || value.isEmpty) {
+                  return 'אנא הזן שם שירות';
+                }
+                return null;
+              },
             ),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(l10n.ok),
+            const SizedBox(height: 16),
+            
+            // תמונה
+            Row(
+              children: [
+                // תצוגת תמונה או כפתור בחירה
+                GestureDetector(
+                  onTap: () => _showImagePickerDialog(index),
+                  child: Container(
+                    width: 100,
+                    height: 100,
+                    decoration: BoxDecoration(
+                      color: Colors.grey[200],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey),
+                    ),
+                    child: service.imageFile != null
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.file(
+                              service.imageFile!,
+                              fit: BoxFit.cover,
+                            ),
+                          )
+                        : Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.add_photo_alternate, color: Colors.grey[600]),
+                              const SizedBox(height: 4),
+                              Text(
+                                'הוסף תמונה',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey[600],
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'תמונה',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _pickServiceImage(index),
+                              icon: const Icon(Icons.photo_library, size: 18),
+                              label: const Text('גלריה'),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _takeServicePhoto(index),
+                              icon: const Icon(Icons.camera_alt, size: 18),
+                              label: const Text('צלם'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            
+            // מחיר וצ'קבוקס בהתאמה אישית
+            Row(
+              children: [
+                Expanded(
+                  child: TextFormField(
+                    controller: service.priceController,
+                    enabled: !service.isCustomPrice,
+                    decoration: const InputDecoration(
+                      labelText: 'מחיר',
+                      hintText: 'לדוגמה: 100',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.attach_money),
+                      suffixText: '₪',
+                    ),
+                    keyboardType: TextInputType.numberWithOptions(decimal: true),
+                    validator: (value) {
+                      if (!service.isCustomPrice && (value == null || value.isEmpty)) {
+                        return 'אנא הזן מחיר';
+                      }
+                      if (!service.isCustomPrice && value != null && value.isNotEmpty) {
+                        final price = double.tryParse(value);
+                        if (price == null || price < 0) {
+                          return 'אנא הזן מחיר תקין';
+                        }
+                      }
+                      return null;
+                    },
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Row(
+                  children: [
+                    Checkbox(
+                      value: service.isCustomPrice,
+                      onChanged: (value) {
+                        setState(() {
+                          service.isCustomPrice = value ?? false;
+                          if (service.isCustomPrice) {
+                            service.priceController.clear();
+                          }
+                        });
+                      },
+                    ),
+                    const Text('בהתאמה אישית'),
+                  ],
+                ),
+              ],
             ),
           ],
         ),
-      );
-
-      if (shouldContinue == true) {
-        // צילום תמונה (מצלמה אחורית)
-        final XFile? image = await _imagePicker.pickImage(
-          source: ImageSource.camera,
-          maxWidth: 1920,
-          maxHeight: 1080,
-          imageQuality: 85,
-          preferredCameraDevice: CameraDevice.front, // מצלמה קדמית (לבדיקה)
-          requestFullMetadata: false,
-        );
-
-        if (image != null) {
-          // בדיקה אם כבר יש 5 תמונות
-          if (_selectedImageFiles.length >= 5) {
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(l10n.cannotAddMoreThan5Images),
-                  duration: Duration(seconds: 2),
-                  backgroundColor: Colors.orange,
-                ),
-              );
-            }
-            return;
-          }
-          
-          setState(() {
-            _selectedImageFiles.add(File(image.path));
-          });
-          
-          // הצגת הודעה על הצלחה
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(l10n.imageAddedSuccessfully),
-                duration: Duration(seconds: 1),
-                backgroundColor: Colors.green,
-              ),
-            );
-          }
-        }
-      }
-    } catch (e) {
-      debugPrint('Error taking multiple photos: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('שגיאה בצילום תמונות: $e'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
-    }
+      ),
+    );
   }
-
-  Future<void> _uploadImages() async {
-    final l10n = AppLocalizations.of(context);
-    if (_selectedImageFiles.isEmpty) {
-      debugPrint('No images to upload');
-      return;
-    }
-
-    debugPrint('Starting to upload ${_selectedImageFiles.length} images');
-
-    try {
-      final storage = FirebaseStorage.instance;
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        debugPrint('User is null, cannot upload images');
-        return;
-      }
-
-      debugPrint('User ID: ${user.uid}');
-
-      for (int i = 0; i < _selectedImageFiles.length; i++) {
-        final imageFile = _selectedImageFiles[i];
-        debugPrint('Uploading image ${i + 1}/${_selectedImageFiles.length}: ${imageFile.path}');
-        
-        final fileName = '${DateTime.now().millisecondsSinceEpoch}_${imageFile.path.split('/').last}';
-        final ref = storage.ref().child('request_images/${user.uid}/$fileName');
-        
-        debugPrint('Storage reference: ${ref.fullPath}');
-        
-        // העלאה עם מטא-דאטה לאופטימיזציה
-        final metadata = SettableMetadata(
-          contentType: 'image/jpeg',
-          cacheControl: 'public, max-age=31536000', // שנה
-        );
-        
-        debugPrint('Starting upload for image ${i + 1}');
-        await ref.putFile(imageFile, metadata).timeout(
-          const Duration(minutes: 2),
-          onTimeout: () {
-            throw Exception('Upload timeout for image ${i + 1}');
-          },
-        );
-        debugPrint('Upload completed for image ${i + 1}');
-        
-        final downloadUrl = await ref.getDownloadURL();
-        debugPrint('Download URL for image ${i + 1}: $downloadUrl');
-        _selectedImages.add(downloadUrl);
-      }
-      
-      debugPrint('All images uploaded successfully. Total URLs: ${_selectedImages.length}');
-    } catch (e) {
-      debugPrint('Error uploading images: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('${l10n.errorUploadingImages}: $e'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
-      rethrow; // Re-throw to stop the save process
-    }
+  
+  // הצגת דיאלוג בחירת תמונה
+  void _showImagePickerDialog(int index) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('בחר תמונה'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library),
+              title: const Text('בחר מגלריה'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickServiceImage(index);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.camera_alt),
+              title: const Text('צלם תמונה'),
+              onTap: () {
+                Navigator.pop(context);
+                _takeServicePhoto(index);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
   }
-
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    
-    // הצגת הודעת הדרכה רק כשהמשתמש נכנס למסך בקשה חדשה
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-      _showNewRequestSpecificTutorial();
-      }
-    });
     
     return NetworkAwareWidget(
       child: Directionality(
@@ -1623,7 +1295,7 @@ class _NewAdScreenState extends State<NewAdScreen> with NetworkAwareMixin {
         child: Scaffold(
         appBar: AppBar(
           title: const Text(
-            'מודעה חדשה',
+            'ניהול עסק',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
@@ -1771,182 +1443,20 @@ class _NewAdScreenState extends State<NewAdScreen> with NetworkAwareMixin {
                         },
                       ),
                       
-                      // בחירת קטגוריה - שני שלבים
-                      Container(
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        padding: const EdgeInsets.all(16),
-                        child: TwoLevelCategorySelector(
-                          selectedCategories: _selectedCategory != null ? [_selectedCategory!] : [],
-                          maxSelections: 1,
-                          title: l10n.selectCategory,
-                          instruction: l10n.selectMainCategoryThenSub,
-                          onSelectionChanged: (categories) {
-                            if (categories.isNotEmpty) {
-                              setState(() {
-                                _selectedCategory = categories.first;
-                              });
-                              // בדיקת נותני שירות זמינים
-                              _checkAvailableHelpers();
-                            }
-                          },
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      
-                      // כותרת
+                      // שם העסק
                       TextFormField(
-                        controller: _titleController,
+                        controller: _businessNameController,
                         decoration: InputDecoration(
-                          labelText: l10n.title,
+                          labelText: 'שם העסק',
                           border: const OutlineInputBorder(),
+                          prefixIcon: const Icon(Icons.business),
                         ),
                         validator: (value) {
                           if (value == null || value.isEmpty) {
-                            return l10n.enterTitle;
+                            return 'אנא הזן שם עסק';
                           }
                           return null;
                         },
-                      ),
-                      const SizedBox(height: 16),
-                      
-                      // תיאור
-                      TextFormField(
-                        controller: _descriptionController,
-                        decoration: InputDecoration(
-                          labelText: l10n.description,
-                          border: const OutlineInputBorder(),
-                        ),
-                        maxLines: 3,
-                        // ✅ השדה "תיאור" הוא אופציונאלי - אין וולידציה
-                      ),
-                      const SizedBox(height: 16),
-                      
-                      
-                      // בחירת תמונות
-                      Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  const Icon(Icons.photo_library, color: Colors.blue),
-                                  const SizedBox(width: 8),
-                                  const Text(
-                                    'תמונות למודעה',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              const Text(
-                                'תמונות עוזרות להבין את המודעה טוב יותר',
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.grey,
-                                ),
-                              ),
-                              const SizedBox(height: 12),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: ElevatedButton.icon(
-                                      onPressed: _selectedImageFiles.length >= 5 ? null : _pickImages,
-                                      icon: const Icon(Icons.photo_library),
-                                      label: Text(_selectedImageFiles.length >= 5 ? l10n.limit5Images : l10n.selectImages),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: _selectedImageFiles.length >= 5 ? Colors.grey : const Color(0xFF03A9F4),
-                                        foregroundColor: Colors.white,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: GestureDetector(
-                                      onLongPress: _selectedImageFiles.length >= 5 ? null : _takeMultiplePhotos,
-                                      child: ElevatedButton.icon(
-                                        onPressed: _selectedImageFiles.length >= 5 ? null : _takePhoto,
-                                        icon: const Icon(Icons.camera_alt),
-                                        label: Text(_selectedImageFiles.length >= 5 ? l10n.limit5Images : l10n.takePhoto),
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: _selectedImageFiles.length >= 5 ? Colors.grey : const Color(0xFFE91E63),
-                                          foregroundColor: Colors.white,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              if (_selectedImageFiles.isNotEmpty) ...[
-                                const SizedBox(height: 12),
-                                Text(
-                                  l10n.selectedImagesCount(_selectedImageFiles.length),
-                                  style: const TextStyle(
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.w500,
-                                    color: Colors.green,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                SizedBox(
-                                  height: 80,
-                                  child: ListView.builder(
-                                    scrollDirection: Axis.horizontal,
-                                    itemCount: _selectedImageFiles.length,
-                                    itemBuilder: (context, index) {
-                                      return Container(
-                                        margin: const EdgeInsets.only(right: 8),
-                                        child: Stack(
-                                          children: [
-                                            ClipRRect(
-                                              borderRadius: BorderRadius.circular(8),
-                                              child: Image.file(
-                                                _selectedImageFiles[index],
-                                                width: 80,
-                                                height: 80,
-                                                fit: BoxFit.cover,
-                                              ),
-                                            ),
-                                            Positioned(
-                                              top: 4,
-                                              right: 4,
-                                              child: GestureDetector(
-                                                onTap: () {
-                                                  setState(() {
-                                                    _selectedImageFiles.removeAt(index);
-                                                  });
-                                                },
-                                                child: Container(
-                                                  padding: const EdgeInsets.all(4),
-                                                  decoration: const BoxDecoration(
-                                                    color: Colors.red,
-                                                    shape: BoxShape.circle,
-                                                  ),
-                                                  child: const Icon(
-                                                    Icons.close,
-                                                    color: Colors.white,
-                                                    size: 16,
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
                       ),
                       const SizedBox(height: 16),
                       
@@ -1961,132 +1471,69 @@ class _NewAdScreenState extends State<NewAdScreen> with NetworkAwareMixin {
                           });
                         },
                         validator: (value) {
-                          // אימות אופציונלי - רק אם הוזן חלק מהמספר
-                          if (_selectedPhonePrefix.isNotEmpty || _selectedPhoneNumber.isNotEmpty) {
-                            if (_selectedPhonePrefix.isEmpty || _selectedPhoneNumber.isEmpty) {
-                              return l10n.enterFullPrefixAndNumber;
-                            }
-                            String fullNumber = '$_selectedPhonePrefix$_selectedPhoneNumber';
-                            if (!PhoneValidation.isValidIsraeliPhone(fullNumber)) {
-                              return l10n.invalidPhoneNumber;
-                            }
+                          // אימות חובה
+                          if (_selectedPhonePrefix.isEmpty || _selectedPhoneNumber.isEmpty) {
+                            return l10n.enterFullPrefixAndNumber;
+                          }
+                          String fullNumber = '$_selectedPhonePrefix$_selectedPhoneNumber';
+                          if (!PhoneValidation.isValidIsraeliPhone(fullNumber)) {
+                            return l10n.invalidPhoneNumber;
                           }
                           return null;
                         },
                       ),
                       const SizedBox(height: 16),
                       
+                      // בחירת קטגוריה - שני שלבים
+                      Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        padding: const EdgeInsets.all(16),
+                        child: TwoLevelCategorySelector(
+                          selectedCategories: _selectedCategories,
+                          maxSelections: 999, // ללא הגבלה מעשית - ניתן לבחור כמה תחומים שרוצים
+                          title: l10n.selectCategory,
+                          instruction: 'בחר את תחומי העיסוק שלך',
+                          onSelectionChanged: (categories) {
+                            setState(() {
+                              _selectedCategories.clear();
+                              _selectedCategories.addAll(categories);
+                            });
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 16),
                       
-                      // בחירת סוג בקשה
-                      FutureBuilder<DocumentSnapshot?>(
-                        future: () async {
-                          final currentUser = FirebaseAuth.instance.currentUser;
-                          if (currentUser == null) return null;
-                          return FirebaseFirestore.instance
-                            .collection('users')
-                              .doc(currentUser.uid)
-                              .get();
-                        }(),
-                        builder: (context, snapshot) {
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              DropdownButtonFormField<RequestType>(
-                                initialValue: _selectedType,
-                                decoration: const InputDecoration(
-                                  labelText: 'סוג המודעה',
-                                  border: const OutlineInputBorder(),
-                                  prefixIcon: const Icon(Icons.payment),
-                                ),
-                                items: RequestType.values.map((type) {
-                                  return DropdownMenuItem(
-                                    value: type,
-                                    child: Text(_getTypeDisplayName(type)),
-                                  );
-                                }).toList(),
-                                onChanged: (value) {
-                                  setState(() {
-                                    _selectedType = value!;
-                                  });
-                                  // בדיקת נותני שירות אחרי שינוי סוג בקשה
-                                  if (_selectedCategory != null) {
-                                    _checkAvailableHelpers();
-                                  }
-                                },
-                              ),
-                              // שדה מחיר (רק אם סוג הבקשה הוא בתשלום)
-                              if (_selectedType == RequestType.paid) ...[
-                                const SizedBox(height: 16),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: TextFormField(
-                                  controller: _priceController,
-                                        enabled: !_isCustomPrice,
-                                  decoration: InputDecoration(
-                                    labelText: 'מחיר',
-                                    hintText: 'לדוגמה: 100',
-                                    border: const OutlineInputBorder(),
-                                    suffixText: '₪',
-                                  ),
-                                  keyboardType: TextInputType.numberWithOptions(decimal: true),
-                                  onChanged: (value) {
-                                    if (value.isEmpty) {
-                                      setState(() {
-                                        _price = null;
-                                      });
-                                    } else {
-                                      final parsedPrice = double.tryParse(value);
-                                      setState(() {
-                                        _price = parsedPrice;
-                                              // אם המשתמש מזין מחיר, בטל את הצ'קבוקס
-                                              if (parsedPrice != null && _isCustomPrice) {
-                                                _isCustomPrice = false;
-                                              }
-                                      });
-                                    }
-                                  },
-                                  validator: (value) {
-                                          if (!_isCustomPrice && value != null && value.isNotEmpty) {
-                                      final parsedPrice = double.tryParse(value);
-                                      if (parsedPrice == null || parsedPrice < 0) {
-                                        return 'אנא הזן מחיר תקין';
-                                      }
-                                    }
-                                    return null;
-                                  },
-                                ),
-                                    ),
-                                    const SizedBox(width: 16),
-                                    Checkbox(
-                                      value: _isCustomPrice,
-                                      onChanged: (value) {
-                                        setState(() {
-                                          _isCustomPrice = value ?? false;
-                                          if (_isCustomPrice) {
-                                            // אם בוחרים "בהתאמה אישית", נקה את שדה המחיר
-                                            _priceController.clear();
-                                            _price = null;
-                                          }
-                                        });
-                                      },
-                                    ),
-                                    const SizedBox(width: 8),
-                                    const Text('בהתאמה אישית'),
-                                  ],
-                                ),
-                              ],
-                            ],
-                          );
-                        },
+                      // רשימת שירותים
+                      ..._services.asMap().entries.map((entry) {
+                        final index = entry.key;
+                        final service = entry.value;
+                        return _buildServiceCard(index, service);
+                      }).toList(),
+                      
+                      // לחצן הוסף שירות
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _selectedCategories.isEmpty ? null : _addService,
+                          icon: const Icon(Icons.add),
+                          label: const Text('הוסף שירות'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Theme.of(context).colorScheme.primary,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                        ),
                       ),
                       const SizedBox(height: 16),
                       
                       // שדה דורש תור
                       Card(
                         child: CheckboxListTile(
-                          title: Text(l10n.serviceRequiresAppointment),
-                          subtitle: Text(l10n.serviceRequiresAppointmentHint),
+                          title: const Text('השירותים דורשים קביעת תור?'),
+                          subtitle: const Text('אם השירותים דורשים קביעת תור, בחר באפשרות זו'),
                           value: _requiresAppointment,
                           onChanged: (value) {
                             setState(() {
@@ -2101,7 +1548,7 @@ class _NewAdScreenState extends State<NewAdScreen> with NetworkAwareMixin {
                       // שדה דורש משלוח
                       Card(
                         child: CheckboxListTile(
-                          title: Text(l10n.canReceiveByDelivery),
+                          title: const Text('אפשר לקבל שירות במשלוח?'),
                           subtitle: Text(l10n.canReceiveByDeliveryHint),
                           value: _requiresDelivery,
                           onChanged: (value) {
@@ -2119,7 +1566,7 @@ class _NewAdScreenState extends State<NewAdScreen> with NetworkAwareMixin {
                         child: ListTile(
                           leading: Icon(
                             Icons.location_on,
-                            color: _selectedCategory == null 
+                            color: _selectedCategories.isEmpty 
                                 ? Colors.grey 
                                 : null,
                           ),
@@ -2127,9 +1574,9 @@ class _NewAdScreenState extends State<NewAdScreen> with NetworkAwareMixin {
                             children: [
                               Expanded(
                                 child: Text(
-                                  _selectedAddress ?? l10n.selectLocation,
+                                  _selectedAddress ?? 'בחר מיקום העסק שלך',
                                   style: TextStyle(
-                                    color: _selectedCategory == null 
+                                    color: _selectedCategories.isEmpty 
                                         ? Colors.grey 
                                         : null,
                                   ),
@@ -2153,7 +1600,7 @@ class _NewAdScreenState extends State<NewAdScreen> with NetworkAwareMixin {
                               ),
                             ],
                           ),
-                          subtitle: _selectedCategory == null
+                          subtitle: _selectedCategories.isEmpty
                               ? Text(
                                   'אנא בחר תחום קודם',
                                   style: TextStyle(
@@ -2166,12 +1613,12 @@ class _NewAdScreenState extends State<NewAdScreen> with NetworkAwareMixin {
                                   : const Text('')),
                           trailing: Icon(
                             Icons.arrow_forward_ios,
-                            color: _selectedCategory == null 
+                            color: _selectedCategories.isEmpty 
                                 ? Colors.grey 
                                 : null,
                           ),
-                          enabled: _selectedCategory != null,
-                          onTap: _selectedCategory == null 
+                          enabled: _selectedCategories.isNotEmpty,
+                          onTap: _selectedCategories.isEmpty 
                               ? () {
                                   // הצגת הודעה אם מנסים לבחור מיקום בלי קטגוריה
                                   ScaffoldMessenger.of(context).showSnackBar(
@@ -2210,7 +1657,7 @@ class _NewAdScreenState extends State<NewAdScreen> with NetworkAwareMixin {
                                     valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                                   ),
                                 )
-                              : Text(l10n.publishAd),
+                              : const Text('המשך לתשלום מנוי שנתי'),
                         ),
                       ),
                     ],
@@ -2361,7 +1808,6 @@ class _NewAdScreenState extends State<NewAdScreen> with NetworkAwareMixin {
         _selectedLongitude = result['longitude'];
         _selectedAddress = result['address'];
         _exposureRadius = result['exposureRadius']; // קבלת רדיוס החשיפה
-        _selectedLocation = RequestLocation.custom;
       });
     }
   }
@@ -2385,477 +1831,908 @@ class _NewAdScreenState extends State<NewAdScreen> with NetworkAwareMixin {
 
 
 
-  String _getTypeDisplayName(RequestType type) {
-    switch (type) {
-      case RequestType.free:
-        return 'חינם';
-      case RequestType.paid:
-        return 'בתשלום';
-    }
-  }
   
-  // הצגת אזהרה על מספר נותני שירות נמוך
-  // הפונקציה הוסרה - לא נדרש יותר
-  // ignore: unused_element
-  void _showHelperCountWarning() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.warning, color: Theme.of(context).colorScheme.tertiary),
-            const SizedBox(width: 8),
-            Expanded(
-              child: const Text(
-                'המלצה',
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
-              ),
-            ),
-          ],
-        ),
-        content: SingleChildScrollView(
-          child: Text(
-            'נמצאו רק $_availableHelpersCount נותני שירות זמינים בתחום זה.\n\n'
-            'מומלץ לבחור "כל הדירוגים" כדי להגדיל את הסיכוי לקבל עזרה.',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('בחר "כל הדירוגים"'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              // לא נדרש יותר - הפונקציה הוסרה
-            },
-            child: const Text('בחר "דירוגים מפורטים"'),
-          ),
-        ],
-      ),
-    );
-  }
-  
-  // ✅ הצגת דיאלוג עם מספר נותני שירות בתחום
-  void _showHelpersCountDialog(int count) {
-    final l10n = AppLocalizations.of(context);
-    final hasHelpers = count > 0;
+
+
+  // הצגת דיאלוג הפעלת מנוי עסקי
+  Future<void> _showPaymentDialog(UserType subscriptionType, [List<RequestCategory>? categories]) async {
+    debugPrint('💰 _showPaymentDialog called with: $subscriptionType');
     
-    showDialog(
+    final l10n = AppLocalizations.of(context);
+    final price = subscriptionType == UserType.personal ? 30 : 90;
+    final typeName = subscriptionType == UserType.personal ? l10n.privateSubscription : l10n.businessSubscription;
+    
+    debugPrint('💰 Opening payment dialog for $typeName subscription, price: $price');
+    
+    await showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        title: Row(
-          children: [
-            Icon(
-              hasHelpers ? Icons.check_circle_outline : Icons.info_outline,
-              color: hasHelpers ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.primary,
-              size: 28,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                hasHelpers
-                    ? l10n.serviceProvidersInCategory(count)
-                    : l10n.noServiceProvidersInCategory,
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 2,
-              ),
-            ),
-          ],
-        ),
+        title: Text(subscriptionType == UserType.business ? 'תשלום עבור מנוי עסקי לשנה' : 'הפעלת מנוי $typeName'),
         content: SingleChildScrollView(
           child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: hasHelpers ? Theme.of(context).colorScheme.primaryContainer : Theme.of(context).colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: hasHelpers ? Theme.of(context).colorScheme.primary : Theme.of(context).colorScheme.primary,
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primaryContainer,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (subscriptionType == UserType.business) ...[
+                    // שם העסק
                     Text(
-                      hasHelpers
-                          ? l10n.serviceProvidersInCategoryMessage(count)
-                          : l10n.noServiceProvidersInCategoryMessage,
+                      'שם העסק: ${_businessNameController.text.trim()}',
                       style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: hasHelpers ? Theme.of(context).colorScheme.onPrimaryContainer : Theme.of(context).colorScheme.onPrimaryContainer,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.onPrimaryContainer,
                       ),
                     ),
-                    if (!hasHelpers) ...[
-                      const SizedBox(height: 8),
+                    const SizedBox(height: 8),
+                    // תחומי עיסוק
+                    if (categories != null && categories.isNotEmpty) ...[
                       Text(
-                        l10n.continueCreatingRequestMessage,
+                        'תחומי עיסוק: ${categories.map((c) => c.categoryDisplayName).join(', ')}',
                         style: TextStyle(
-                          fontSize: 13,
+                          fontSize: 14,
                           color: Theme.of(context).colorScheme.onPrimaryContainer,
                         ),
                       ),
+                      const SizedBox(height: 8),
+                    ],
+                    // מחיר
+                    Text(
+                      '90 ₪ לשנה',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.onPrimaryContainer,
+                      ),
+                    ),
+                  ] else ...[
+                    // למנוי פרטי - הטקסט הישן
+                    Text(
+                      l10n.subscriptionTypeWithType(typeName),
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.onPrimaryContainer,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      l10n.perYear(price),
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.onPrimaryContainer,
+                      ),
+                    ),
+                    if (categories != null && categories.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        l10n.businessAreas(categories.map((c) => c.categoryDisplayName).join(', ')),
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
                     ],
                   ],
-                ),
+                ],
               ),
-              const SizedBox(height: 16),
-              // ✅ חלק "עזור לנו למצוא נותני שירות, שתף את האפליקציה"
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Theme.of(context).colorScheme.primary),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.tertiaryContainer,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.amber[200]!),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline, 
+                        color: Theme.of(context).brightness == Brightness.dark 
+                            ? Theme.of(context).colorScheme.onTertiaryContainer
+                            : Theme.of(context).colorScheme.onSurface, 
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        l10n.howToPay,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).brightness == Brightness.dark 
+                              ? Theme.of(context).colorScheme.onTertiaryContainer
+                              : Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    l10n.paymentInstructions(price),
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Theme.of(context).brightness == Brightness.dark
+                          ? Theme.of(context).colorScheme.onTertiaryContainer
+                          : Theme.of(context).colorScheme.onSurface,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.tertiaryContainer,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.amber[200]!),
+                    ),
+                    child: Row(
                       children: [
-                        Icon(Icons.share, color: Theme.of(context).colorScheme.primary, size: 20),
+                        Icon(
+                          Icons.warning, 
+                          color: Theme.of(context).brightness == Brightness.dark 
+                              ? Theme.of(context).colorScheme.onTertiaryContainer
+                              : Theme.of(context).colorScheme.onSurface, 
+                          size: 16,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            l10n.helpGrowCommunity,
+                            'BIT (PayMe): יפתח דף תשלום מאובטח של PayMe\n'
+                            'כרטיס אשראי (PayMe): יפתח דף תשלום מאובטח של PayMe\n'
+                            'המנוי יופעל אוטומטית לאחר התשלום',
                             style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: Theme.of(context).colorScheme.onPrimaryContainer,
+                              fontSize: 12,
+                              color: Theme.of(context).brightness == Brightness.dark 
+                                  ? Theme.of(context).colorScheme.onTertiaryContainer
+                                  : Theme.of(context).colorScheme.onSurface,
+                              fontWeight: FontWeight.w500,
                             ),
-                            overflow: TextOverflow.ellipsis,
-                            maxLines: 2,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      l10n.shareAppToGrowProviders,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                    ),
-                  ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            
+            // כפתור PayMe (multi-payment - משתמש בוחר Bit או כרטיס אשראי)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ElevatedButton.icon(
+                onPressed: () async {
+                  // שמירת שם העסק ומספר הטלפון ב-Firestore לפני פתיחת תשלום PayMe
+                  final user = FirebaseAuth.instance.currentUser;
+                  if (user != null && subscriptionType == UserType.business) {
+                    // קבלת השם המקורי לפני עדכון
+                    final userDoc = await FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(user.uid)
+                        .get();
+                    
+                    final updateData = <String, dynamic>{
+                      'updatedAt': DateTime.now(),
+                    };
+                    
+                    // שמירת השם המקורי ב-name לפני עדכון displayName לשם העסק
+                    final businessName = _businessNameController.text.trim();
+                    if (userDoc.exists) {
+                      final userData = userDoc.data() as Map<String, dynamic>;
+                      final currentName = userData['name'] as String?;
+                      final currentDisplayName = userData['displayName'] as String?;
+                      
+                      // אם אין name, נשמור את השם המקורי ב-name
+                      if ((currentName == null || currentName.isEmpty)) {
+                        // אם displayName שונה מ-businessName, זה השם המקורי
+                        if (currentDisplayName != null && 
+                            currentDisplayName.isNotEmpty &&
+                            currentDisplayName != businessName) {
+                          // displayName הוא השם המקורי, שמור אותו ב-name
+                          updateData['name'] = currentDisplayName;
+                        } else {
+                          // displayName כבר שונה לשם העסק או ריק, נשתמש במייל
+                          final email = userData['email'] as String?;
+                          if (email != null && email.isNotEmpty) {
+                            updateData['name'] = email.split('@')[0];
+                          } else {
+                            // אם אין גם מייל, נשתמש ב-displayName הנוכחי (אפילו אם זה שם העסק)
+                            // זה יקרה רק במקרים נדירים
+                            if (currentDisplayName != null && currentDisplayName.isNotEmpty) {
+                              updateData['name'] = currentDisplayName;
+                            }
+                          }
+                        }
+                      }
+                    }
+                    
+                    if (businessName.isNotEmpty) {
+                      updateData['displayName'] = businessName;
+                    }
+                    
+                    // שמירת מספר הטלפון
+                    if (_selectedPhonePrefix.isNotEmpty && _selectedPhoneNumber.isNotEmpty) {
+                      final phoneNumber = '$_selectedPhonePrefix$_selectedPhoneNumber';
+                      updateData['phoneNumber'] = phoneNumber;
+                    }
+                    
+                    if (updateData.length > 1) { // יותר מ-updatedAt בלבד
+                      await FirebaseFirestore.instance
+                          .collection('users')
+                          .doc(user.uid)
+                          .update(updateData);
+                    }
+                  }
+                  await _openPayMePayment(subscriptionType, price, context, categories);
+                },
+                icon: const Icon(Icons.payment, color: Colors.white),
+                label: const Text('שלם דרך PayMe (Bit או כרטיס אשראי)'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.primary,
+                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                 ),
               ),
-            ],
+            ),
+            // כפתור תשלום במזומן
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ElevatedButton.icon(
+                onPressed: () async {
+                  Navigator.pop(context); // סגירת דיאלוג התשלום הנוכחי
+                  await _showCashPaymentDialog(subscriptionType, price, categories);
+                },
+                icon: const Icon(Icons.money, color: Colors.white),
+                label: Text(AppLocalizations.of(context).payCash),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            ),
+          ],
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text(l10n.understood),
+            child: const Text('חזור'),
           ),
-          ElevatedButton.icon(
-            onPressed: () {
-              Navigator.pop(context);
-              // פתיחת מסך שיתוף
-              AppSharingService.shareApp(context);
-            },
-            icon: const Icon(Icons.share, size: 18),
-            label: Text(l10n.shareNow),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.primary,
-              foregroundColor: Colors.white,
-            ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('ביטול'),
           ),
         ],
       ),
     );
   }
 
+  /// פתיחת תשלום דרך PayMe API (multi-payment - משתמש בוחר Bit או כרטיס אשראי)
+  Future<void> _openPayMePayment(UserType subscriptionType, int price, [BuildContext? dialogContext, List<RequestCategory>? categories]) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('שגיאה: משתמש לא מחובר'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+        return;
+      }
+
+      // בדיקה אם המשתמש הוא אורח זמני
+      try {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        
+        if (userDoc.exists) {
+          final userData = userDoc.data()!;
+          final isTemporaryGuest = userData['isTemporaryGuest'] ?? false;
+          
+          if (isTemporaryGuest) {
+            if (mounted) {
+              final l10n = AppLocalizations.of(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(l10n.pleaseRegisterFirst),
+                  backgroundColor: Colors.orange,
+                  duration: const Duration(seconds: 3),
+                ),
+              );
+            }
+            return;
+          }
+        }
+      } catch (e) {
+        debugPrint('Error checking temporary guest status: $e');
+      }
+
+      final l10n = AppLocalizations.of(context);
+      final typeName = subscriptionType == UserType.personal ? l10n.privateSubscription : l10n.businessSubscription;
+      final subscriptionTypeString = subscriptionType == UserType.personal ? 'personal' : 'business';
+      
+      debugPrint('💳 Creating PayMe payment for $typeName subscription, price: ₪$price');
+      
+      // הצגת אינדיקטור טעינה
+      if (mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const Center(
+            child: CircularProgressIndicator(),
+          ),
+        );
+      }
+
+      try {
+        // יצירת תשלום דרך PayMe API (multi-payment - משתמש בוחר Bit או כרטיס אשראי)
+        final result = await PayMePaymentService.createSubscriptionPayment(
+          subscriptionType: subscriptionTypeString,
+          businessCategories: categories != null ? categories.map((c) => c.categoryDisplayName).toList() : null,
+        );
+
+        // סגירת אינדיקטור הטעינה
+        if (mounted) {
+          Navigator.pop(context);
+        }
+
+        if (result.success && result.saleUrl != null) {
+          debugPrint('✅ PayMe payment created successfully: ${result.transactionId}');
+          
+          // סגירת הדיאלוג (אם יש)
+          if (dialogContext != null && mounted) {
+            Navigator.pop(dialogContext);
+          }
+          
+          // פתיחת דף התשלום (multi-payment - משתמש בוחר Bit או כרטיס אשראי)
+          final opened = await PayMePaymentService.openCheckout(result.saleUrl!);
+          
+          if (opened && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('פתחתי את דף התשלום PayMe עבור ₪$price\nתוכל לבחור Bit או כרטיס אשראי'),
+                backgroundColor: Colors.green,
+                duration: const Duration(seconds: 4),
+              ),
+            );
+          } else if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('שגיאה בפתיחת דף התשלום'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        } else {
+          debugPrint('❌ PayMe payment creation failed: ${result.error}');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('שגיאה ביצירת תשלום: ${result.error ?? "שגיאה לא ידועה"}'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+      } catch (e) {
+        debugPrint('❌ Error in PayMe payment: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('שגיאה בתשלום: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error in PayMe payment: $e');
+      if (mounted) {
+        Navigator.pop(context); // Close loading dialog if still open
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה בתשלום: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  /// דיאלוג תשלום במזומן
+  Future<void> _showCashPaymentDialog(UserType subscriptionType, int price, [List<RequestCategory>? categories]) async {
+    final l10n = AppLocalizations.of(context);
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    // קבלת פרטי המשתמש
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .get();
+    
+    if (!userDoc.exists) return;
+    
+    final userData = userDoc.data()!;
+    final userName = userData['displayName'] ?? userData['name'] ?? user.email ?? 'משתמש';
+    final userEmail = user.email ?? '';
+    final userPhone = userData['phoneNumber'] as String? ?? '';
+    
+    final typeName = subscriptionType == UserType.personal ? l10n.privateSubscription : l10n.businessSubscription;
+    final subscriptionTypeString = subscriptionType == UserType.personal ? 'personal' : 'business';
+    
+    final TextEditingController phoneController = TextEditingController();
+    // שימוש במספר הטלפון מהמסך ניהול עסק אם קיים, אחרת מהפרופיל
+    final String phoneFromScreen = _selectedPhonePrefix.isNotEmpty && _selectedPhoneNumber.isNotEmpty
+        ? '$_selectedPhonePrefix$_selectedPhoneNumber'
+        : userPhone;
+    if (phoneFromScreen.isNotEmpty) {
+      phoneController.text = phoneFromScreen;
+    }
+    String? phoneError;
+    final bool hasPhone = phoneFromScreen.isNotEmpty;
+    
+    final navigator = Navigator.of(context);
+    await showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: Text(l10n.isRTL ? 'תשלום מזומן' : l10n.cashPaymentTitle),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // שם המשתמש
+                TextField(
+                  enabled: false,
+                  controller: TextEditingController(text: userName),
+                  decoration: InputDecoration(
+                    labelText: l10n.fullName,
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // שם העסק
+                TextField(
+                  enabled: false,
+                  controller: TextEditingController(text: _businessNameController.text.trim()),
+                  decoration: const InputDecoration(
+                    labelText: 'שם העסק',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // מייל המשתמש
+                TextField(
+                  enabled: false,
+                  controller: TextEditingController(text: userEmail),
+                  decoration: InputDecoration(
+                    labelText: l10n.email,
+                    border: const OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // שדה טלפון
+                TextField(
+                  enabled: !hasPhone,
+                  controller: phoneController,
+                  decoration: InputDecoration(
+                    labelText: '${l10n.phoneNumber}${hasPhone ? '' : ' *'}',
+                    hintText: hasPhone ? '' : l10n.enterPhoneNumber,
+                    border: const OutlineInputBorder(),
+                    errorText: phoneError,
+                  ),
+                  keyboardType: TextInputType.phone,
+                  onChanged: (value) {
+                    if (phoneError != null) {
+                      setState(() {
+                        phoneError = null;
+                      });
+                    }
+                  },
+                ),
+                const SizedBox(height: 16),
+                // פרטי המנוי
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.3)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        l10n.subscriptionDetails,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '${l10n.subscriptionTypeWithType(typeName)}\n${l10n.perYear(price)}',
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                      if (categories != null && categories.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          l10n.businessAreas(categories.map((c) => c.categoryDisplayName).join(', ')),
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onPrimaryContainer,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                // הוראות תשלום במזומן
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.tertiaryContainer,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.amber[200]!),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.info_outline,
+                            color: Theme.of(context).brightness == Brightness.dark
+                                ? Theme.of(context).colorScheme.onTertiaryContainer
+                                : Theme.of(context).colorScheme.onSurface,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                      Text(
+                        'איך לשלם במזומן',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? Theme.of(context).colorScheme.onTertiaryContainer
+                              : Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'שלח בקשת תשלום במזומן במערכת, ניצור איתך קשר בהקדם לצורך הסדרת תשלום והפעלת העסק שלך.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? Theme.of(context).colorScheme.onTertiaryContainer
+                              : Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('ביטול'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                // בדיקת טלפון אם לא הוזן
+                if (!hasPhone && phoneController.text.trim().isEmpty) {
+                  setState(() {
+                    phoneError = l10n.enterPhoneNumber;
+                  });
+                  return;
+                }
+
+                // בדיקת תקינות טלפון
+                if (!hasPhone && phoneController.text.trim().isNotEmpty) {
+                  if (!PhoneValidation.isValidIsraeliPhone(phoneController.text.trim())) {
+                    setState(() {
+                      phoneError = l10n.invalidPhoneNumber;
+                    });
+                    return;
+                  }
+                }
+
+                final finalPhone = hasPhone ? phoneFromScreen : phoneController.text.trim();
+                
+                // שליחת בקשה לתשלום במזומן
+                try {
+                  // שמירת שם העסק ומספר הטלפון ב-Firestore לפני שליחת הבקשה
+                  final businessName = _businessNameController.text.trim();
+                  if (subscriptionTypeString == 'business') {
+                    // קבלת השם המקורי לפני עדכון
+                    final userDoc = await FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(user.uid)
+                        .get();
+                    
+                    final updateData = <String, dynamic>{
+                      'updatedAt': DateTime.now(),
+                    };
+                    
+                    // שמירת השם המקורי ב-name לפני עדכון displayName לשם העסק
+                    if (userDoc.exists) {
+                      final userData = userDoc.data() as Map<String, dynamic>;
+                      final currentName = userData['name'] as String?;
+                      final currentDisplayName = userData['displayName'] as String?;
+                      
+                      // אם אין name, נשמור את השם המקורי ב-name
+                      if ((currentName == null || currentName.isEmpty)) {
+                        // אם displayName שונה מ-businessName, זה השם המקורי
+                        if (currentDisplayName != null && 
+                            currentDisplayName.isNotEmpty &&
+                            currentDisplayName != businessName) {
+                          // displayName הוא השם המקורי, שמור אותו ב-name
+                          updateData['name'] = currentDisplayName;
+                        } else {
+                          // displayName כבר שונה לשם העסק או ריק, נשתמש במייל
+                          final email = userData['email'] as String?;
+                          if (email != null && email.isNotEmpty) {
+                            updateData['name'] = email.split('@')[0];
+                          } else {
+                            // אם אין גם מייל, נשתמש ב-displayName הנוכחי (אפילו אם זה שם העסק)
+                            // זה יקרה רק במקרים נדירים
+                            if (currentDisplayName != null && currentDisplayName.isNotEmpty) {
+                              updateData['name'] = currentDisplayName;
+                            }
+                          }
+                        }
+                      }
+                    }
+                    
+                    if (businessName.isNotEmpty) {
+                      updateData['displayName'] = businessName;
+                    }
+                    
+                    // שמירת מספר הטלפון
+                    if (finalPhone.isNotEmpty) {
+                      updateData['phoneNumber'] = finalPhone;
+                    }
+                    
+                    if (updateData.length > 1) { // יותר מ-updatedAt בלבד
+                      await FirebaseFirestore.instance
+                          .collection('users')
+                          .doc(user.uid)
+                          .update(updateData);
+                    }
+                  }
+                  
+                  await ManualPaymentService.submitCashPaymentRequest(
+                    userId: user.uid,
+                    userName: userName,
+                    userEmail: userEmail,
+                    phone: finalPhone,
+                    subscriptionType: subscriptionTypeString,
+                    amount: price.toDouble(),
+                    businessCategories: categories != null ? categories.map((c) => c.categoryDisplayName).toList() : null,
+                  );
+                  
+                  // סגירת כל הדיאלוגים - סגירה בטוחה
+                  // סגירת דיאלוג תשלום מזומן
+                  Navigator.pop(dialogContext);
+                  
+                  // המתנה קצרה לפני סגירת הדיאלוג הבא
+                  await Future.delayed(const Duration(milliseconds: 150));
+                  
+                  // סגירת דיאלוג תשלום עבור מנוי עסקי לשנה (אם עדיין פתוח)
+                  if (navigator.canPop()) {
+                    navigator.pop();
+                  }
+                  
+                  // המתנה קצרה לפני סגירת מסך ניהול העסק
+                  await Future.delayed(const Duration(milliseconds: 150));
+                  
+                  // סגירת מסך ניהול העסק וניווט למסך פרופיל
+                  if (mounted) {
+                    Navigator.of(context).pop(); // סגירת מסך ניהול העסק
+                    
+                    // המתנה קצרה לפני ניווט למסך פרופיל
+                    await Future.delayed(const Duration(milliseconds: 150));
+                    
+                    if (mounted) {
+                      // ניווט למסך פרופיל
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => const ProfileScreen(),
+                        ),
+                      );
+                      
+                      // הצגת הודעה במסך פרופיל
+                      await Future.delayed(const Duration(milliseconds: 300));
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('בקשת התשלום נשלחה בהצלחה'),
+                            backgroundColor: Colors.green,
+                            duration: Duration(seconds: 3),
+                          ),
+                        );
+                      }
+                    }
+                  }
+                } catch (e) {
+                  debugPrint('Error submitting cash payment request: $e');
+                  
+                  // גם במקרה של שגיאה, נסגור את הדיאלוגים
+                  Navigator.pop(dialogContext);
+                  
+                  await Future.delayed(const Duration(milliseconds: 150));
+                  
+                  if (navigator.canPop()) {
+                    navigator.pop();
+                  }
+                  
+                  // המתנה קצרה לפני סגירת מסך ניהול העסק
+                  await Future.delayed(const Duration(milliseconds: 150));
+                  
+                  // סגירת מסך ניהול העסק וניווט למסך פרופיל
+                  if (mounted) {
+                    Navigator.of(context).pop(); // סגירת מסך ניהול העסק
+                    
+                    // המתנה קצרה לפני ניווט למסך פרופיל
+                    await Future.delayed(const Duration(milliseconds: 150));
+                    
+                    if (mounted) {
+                      // ניווט למסך פרופיל
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => const ProfileScreen(),
+                        ),
+                      );
+                      
+                      // הצגת הודעת שגיאה במסך פרופיל
+                      await Future.delayed(const Duration(milliseconds: 300));
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('שגיאה בשליחת הבקשה: $e'),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    }
+                  }
+                }
+              },
+              child: const Text('שלח בקשה'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Future<void> _saveAd() async {
     final l10n = AppLocalizations.of(context);
-    if (!_formKey.currentState!.validate()) return;
-
-    // בדיקת קטגוריה נבחרת
-    if (_selectedCategory == null) {
+    
+    // בדיקת תקינות הטופס
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+    
+    // בדיקת שם העסק
+    if (_businessNameController.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(l10n.pleaseSelectCategory),
+        const SnackBar(
+          content: Text('אנא הזן שם עסק'),
           backgroundColor: Colors.red,
         ),
       );
       return;
     }
-
-    // בדיקת חיבור לאינטרנט
-    if (!isConnected) {
-      showNetworkMessage(context);
+    
+    // בדיקת טלפון
+    if (_selectedPhonePrefix.isEmpty || _selectedPhoneNumber.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(l10n.enterFullPrefixAndNumber),
+          backgroundColor: Colors.red,
+        ),
+      );
       return;
     }
-
-      debugPrint('🚀 ===== START _saveAd =====');
-      debugPrint('📝 Ad title: ${_titleController.text.trim()}');
-      debugPrint('📝 Selected category: ${_selectedCategory?.categoryDisplayName}');
-      debugPrint('📝 Selected location: $_selectedLatitude, $_selectedLongitude');
-      debugPrint('📝 Exposure radius: $_exposureRadius km');
-      debugPrint('📝 Requires appointment: $_requiresAppointment');
-      debugPrint('📝 Requires delivery: $_requiresDelivery');
-    debugPrint('Starting to save ad...');
-    setState(() => _isLoading = true);
-
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        debugPrint('User is null, cannot save request');
-        return;
-      }
-
-      // בדיקת הגבלות (לא נדרש למודעות - אין הגבלות)
-      // await _checkRequestLimits(user.uid); // לא נדרש למודעות
-
-      // Guard context usage after async gap
-      if (!mounted) return;
-
-      // בדיקת מיקום וטווח חשיפה
-      if (_selectedLatitude == null || _selectedLongitude == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(l10n.pleaseSelectLocation),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-      
-      
-      // בדיקת טווח חשיפה - מותר לטווח המקסימלי של המנוי
-      // (הגבלת התראות תהיה בצד הסינון)
-
-      debugPrint('User authenticated: ${user.uid}');
-
-      // העלאת תמונות אם נבחרו
-      if (_selectedImageFiles.isNotEmpty) {
-        debugPrint('Uploading ${_selectedImageFiles.length} images...');
-        try {
-          await _uploadImages();
-          debugPrint('Images uploaded successfully');
-        } catch (e) {
-          debugPrint('Error uploading images: $e');
-          // אם יש שגיאה בהעלאת תמונות, נמשיך ללא תמונות
-          _selectedImages.clear();
-        }
-      } else {
-        debugPrint('No images to upload');
-        // נוודא שהרשימה ריקה
-        _selectedImages.clear();
-      }
-
-      // תאריך יעד - לא בשימוש (הוסר מהממשק)
-      DateTime? finalDeadline = null;
-
-      // בדיקת מספר טלפון לפני יצירת הבקשה
-      debugPrint('📞 _saveRequest: _selectedPhonePrefix: "$_selectedPhonePrefix"');
-      debugPrint('📞 _saveRequest: _selectedPhoneNumber: "$_selectedPhoneNumber"');
-      debugPrint('📞 _saveRequest: _selectedPhonePrefix.isNotEmpty: ${_selectedPhonePrefix.isNotEmpty}');
-      debugPrint('📞 _saveRequest: _selectedPhoneNumber.isNotEmpty: ${_selectedPhoneNumber.isNotEmpty}');
-      
-      final finalPhoneNumber = _selectedPhonePrefix.isNotEmpty && _selectedPhoneNumber.isNotEmpty 
-          ? '$_selectedPhonePrefix-$_selectedPhoneNumber' 
-          : null;
-      debugPrint('📞 _saveRequest: finalPhoneNumber: $finalPhoneNumber');
-      
-      var ad = Ad(
-        adId: '', // יוגדר ב-Firestore
-        title: _titleController.text.trim(),
-        description: _descriptionController.text.trim(),
-        category: _selectedCategory!,
-        location: _selectedLocation,
-        isUrgent: false, // לא נדרש למודעות
-        images: _selectedImages,
-        createdAt: DateTime.now(),
-        createdBy: user.uid,
-        interestedUsers: [],
-        phoneNumber: finalPhoneNumber,
-        type: _selectedType,
-        deadline: finalDeadline,
-        targetAudience: TargetAudience.all,
-        maxDistance: null,
-        targetVillage: null,
-        targetCategories: _selectedTargetCategories.isNotEmpty ? _selectedTargetCategories : null,
-        urgencyLevel: UrgencyLevel.normal, // ברירת מחדל
-        tags: [], // לא נדרש למודעות
-        customTag: null, // לא נדרש למודעות
-        minRating: _minRating,
-        minReliability: _minReliability,
-        minAvailability: _minAvailability,
-        minAttitude: _minAttitude,
-        minFairPrice: _minFairPrice,
-        latitude: _selectedLatitude,
-        longitude: _selectedLongitude,
-        address: _selectedAddress,
-        exposureRadius: _exposureRadius,
-        showToProvidersOutsideRange: null, // לא נדרש למודעות
-        showToAllUsers: null, // לא נדרש למודעות
-        price: _isCustomPrice ? null : _price, // מחיר (אופציונלי) - null אם "בהתאמה אישית"
-        requiresAppointment: _requiresAppointment, // האם השירות דורש תור
-        requiresDelivery: _requiresDelivery, // האם השירות דורש משלוח
-        deliveryLocation: _requiresDelivery ? _selectedAddress : null, // שימוש במיקום הראשי
-        deliveryLatitude: _requiresDelivery ? _selectedLatitude : null, // שימוש במיקום הראשי
-        deliveryLongitude: _requiresDelivery ? _selectedLongitude : null, // שימוש במיקום הראשי
-        deliveryRadius: _requiresDelivery ? _exposureRadius : null, // שימוש ברדius הראשי
+    
+    // בדיקת תקינות טלפון
+    String fullNumber = '$_selectedPhonePrefix$_selectedPhoneNumber';
+    if (!PhoneValidation.isValidIsraeliPhone(fullNumber)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(l10n.invalidPhoneNumber),
+          backgroundColor: Colors.red,
+        ),
       );
-
-      debugPrint('Creating ad in Firestore...');
-      debugPrint('Ad data: ${ad.toFirestore()}');
-      
-      // שימוש ב-NetworkService עם retry
-      final docRef = await NetworkService.executeWithRetry(
-        () => FirebaseFirestore.instance
-            .collection('ads')
-            .add(ad.toFirestore())
-            .timeout(
-              const Duration(minutes: 1),
-              onTimeout: () {
-                throw Exception('Firestore timeout');
-              },
-            ),
-        operationName: 'יצירת מודעה',
-        maxRetries: 3,
+      return;
+    }
+    
+    // בדיקת בחירת לפחות תחום אחד
+    if (_selectedCategories.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('אנא בחר לפחות תחום אחד'),
+          backgroundColor: Colors.red,
+        ),
       );
-      
-      debugPrint('Ad created successfully with ID: ${docRef.id}');
-
-      // שליחת התראות למשתמשים הרלוונטיים (לא נדרש למודעות - נשאיר ריק כרגע)
-      // TODO: להוסיף התראות למודעות אם נדרש
-
-      debugPrint('Ad saved successfully, showing success message');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('המודעה נשמרה בהצלחה'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 2),
-          ),
-        );
-        debugPrint('Navigating back to previous screen');
-        Navigator.pop(context);
+      return;
+    }
+    
+    // בדיקת הוספת לפחות שירות אחד
+    if (_services.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('אנא הוסף לפחות שירות אחד'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    
+    // בדיקת תקינות כל השירותים
+    bool hasInvalidService = false;
+    for (var service in _services) {
+      if (service.nameController.text.trim().isEmpty) {
+        hasInvalidService = true;
+        break;
       }
-    } catch (e) {
-      debugPrint('Error saving ad: $e');
-      if (mounted) {
-        showError(context, e, onRetry: () {
-          _saveAd();
-        });
-      }
-    } finally {
-      debugPrint('Setting loading to false');
-      if (mounted) {
-        setState(() => _isLoading = false);
+      if (!service.isCustomPrice && (service.priceController.text.trim().isEmpty || 
+          double.tryParse(service.priceController.text.trim()) == null)) {
+        hasInvalidService = true;
+        break;
       }
     }
-  }
-
-  /// שליחת התראות למשתמשים הרלוונטיים
-
-  // בדיקת הגבלות בקשות - לא נדרש למודעות
-  // ignore: unused_element
-  Future<void> _checkRequestLimits(String userId) async {
-    try {
-      debugPrint('🔍 _checkRequestLimits: Starting check for user $userId');
-      
-      // בדיקה אם המשתמש הוא מנהל
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        final userEmail = user.email;
-        if (userEmail == 'haitham.ay82@gmail.com' || userEmail == 'admin@gmail.com') {
-          debugPrint('🔍 _checkRequestLimits: Admin user detected, bypassing limits');
-          return;
-        }
-      }
-      
-      // קבלת פרופיל המשתמש
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .get();
-      
-      if (!userDoc.exists) {
-        throw Exception('פרופיל משתמש לא נמצא');
-      }
-      
-      final userData = userDoc.data()!;
-      final maxRequestsPerMonth = userData['maxRequestsPerMonth'] ?? 1;
-      final createdAt = userData['createdAt'] as Timestamp?;
-      
-      debugPrint('🔍 _checkRequestLimits: maxRequestsPerMonth = $maxRequestsPerMonth');
-      debugPrint('🔍 _checkRequestLimits: createdAt = $createdAt');
-      
-      if (createdAt == null) {
-        debugPrint('🔍 _checkRequestLimits: No createdAt, allowing request creation');
-        return; // אם אין תאריך יצירה, אפשר ליצור
-      }
-
-      // חישוב החודש הנוכחי
-      final now = DateTime.now();
-      final currentMonthKey = '${now.year}-${now.month.toString().padLeft(2, '0')}';
-      
-      debugPrint('🔍 _checkRequestLimits: now = $now');
-      debugPrint('🔍 _checkRequestLimits: currentMonthKey = $currentMonthKey');
-      
-      // בדיקת מספר הבקשות שנוצרו החודש
-      final monthlyRequestsDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(userId)
-          .collection('monthly_requests_count')
-          .doc(currentMonthKey)
-          .get();
-
-      final currentMonthRequests = monthlyRequestsDoc.exists 
-          ? (monthlyRequestsDoc.data()?['count'] ?? 0) 
-          : 0;
-
-      debugPrint('🔍 _checkRequestLimits: monthlyRequestsDoc.exists = ${monthlyRequestsDoc.exists}');
-      debugPrint('🔍 _checkRequestLimits: currentMonthRequests = $currentMonthRequests');
-      debugPrint('🔍 _checkRequestLimits: Checking if $currentMonthRequests >= $maxRequestsPerMonth');
-
-      if (currentMonthRequests >= maxRequestsPerMonth) {
-        debugPrint('🔍 _checkRequestLimits: LIMIT REACHED! Blocking request creation');
-        
-        // חישוב תאריך החודש הבא
-        final nextMonth = DateTime(now.year, now.month + 1, 1);
-        final nextMonthFormatted = '${nextMonth.day}/${nextMonth.month}/${nextMonth.year}';
-        
-        String message = 'הגעת למגבלת הבקשות החודשית ($maxRequestsPerMonth בקשות). המתן עד $nextMonthFormatted או שדרג את המנוי שלך.';
-        
-        throw Exception(message);
-      }
-
-      debugPrint('🔍 _checkRequestLimits: Limit not reached, allowing request creation');
-      
-    } catch (e) {
-      debugPrint('🔍 _checkRequestLimits: Error: $e');
-      setState(() => _isLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.toString().replaceFirst('Exception: ', '')),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 4),
-          ),
-        );
-      }
-      rethrow;
+    
+    if (hasInvalidService) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('אנא מלא את כל פרטי השירותים'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
     }
+    
+    // בדיקת בחירת מיקום העסק
+    if (_selectedLatitude == null || _selectedLongitude == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('אנא בחר מיקום העסק'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    
+    // כל הבדיקות עברו - הצגת דיאלוג הפעלת מנוי עסקי
+    await _showPaymentDialog(UserType.business, _selectedCategories);
   }
-  
-  
 }

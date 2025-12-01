@@ -315,7 +315,7 @@ class NotificationService {
       final title = approved ? 'מנוי אושר! ✅' : 'מנוי נדחה ❌';
       final message = approved
           ? (isBusiness
-              ? 'המנוי העסקי שלך אושר בהצלחה. כעת תוכל לראות בקשות בתשלום.'
+              ? 'המנוי העסקי שלך אושר בהצלחה.\n\nהעסק שלך באוויר!!\n\nבאפשרותך גם לצפות בבקשות של מפרסמים המתאימות לתחום העיסוק שלך ולהרוויח כסף.'
               : 'המנוי הפרטי שלך אושר בהצלחה.')
           : rejectionReason != null && rejectionReason.isNotEmpty
               ? (paymentMethodText.isNotEmpty

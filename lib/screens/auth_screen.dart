@@ -404,9 +404,11 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
           password: _passwordController.text,
         );
 
+        final nameValue = _nameController.text.trim();
         final userData = {
           'uid': cred.user!.uid,
-          'displayName': _nameController.text.trim(),
+          'displayName': nameValue,
+          'name': nameValue, // שמירת השם המקורי ב-name גם כן
           'email': _emailController.text.trim(),
           'userType': 'personal', // כל המשתמשים נרשמים כפרטיים
           'createdAt': DateTime.now(),

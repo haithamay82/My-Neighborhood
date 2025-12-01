@@ -469,6 +469,7 @@ class ManualPaymentService {
         updateData['isSubscriptionActive'] = false;
         updateData['subscriptionExpiry'] = null;
         updateData['requestedSubscriptionType'] = null; // איפוס סוג המנוי המבוקש
+        updateData['userType'] = 'personal'; // החזרת המשתמש לפרטי חינם
       }
       
       debugPrint('📝 Updating user document with data: $updateData');

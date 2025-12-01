@@ -4619,7 +4619,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
     if (hasCategories) {
       notificationType = 'guest_with_categories';
     } else {
-      notificationType = 'guest_trial_ended';
+      // אורחים ללא הגבלת זמן - אין התראה על סיום תקופה
+      return; // לא נשלח התראה על סיום תקופה כי אין הגבלת זמן
     }
     
     // בדיקה אם כבר נשלחה התראה מסוג זה למשתמש הזה

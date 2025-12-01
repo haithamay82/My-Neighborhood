@@ -1029,25 +1029,25 @@ class _YokiStyleAuthScreenState extends State<YokiStyleAuthScreen>
       // ✅ לא שולחים אימייל אימות - המשתמש נרשם ללא אימות
       // ✅ לא מתנתקים - המשתמש נכנס ישירות לאפליקציה
       
-      // יצירת פרופיל משתמש אורח ב-Firestore
+      // יצירת פרופיל משתמש פרטי מנוי ב-Firestore
       final now = DateTime.now();
-      final guestTrialEndDate = now.add(const Duration(days: 60));
       
       final userData = {
         'uid': cred.user!.uid,
         'displayName': email.split('@')[0],
         'email': email,
-        'userType': 'guest',
+        'userType': 'personal', // משתמשים חדשים דרך שכונתי נרשמים כפרטי מנוי
         'createdAt': Timestamp.fromDate(now),
-        'isSubscriptionActive': true, // ✅ פעיל גם בלי אימות אימייל
+        'isSubscriptionActive': true, // פרטי מנוי פעיל
         'subscriptionStatus': 'active',
+        'subscriptionExpiry': Timestamp.fromDate(
+          DateTime.now().add(const Duration(days: 365)) // שנה אחת
+        ),
         'emailVerified': false, // לא מאומת אבל יכול להשתמש באפליקציה
         'accountStatus': 'active',
-        'guestTrialStartDate': Timestamp.fromDate(now),
-        'guestTrialEndDate': Timestamp.fromDate(guestTrialEndDate),
-        'maxRequestsPerMonth': 10,
-        'maxRadius': 3.0,
-        'canCreatePaidRequests': true, // ✅ יכול גם בלי אימות אימייל
+        'maxRequestsPerMonth': 5, // פרטי מנוי - 5 בקשות בחודש
+        'maxRadius': 10.0, // 10 ק"מ
+        'canCreatePaidRequests': false, // פרטי מנוי - רק בקשות חינמיות
         'businessCategories': [],
         'hasAcceptedTerms': true,
       };
@@ -1189,25 +1189,25 @@ class _YokiStyleAuthScreenState extends State<YokiStyleAuthScreen>
           }
         }
         
-        // יצירת פרופיל משתמש אורח ב-Firestore
+        // יצירת פרופיל משתמש פרטי מנוי ב-Firestore
         final now = DateTime.now();
-        final guestTrialEndDate = now.add(const Duration(days: 60)); // 60 יום תקופת ניסיון
         
         final userData = {
           'uid': cred.user!.uid,
           'displayName': email.split('@')[0], // שם משתמש מהאימייל
           'email': email,
-          'userType': 'guest', // כל המשתמשים החדשים נרשמים כאורחים
+          'userType': 'personal', // משתמשים חדשים דרך שכונתי נרשמים כפרטי מנוי
           'createdAt': Timestamp.fromDate(now),
-          'isSubscriptionActive': isEmailVerified, // פעיל רק אם האימייל מאומת
+          'isSubscriptionActive': isEmailVerified, // פרטי מנוי פעיל רק אם האימייל מאומת
           'subscriptionStatus': isEmailVerified ? 'active' : 'pending_verification', // ממתין לאימות אימייל
+          'subscriptionExpiry': isEmailVerified ? Timestamp.fromDate(
+            DateTime.now().add(const Duration(days: 365)) // שנה אחת
+          ) : null,
           'emailVerified': isEmailVerified, // שמירת הסטטוס האמיתי
           'accountStatus': isEmailVerified ? 'active' : 'pending_verification', // ממתין לאימות אימייל
-          'guestTrialStartDate': Timestamp.fromDate(now),
-          'guestTrialEndDate': Timestamp.fromDate(guestTrialEndDate),
-          'maxRequestsPerMonth': 10, // גבוה יותר לאורחים
-          'maxRadius': 3.0, // 3 ק"מ לאורחים
-          'canCreatePaidRequests': isEmailVerified, // יכול רק אם האימייל מאומת
+          'maxRequestsPerMonth': isEmailVerified ? 5 : 1, // פרטי מנוי - 5 בקשות בחודש (או 1 אם לא מאומת)
+          'maxRadius': isEmailVerified ? 10.0 : 3.0, // 10 ק"מ (או 3 אם לא מאומת)
+          'canCreatePaidRequests': false, // פרטי מנוי - רק בקשות חינמיות
           'businessCategories': [], // יבחרו במסך הבא
           'hasAcceptedTerms': true,
         };
@@ -1755,25 +1755,27 @@ class _YokiStyleAuthScreenState extends State<YokiStyleAuthScreen>
             .get();
         
         if (!userDoc.exists) {
-          // משתמש חדש - יצירת פרופיל אורח
+          // משתמש חדש - יצירת פרופיל פרטי מנוי
           final now = DateTime.now();
-          final guestTrialEndDate = now.add(const Duration(days: 60)); // 60 יום תקופת ניסיון
           
+          final displayNameValue = user.displayName ?? user.email?.split('@')[0] ?? 'משתמש';
           final userData = {
             'uid': user.uid,
-            'displayName': user.displayName ?? user.email?.split('@')[0] ?? 'משתמש',
+            'displayName': displayNameValue,
+            'name': displayNameValue, // שמירת השם המקורי ב-name גם כן
             'email': user.email ?? '',
-            'userType': 'guest', // משתמש חדש כאורח
+            'userType': 'personal', // משתמש חדש דרך גוגל נרשם כפרטי מנוי
             'createdAt': Timestamp.fromDate(now),
-            'isSubscriptionActive': true, // תקופת אורח פעילה
+            'isSubscriptionActive': true, // פרטי מנוי פעיל
             'subscriptionStatus': 'active',
+            'subscriptionExpiry': Timestamp.fromDate(
+              DateTime.now().add(const Duration(days: 365)) // שנה אחת
+            ),
             'emailVerified': user.emailVerified,
             'accountStatus': 'active',
-            'guestTrialStartDate': Timestamp.fromDate(now),
-            'guestTrialEndDate': Timestamp.fromDate(guestTrialEndDate),
-            'maxRequestsPerMonth': 10, // גבוה יותר לאורחים
-            'maxRadius': 3.0, // 3 ק"מ לאורחים
-            'canCreatePaidRequests': true, // אורחים יכולים ליצור בקשות בתשלום
+            'maxRequestsPerMonth': 5, // פרטי מנוי - 5 בקשות בחודש
+            'maxRadius': 10.0, // 10 ק"מ
+            'canCreatePaidRequests': false, // פרטי מנוי - רק בקשות חינמיות
             'businessCategories': [], // יבחרו במסך הבא
             'hasAcceptedTerms': true,
           };

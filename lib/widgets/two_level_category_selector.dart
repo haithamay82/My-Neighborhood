@@ -28,7 +28,16 @@ class _TwoLevelCategorySelectorState extends State<TwoLevelCategorySelector> {
   @override
   void initState() {
     super.initState();
-    _selectedCategories = widget.selectedCategories ?? [];
+    _selectedCategories = List.from(widget.selectedCategories ?? []);
+  }
+  
+  @override
+  void didUpdateWidget(TwoLevelCategorySelector oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // עדכון הרשימה הפנימית אם הרשימה החיצונית השתנתה
+    if (widget.selectedCategories != oldWidget.selectedCategories) {
+      _selectedCategories = List.from(widget.selectedCategories ?? []);
+    }
   }
 
   @override

@@ -37,6 +37,7 @@ import 'admin_contact_inquiries_screen.dart';
 import 'admin_guest_management_screen.dart';
 import 'admin_requests_statistics_screen.dart';
 import 'appointment_settings_screen.dart';
+import 'business_management_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -759,18 +760,22 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       final user = FirebaseAuth.instance.currentUser;
       if (user == null) return;
 
+      final displayNameValue = user.displayName ?? user.email?.split('@')[0] ?? 'משתמש';
       final userProfile = UserProfile(
         userId: user.uid,
-        displayName: user.displayName ?? user.email?.split('@')[0] ?? 'משתמש',
+        displayName: displayNameValue,
         email: user.email ?? '',
         userType: userType,
         createdAt: DateTime.now(),
       );
 
+      final firestoreData = userProfile.toFirestore();
+      firestoreData['name'] = displayNameValue; // שמירת השם המקורי ב-name גם כן
+      
       await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
-          .set(userProfile.toFirestore());
+          .set(firestoreData);
 
       debugPrint('User profile created successfully with type: $userType');
       
@@ -1424,9 +1429,34 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         debugPrint('email: ${userProfile.email}');
 
         // טעינת שם התצוגה ל-controller
-        final newDisplayName = userProfile.displayName.isNotEmpty 
-            ? userProfile.displayName 
-            : userProfile.email.split('@')[0];
+        // למשתמש עסקי מנוי - טען את שם העסק (displayName)
+        // למשתמשים אחרים - טען את השם המקורי מההרשמה (name)
+        String newDisplayName;
+        if (userProfile.userType == UserType.business && userProfile.isSubscriptionActive) {
+          // למשתמש עסקי - טען את שם העסק (displayName)
+          newDisplayName = userProfile.displayName.isNotEmpty 
+              ? userProfile.displayName 
+              : userProfile.email.split('@')[0];
+        } else {
+          // למשתמשים אחרים - טען את השם המקורי מההרשמה (name)
+          final userDoc = snapshot.data;
+          if (userDoc != null && userDoc.exists) {
+            final userData = userDoc.data() as Map<String, dynamic>;
+            final originalName = userData['name'] as String?;
+            if (originalName != null && originalName.isNotEmpty) {
+              newDisplayName = originalName;
+            } else {
+              // אם אין name, נשתמש ב-displayName או במייל
+              newDisplayName = userProfile.displayName.isNotEmpty 
+                  ? userProfile.displayName 
+                  : userProfile.email.split('@')[0];
+            }
+          } else {
+            newDisplayName = userProfile.displayName.isNotEmpty 
+                ? userProfile.displayName 
+                : userProfile.email.split('@')[0];
+          }
+        }
         
         // עדכון ה-controller רק אם השם השתנה
         if (_displayNameController.text != newDisplayName) {
@@ -1738,22 +1768,45 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                                                 ),
                                               ),
                                           ),
-                                            errorWidget: (context, url, error) => Container(
-                                              width: 60,
-                                              height: 60,
-                                              color: Theme.of(context).colorScheme.primary,
-                                              child: Center(
-                                                child: Text(
-                                                  userProfile.displayName.isNotEmpty 
-                                                      ? userProfile.displayName[0].toUpperCase()
-                                                      : '?',
-                                                  style: TextStyle(
-                                                    fontSize: 24,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: Theme.of(context).colorScheme.onPrimary,
+                                            errorWidget: (context, url, error) => Builder(
+                                              builder: (context) {
+                                                // למשתמש עסקי מנוי - השתמש בשם המקורי (name) לאות הראשונה
+                                                String firstChar = '?';
+                                                if (userProfile.userType == UserType.business && userProfile.isSubscriptionActive) {
+                                                  final userDoc = snapshot.data;
+                                                  if (userDoc != null && userDoc.exists) {
+                                                    final userData = userDoc.data() as Map<String, dynamic>;
+                                                    final originalName = userData['name'] as String?;
+                                                    if (originalName != null && originalName.isNotEmpty) {
+                                                      firstChar = originalName[0].toUpperCase();
+                                                    } else if (userProfile.email.isNotEmpty) {
+                                                      firstChar = userProfile.email[0].toUpperCase();
+                                                    }
+                                                  } else if (userProfile.email.isNotEmpty) {
+                                                    firstChar = userProfile.email[0].toUpperCase();
+                                                  }
+                                                } else if (userProfile.displayName.isNotEmpty) {
+                                                  firstChar = userProfile.displayName[0].toUpperCase();
+                                                } else if (userProfile.email.isNotEmpty) {
+                                                  firstChar = userProfile.email[0].toUpperCase();
+                                                }
+                                                
+                                                return Container(
+                                                  width: 60,
+                                                  height: 60,
+                                                  color: Theme.of(context).colorScheme.primary,
+                                                  child: Center(
+                                                    child: Text(
+                                                      firstChar,
+                                                      style: TextStyle(
+                                                        fontSize: 24,
+                                                        fontWeight: FontWeight.bold,
+                                                        color: Theme.of(context).colorScheme.onPrimary,
+                                                      ),
+                                                    ),
                                                   ),
-                                                ),
-                                              ),
+                                                );
+                                              },
                                             ),
                                           ),
                                         )
@@ -1765,15 +1818,38 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                                             color: Theme.of(context).colorScheme.primary,
                                           ),
                                           child: Center(
-                                            child: Text(
-                                          userProfile.displayName.isNotEmpty 
-                                              ? userProfile.displayName[0].toUpperCase()
-                                              : '?',
-                                          style: TextStyle(
-                                            fontSize: 24,
-                                            fontWeight: FontWeight.bold,
-                                            color: Theme.of(context).colorScheme.onPrimary,
-                                              ),
+                                            child: Builder(
+                                              builder: (context) {
+                                                // למשתמש עסקי מנוי - השתמש בשם המקורי (name) לאות הראשונה
+                                                String firstChar = '?';
+                                                if (userProfile.userType == UserType.business && userProfile.isSubscriptionActive) {
+                                                  final userDoc = snapshot.data;
+                                                  if (userDoc != null && userDoc.exists) {
+                                                    final userData = userDoc.data() as Map<String, dynamic>;
+                                                    final originalName = userData['name'] as String?;
+                                                    if (originalName != null && originalName.isNotEmpty) {
+                                                      firstChar = originalName[0].toUpperCase();
+                                                    } else if (userProfile.email.isNotEmpty) {
+                                                      firstChar = userProfile.email[0].toUpperCase();
+                                                    }
+                                                  } else if (userProfile.email.isNotEmpty) {
+                                                    firstChar = userProfile.email[0].toUpperCase();
+                                                  }
+                                                } else if (userProfile.displayName.isNotEmpty) {
+                                                  firstChar = userProfile.displayName[0].toUpperCase();
+                                                } else if (userProfile.email.isNotEmpty) {
+                                                  firstChar = userProfile.email[0].toUpperCase();
+                                                }
+                                                
+                                                return Text(
+                                                  firstChar,
+                                                  style: TextStyle(
+                                                    fontSize: 24,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Theme.of(context).colorScheme.onPrimary,
+                                                  ),
+                                                );
+                                              },
                                             ),
                                           ),
                                         ),
@@ -1823,17 +1899,36 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  userProfile.displayName.isNotEmpty 
-                                      ? userProfile.displayName 
-                                      : userProfile.email.split('@')[0],
-                                  style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.bold,
-                                    color: Theme.of(context).brightness == Brightness.dark
-                                        ? Colors.white
-                                        : Colors.grey[900], // כהה מאוד (כמעט שחור) בערכה כהה
-                                  ),
+                                Builder(
+                                  builder: (context) {
+                                    // תמיד הצג את השם המקורי מההרשמה (name) מעל המייל
+                                    // זה השם שהמשתמש הזין במסך התחברות/הרשמה
+                                    String displayText;
+                                    final userDoc = snapshot.data;
+                                    if (userDoc != null && userDoc.exists) {
+                                      final userData = userDoc.data() as Map<String, dynamic>;
+                                      final originalName = userData['name'] as String?;
+                                      if (originalName != null && originalName.isNotEmpty) {
+                                        displayText = originalName;
+                                      } else {
+                                        // אם אין name, השתמש במייל
+                                        displayText = userProfile.email.split('@')[0];
+                                      }
+                                    } else {
+                                      displayText = userProfile.email.split('@')[0];
+                                    }
+                                    
+                                    return Text(
+                                      displayText,
+                                      style: TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.bold,
+                                        color: Theme.of(context).brightness == Brightness.dark
+                                            ? Colors.white
+                                            : Colors.grey[900], // כהה מאוד (כמעט שחור) בערכה כהה
+                                      ),
+                                    );
+                                  },
                                 ),
                                 Text(
                                   userProfile.email,
@@ -1859,7 +1954,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                                           _showBusinessSubscriptionDetailsDialog(userProfile);
                                         } else if (userProfile.isSubscriptionActive && 
                                                    (userProfile.businessCategories == null || userProfile.businessCategories!.isEmpty)) {
-                                          // אם המשתמש פרטי מנוי - הצג דיאלוג פירוט
+                                          // אם המשתמש פרטי מנוי - הצג דיאלוג פרטי מנוי
                                           _showPersonalSubscriptionDetailsDialog(userProfile);
                                         } else if (!userProfile.isSubscriptionActive) {
                                           // אם המשתמש חינם - הצג דיאלוג פירוט עם אפשרות שדרוג
@@ -1921,7 +2016,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                                               ),
                                               const SizedBox(width: 4),
                                               Text(
-                                                'שדרג מנוי',
+                                                'פרסם עסק',
                                                 style: TextStyle(
                                                   color: Colors.white,
                                                   fontSize: 12,
@@ -1953,7 +2048,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               ),
               const SizedBox(height: 16),
 
-              // שדה שם פרטי ומשפחה/חברה/עסק/כינוי - לכל סוגי המשתמשים
+              // שדה שם פרטי ומשפחה/חברה/עסק/כינוי - לכל סוגי המשתמשים (לא לאורח זמני)
+              // למשתמש עסקי מנוי - מציג "שם העסק/חברה/כינוי" במקום "שם פרטי ומשפחה"
+              if (userProfile.isTemporaryGuest != true) ...[
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -1973,7 +2070,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                     Row(
                       children: [
                         Icon(
-                          Icons.person, 
+                          userProfile.userType == UserType.business && userProfile.isSubscriptionActive
+                              ? Icons.business
+                              : Icons.person, 
                           color: Theme.of(context).brightness == Brightness.dark 
                               ? Theme.of(context).colorScheme.onSurface
                               : Theme.of(context).colorScheme.onSurface,
@@ -1981,7 +2080,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          l10n.firstNameLastName,
+                          userProfile.userType == UserType.business && userProfile.isSubscriptionActive
+                              ? 'שם העסק/חברה/כינוי'
+                              : l10n.firstNameLastName,
                           style: TextStyle(
                             color: Theme.of(context).brightness == Brightness.dark 
                                 ? Theme.of(context).colorScheme.onSurface
@@ -2004,7 +2105,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                                 keyboardType: TextInputType.text,
                                 enabled: false, // שדה read-only
                                 decoration: InputDecoration(
-                                  hintText: l10n.enterFirstNameLastName,
+                                  hintText: userProfile.userType == UserType.business && userProfile.isSubscriptionActive
+                                      ? 'הזן שם העסק/חברה/כינוי'
+                                      : l10n.enterFirstNameLastName,
                                   hintStyle: const TextStyle(
                                     color: Colors.grey,
                                     fontSize: 16,
@@ -2013,7 +2116,12 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   errorText: _displayNameError,
-                                  prefixIcon: Icon(Icons.person, color: Theme.of(context).colorScheme.primary),
+                                  prefixIcon: Icon(
+                                    userProfile.userType == UserType.business && userProfile.isSubscriptionActive
+                                        ? Icons.business
+                                        : Icons.person,
+                                    color: Theme.of(context).colorScheme.primary
+                                  ),
                                   filled: true,
                                   fillColor: Theme.of(context).colorScheme.surfaceContainer,
                                 ),
@@ -2085,8 +2193,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 ),
               ),
               const SizedBox(height: 16),
+              ],
 
-              // שדה טלפון - לכל סוגי המשתמשים
+              // שדה טלפון - לכל סוגי המשתמשים (לא לאורח זמני)
+              if (userProfile.isTemporaryGuest != true) ...[
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -2220,11 +2330,13 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 ),
               ),
               const SizedBox(height: 16),
+              ],
 
-              // תחומי עיסוק - מנהל, עסקי מנוי או אורח
-              if (_isAdmin == true || 
+              // תחומי עיסוק - מנהל, עסקי מנוי או אורח (לא לאורח זמני)
+              if (userProfile.isTemporaryGuest != true &&
+                  (_isAdmin == true || 
                   userProfile.userType == UserType.guest || 
-                  userProfile.userType == UserType.business) ...[
+                  userProfile.userType == UserType.business)) ...[
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -2394,8 +2506,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 const SizedBox(height: 16),
               ],
 
-              // התראה למשתמש אורח או עסקי מנוי שאין לו תחומי עיסוק
-              if ((userProfile.userType == UserType.guest || userProfile.userType == UserType.business) && 
+              // התראה למשתמש אורח או עסקי מנוי שאין לו תחומי עיסוק (לא לאורח זמני)
+              if (userProfile.isTemporaryGuest != true &&
+                  (userProfile.userType == UserType.guest || userProfile.userType == UserType.business) && 
                   (userProfile.businessCategories == null || userProfile.businessCategories!.isEmpty)) ...[
                 Container(
                   padding: const EdgeInsets.all(16),
@@ -2524,10 +2637,11 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 const SizedBox(height: 16),
               ],
 
-              // זמינות - מוצג למשתמשי אורח ועסקי מנוי
-              if (_isAdmin == true || 
+              // זמינות - מוצג למשתמשי אורח ועסקי מנוי (לא לאורח זמני)
+              if (userProfile.isTemporaryGuest != true &&
+                  (_isAdmin == true || 
                   userProfile.userType == UserType.guest || 
-                  userProfile.userType == UserType.business) ...[
+                  userProfile.userType == UserType.business)) ...[
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
@@ -2749,7 +2863,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 const SizedBox(height: 16),
               ],
 
-              // כרטיס מונה בקשות חודשיות - מוצג לכל המשתמשים
+              // כרטיס מונה בקשות חודשיות - מוצג לכל המשתמשים (לא לאורח זמני)
+              if (userProfile.isTemporaryGuest != true) ...[
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
@@ -2780,11 +2895,13 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 ),
               ),
               const SizedBox(height: 16),
+              ],
 
-              // כרטיס מיקום - מוצג רק למשתמשים נותני שירות (אורח, עסקי, מנהל)
-              if (userProfile.userType == UserType.guest || 
+              // כרטיס מיקום - מוצג רק למשתמשים נותני שירות (אורח, עסקי, מנהל) (לא לאורח זמני)
+              if (userProfile.isTemporaryGuest != true &&
+                  (userProfile.userType == UserType.guest || 
                   userProfile.userType == UserType.business ||
-                  _isAdmin == true) ...[
+                  _isAdmin == true)) ...[
                 Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
@@ -3057,10 +3174,11 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 const SizedBox(height: 16),
               ],
 
-              // דירוג המשתמש - מוצג רק למשתמשים נותני שירות (אורח, עסקי, מנהל)
-              if (userProfile.userType == UserType.guest || 
+              // דירוג המשתמש - מוצג רק למשתמשים נותני שירות (אורח, עסקי, מנהל) (לא לאורח זמני)
+              if (userProfile.isTemporaryGuest != true &&
+                  (userProfile.userType == UserType.guest || 
                   userProfile.userType == UserType.business ||
-                  _isAdmin == true) ...[
+                  _isAdmin == true)) ...[
                 _buildRatingCard(userProfile),
                 const SizedBox(height: 16),
               ],
@@ -3245,7 +3363,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 const SizedBox(height: 16),
               ],
 
-              // מידע נוסף
+              // מידע נוסף (לא לאורח זמני)
+              if (userProfile.isTemporaryGuest != true) ...[
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(16),
@@ -3285,6 +3404,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 ),
               ),
               const SizedBox(height: 16),
+              ],
               
               // כרטיס שיתוף והמלצה
               Card(
@@ -3738,7 +3858,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 child: ElevatedButton.icon(
                   onPressed: () => _showSubscriptionTypeDialog(userProfile),
                   icon: const Icon(Icons.upgrade, size: 18),
-                  label: const Text('רוצה יותר? שדרג מנוי'),
+                  label: const Text('פרסם עסק'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Theme.of(context).brightness == Brightness.dark 
               ? const Color(0xFF9C27B0) // סגול יפה
@@ -3934,66 +4054,21 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('שדרוג מנוי 🚀'),
+        title: const Text('פרסם את העסק שלך'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (currentLevel == -1) ...[
-              // ✅ משתמש אורח - יכול לשדרג לפרטי מנוי או עסקי
-              const Text('בחר סוג מנוי:'),
-              const SizedBox(height: 16),
+            // הצגת אפשרות פרסום עסק בלבד
               _buildUpgradeOption(
-                title: 'פרטי מנוי - 30₪/שנה',
-                description: '• 5 בקשות בחודש\n• טווח: 0-10 ק"מ + בונוסים\n• רואה רק בקשות חינם',
-                onTap: () {
-                  Navigator.pop(context);
-                  _updateSubscriptionType(UserType.personal, true, userProfile: userProfile);
-                },
-              ),
-              const SizedBox(height: 8),
-              _buildUpgradeOption(
-                title: 'עסקי מנוי - 70₪/שנה',
-                description: '• 10 בקשות בחודש\n• טווח: 0-50 ק"מ + בונוסים\n• רואה בקשות חינם ובתשלום\n• בחירת תחומי עיסוק',
+              title: 'הפרסום כולל:',
+              description: '• בחירת תחומי עיסוק\n• הגדרת מחירים\n• הגדרת מיקום\n• הגדרת טווח חשיפה\n• קידום\n• שירותים נלווים\n• ניהול עסק\n\n• עלות הפרסום: 90 ש"ח/שנה',
                 onTap: () {
                   Navigator.pop(context);
                   _updateSubscriptionType(UserType.business, true, userProfile: userProfile);
                 },
               ),
-            ] else if (currentLevel == 0) ...[
-              // פרטי חינם - יכול לשדרג לפרטי מנוי או עסקי
-              const Text('בחר סוג מנוי:'),
-              const SizedBox(height: 16),
-              _buildUpgradeOption(
-                title: 'פרטי מנוי - 30₪/שנה',
-                description: '• 5 בקשות בחודש\n• טווח: 0-10 ק"מ + בונוסים\n• רואה רק בקשות חינם',
-                onTap: () {
-                  Navigator.pop(context);
-                  _updateSubscriptionType(UserType.personal, true, userProfile: userProfile);
-                },
-              ),
-              const SizedBox(height: 8),
-              _buildUpgradeOption(
-                title: 'עסקי מנוי - 70₪/שנה',
-                description: '• 10 בקשות בחודש\n• טווח: 0-50 ק"מ + בונוסים\n• רואה בקשות חינם ובתשלום\n• בחירת תחומי עיסוק',
-                onTap: () {
-                  Navigator.pop(context);
-                  _updateSubscriptionType(UserType.business, true, userProfile: userProfile);
-                },
-              ),
-            ] else if (currentLevel == 1) ...[
-              // פרטי מנוי - יכול לשדרג לעסקי בלבד
-              const Text('שדרוג לעסקי מנוי:'),
-              const SizedBox(height: 16),
-              _buildUpgradeOption(
-                title: 'עסקי מנוי - 70₪/שנה',
-                description: '• 10 בקשות בחודש (במקום 5)\n• טווח: 0-50 ק"מ + בונוסים\n• רואה בקשות חינם ובתשלום\n• בחירת תחומי עיסוק',
-                onTap: () {
-                  Navigator.pop(context);
-                  _updateSubscriptionType(UserType.business, true, userProfile: userProfile);
-                },
-              ),
-            ] else if (currentLevel >= 2) ...[
+            if (currentLevel >= 2) ...[
               // עסקי מנוי - לא יכול לשדרג
               const Text('אין אפשרויות שדרוג זמינות'),
               const SizedBox(height: 16),
@@ -4517,6 +4592,96 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             backgroundColor: Colors.red,
           ),
         );
+      }
+    }
+  }
+
+  /// מחיקת משתמש אורח זמני והעברה למסך התחברות
+  Future<void> _deleteTemporaryGuestAndNavigateToAuth() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        // אם אין משתמש מחובר, פשוט מעביר למסך התחברות
+        if (mounted) {
+          Navigator.pushNamedAndRemoveUntil(
+            context,
+            '/auth',
+            (route) => false,
+          );
+        }
+        return;
+      }
+
+      // הצגת אינדיקטור טעינה
+      if (mounted) {
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const AlertDialog(
+            content: Row(
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(width: 16),
+                Text('מוחק חשבון...'),
+              ],
+            ),
+          ),
+        );
+      }
+
+      final userId = user.uid;
+
+      // מחיקה מקבילה של נתונים מ-Firestore ו-Storage
+      await Future.wait([
+        _deleteUserDataFromFirestore(userId),
+        _deleteUserImagesFromStorage(userId),
+        _clearLocalData(),
+      ]);
+
+      // מחיקת החשבון מ-Firebase Auth (אחרון)
+      await user.delete();
+
+      // סגירת דיאלוג הטעינה
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+
+      // חזרה למסך התחברות
+      if (mounted) {
+        Navigator.pushNamedAndRemoveUntil(
+          context,
+          '/auth',
+          (route) => false,
+        );
+      }
+    } catch (e) {
+      debugPrint('Error deleting temporary guest: $e');
+      
+      // סגירת דיאלוג הטעינה אם עדיין פתוח
+      if (mounted) {
+        Navigator.of(context).pop();
+      }
+      
+      // גם אם יש שגיאה, ננסה להתנתק ולהעביר למסך התחברות
+      try {
+        await AutoLoginService.logout();
+        if (mounted) {
+          Navigator.pushNamedAndRemoveUntil(
+            context,
+            '/auth',
+            (route) => false,
+          );
+        }
+      } catch (logoutError) {
+        debugPrint('Error during logout: $logoutError');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('שגיאה במחיקת החשבון. אנא נסה שוב.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     }
   }
@@ -5701,6 +5866,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         'filter_preferences', // קולקציה נוספת
         'likes', // קולקציה נוספת
         'notification_queue', // קולקציה נוספת
+        'appointments', // קולקציית תורים
       ];
 
       int totalDeleted = 0;
@@ -6030,17 +6196,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     // בדיקה לפי סוג המשתמש
     switch (userProfile.userType) {
       case UserType.guest:
-        // אם זה אורח זמני - הצג רק "אורח" בלי ימים
-        if (userProfile.isTemporaryGuest == true) {
+        // אורח ללא הגבלת זמן - תמיד הצג רק "אורח"
           return 'אורח';
-        }
-        final timeLeft = userProfile.guestTrialEndDate?.difference(DateTime.now()) ?? Duration.zero;
-        if (timeLeft.inDays > 0) {
-          return 'אורח (${timeLeft.inDays} ימים)';
-        } else {
-          // אם הזמן נגמר, עדיין הצג "אורח" - המעבר לפרטי יקרה אוטומטית
-          return 'אורח';
-        }
       case UserType.personal:
     if (userProfile.isSubscriptionActive) {
           return 'פרטי (מנוי)';
@@ -6068,12 +6225,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     // בדיקה לפי סוג המשתמש
     switch (userProfile.userType) {
       case UserType.guest:
-        final timeLeft = userProfile.guestTrialEndDate?.difference(DateTime.now()) ?? Duration.zero;
-        if (timeLeft.inDays > 0) {
-          return Theme.of(context).colorScheme.tertiary; // צהוב לאורח פעיל
-        } else {
-          return Colors.amber; // צהוב גם כשהזמן נגמר - המעבר יקרה אוטומטית
-        }
+        return Theme.of(context).colorScheme.tertiary; // צהוב לאורח (ללא הגבלת זמן)
       case UserType.personal:
         if (userProfile.isSubscriptionActive) {
           return Theme.of(context).colorScheme.primary; // כחול לפרטי מנוי
@@ -6223,7 +6375,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                       _showSubscriptionTypeDialog(userProfile);
                     },
                     icon: const Icon(Icons.upgrade),
-                    label: const Text('שדרג'),
+                    label: const Text('פרסם עסק'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Theme.of(context).colorScheme.primary,
                       foregroundColor: Theme.of(context).colorScheme.onPrimary,
@@ -6261,116 +6413,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     );
   }
 
-  // דיאלוג פירוט מנוי פרטי
-  void _showPersonalSubscriptionDetailsDialog(UserProfile userProfile) {
-    final l10n = AppLocalizations.of(context);
-    final expiryDate = userProfile.subscriptionExpiry != null 
-        ? '${userProfile.subscriptionExpiry!.day}/${userProfile.subscriptionExpiry!.month}/${userProfile.subscriptionExpiry!.year}'
-        : l10n.unknown;
-    
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(l10n.yourPersonalSubscriptionDetails),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              l10n.yourPersonalSubscriptionIncludes,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 16),
-            
-            // פרטי המנוי
-            _buildSubscriptionDetailItem(
-              icon: Icons.assignment,
-              title: l10n.requestsPerMonth(5),
-              description: l10n.publishUpToRequestsPerMonth(5),
-            ),
-            const SizedBox(height: 12),
-            
-            _buildSubscriptionDetailItem(
-              icon: Icons.location_on,
-              title: l10n.rangeWithBonuses('0-5'),
-              description: l10n.exposureUpToKm(5),
-            ),
-            const SizedBox(height: 12),
-            
-            _buildSubscriptionDetailItem(
-              icon: Icons.visibility,
-              title: l10n.seesOnlyFreeRequests,
-              description: l10n.accessToFreeRequestsOnly,
-            ),
-            const SizedBox(height: 12),
-            
-            _buildSubscriptionDetailItem(
-              icon: Icons.payment,
-              title: l10n.paymentPerYear(30),
-              description: l10n.oneTimePaymentForFullYear,
-            ),
-            const SizedBox(height: 16),
-            
-            // סטטוס המנוי
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Theme.of(context).colorScheme.primary),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.check_circle, color: Theme.of(context).colorScheme.primary, size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      l10n.yourSubscriptionActiveUntil(expiryDate),
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onPrimaryContainer,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            
-            // כפתור שדרוג - רק אם לא משתמש אורח
-            if (userProfile.userType != UserType.guest) ...[
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.pop(context);
-                  _showSubscriptionTypeDialog(userProfile);
-                },
-                icon: const Icon(Icons.upgrade),
-                label: const Text('שדרג לעסקי מנוי'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Theme.of(context).colorScheme.primary,
-                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-              ),
-            ),
-            ],
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('סגור'),
-          ),
-        ],
-      ),
-    );
-  }
-
   // דיאלוג פירוט מנוי עסקי
   void _showGuestSubscriptionDetailsDialog(UserProfile userProfile) {
     // אם זה אורח זמני - הצג הודעה שונה
@@ -6381,7 +6423,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         builder: (context) => AlertDialog(
           title: const Text('שלום אורח'),
           content: const Text(
-            'על מנת שתוכל ליצור בקשות ולפנות למבקשי שירות ולעדכן תחומי עיסוק, עליך להירשם.',
+            'על מנת שתוכל לפרסם בקשות שירות/ לפרסם עסק, עליך להירשם.',
           ),
           actions: [
             TextButton(
@@ -6395,27 +6437,11 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               },
               child: Text(l10n.register),
             ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.pop(context); // סגירת הדיאלוג הנוכחי
-                _showSubscriptionTypeDialog(userProfile); // פתיחת דיאלוג בחירת סוג מנוי
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Theme.of(context).colorScheme.primary,
-                foregroundColor: Theme.of(context).colorScheme.onPrimary,
-              ),
-              child: const Text('שדרג מנוי'),
-            ),
           ],
         ),
       );
       return;
     }
-    
-    // חישוב ימים נותרים
-    final now = DateTime.now();
-    final trialEndDate = userProfile.guestTrialEndDate ?? now.add(const Duration(days: 30));
-    final daysRemaining = trialEndDate.difference(now).inDays;
     
     final l10n = AppLocalizations.of(context);
     final businessAreas = userProfile.businessCategories?.map((c) => c.categoryDisplayName).join(', ') ?? l10n.noBusinessAreasSelected;
@@ -6423,15 +6449,15 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(l10n.yourGuestSubscriptionDetails),
+        title: const Text('מצב אורח'),
         content: SingleChildScrollView(
           child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              l10n.yourTrialPeriodIncludes,
-              style: const TextStyle(
+            const Text(
+              'אתה משתמש אורח ללא הגבלת זמן',
+              style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
@@ -6465,66 +6491,30 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               title: l10n.selectedBusinessAreas,
               description: l10n.yourBusinessAreas(businessAreas),
             ),
-            const SizedBox(height: 12),
-            
-            _buildSubscriptionDetailItem(
-              icon: Icons.schedule,
-              title: l10n.trialPeriodDays(30),
-              description: l10n.fullAccessToAllFeatures,
-            ),
             const SizedBox(height: 16),
             
             // סטטוס המנוי
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: daysRemaining > 0 ? Theme.of(context).colorScheme.tertiaryContainer : Theme.of(context).colorScheme.errorContainer,
+                color: Theme.of(context).colorScheme.tertiaryContainer,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: daysRemaining > 0 ? Theme.of(context).colorScheme.tertiary : Theme.of(context).colorScheme.error),
+                border: Border.all(color: Theme.of(context).colorScheme.tertiary),
               ),
               child: Row(
                 children: [
                   Icon(
-                    daysRemaining > 0 ? Icons.schedule : Icons.warning,
-                    color: daysRemaining > 0 ? Theme.of(context).colorScheme.tertiary : Theme.of(context).colorScheme.error,
+                    Icons.check_circle,
+                    color: Theme.of(context).colorScheme.tertiary,
                     size: 20,
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      daysRemaining > 0 
-                          ? l10n.yourTrialActiveForDays(daysRemaining)
-                          : l10n.subscriptionExpiredSwitchToFree,
+                      'אורח פעיל ללא הגבלת זמן',
                       style: TextStyle(
-                        color: daysRemaining > 0 ? Theme.of(context).colorScheme.onTertiaryContainer : Theme.of(context).colorScheme.onErrorContainer,
+                        color: Theme.of(context).colorScheme.onTertiaryContainer,
                         fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            
-            // הודעה על המעבר האוטומטי
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.blue[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue[200]!),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.info, color: Colors.blue[700], size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      l10n.afterTrialAutoSwitchToFree,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.primary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ),
@@ -6548,7 +6538,50 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               backgroundColor: Theme.of(context).colorScheme.primary,
               foregroundColor: Theme.of(context).colorScheme.onPrimary,
             ),
-            child: Text(l10n.upgradeSubscription),
+            child: const Text('פרסם עסק'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // דיאלוג פירוט מנוי פרטי
+  void _showPersonalSubscriptionDetailsDialog(UserProfile userProfile) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('כמשתמש פרטי אתה יכול'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '• לפרסם בקשות שירות (חינם/בתשלום)',
+                style: TextStyle(fontSize: 14),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'מכל התחומים בשכונה שלך ובכל מקום בארץ.',
+                style: TextStyle(fontSize: 14),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                '• לחפש עסקים בשכונה ובכל מקום בארץ.',
+                style: TextStyle(fontSize: 14),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                '• ליצור הזמנות (אפשרות למשלוח / אפשרות לתור).',
+                style: TextStyle(fontSize: 14),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('הבנתי'),
           ),
         ],
       ),
@@ -6565,15 +6598,15 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(l10n.yourBusinessSubscriptionDetails),
+        title: const Text('פרסום עסק'),
         content: SingleChildScrollView(
           child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              l10n.yourBusinessSubscriptionIncludes,
-              style: const TextStyle(
+            const Text(
+              'הפרסום כולל:',
+              style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
@@ -6582,37 +6615,58 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
             
             // פרטי המנוי
             _buildSubscriptionDetailItem(
-              icon: Icons.assignment,
-              title: l10n.requestsPerMonth(10),
-              description: l10n.publishUpToRequestsPerMonth(10),
-            ),
-            const SizedBox(height: 12),
-            
-            _buildSubscriptionDetailItem(
-              icon: Icons.location_on,
-              title: l10n.rangeWithBonuses('0-50'),
-              description: l10n.exposureUpToKm(50),
-            ),
-            const SizedBox(height: 12),
-            
-            _buildSubscriptionDetailItem(
-              icon: Icons.visibility,
-              title: l10n.seesFreeAndPaidRequests,
-              description: l10n.accessToAllRequestTypes,
-            ),
-            const SizedBox(height: 12),
-            
-            _buildSubscriptionDetailItem(
               icon: Icons.work,
-              title: l10n.selectedBusinessAreas,
+              title: 'בחירת תחומי עיסוק',
               description: l10n.yourBusinessAreas(businessAreas),
             ),
             const SizedBox(height: 12),
             
             _buildSubscriptionDetailItem(
+              icon: Icons.attach_money,
+              title: 'הגדרת מחירים',
+              description: 'הגדרת מחירים לשירותים שלך',
+            ),
+            const SizedBox(height: 12),
+            
+            _buildSubscriptionDetailItem(
+              icon: Icons.location_on,
+              title: 'הגדרת מיקום',
+              description: 'הגדרת מיקום העסק שלך',
+            ),
+            const SizedBox(height: 12),
+            
+            _buildSubscriptionDetailItem(
+              icon: Icons.visibility,
+              title: 'הגדרת טווח חשיפה',
+              description: 'הגדרת טווח החשיפה של העסק',
+            ),
+            const SizedBox(height: 12),
+            
+            _buildSubscriptionDetailItem(
+              icon: Icons.trending_up,
+              title: 'קידום',
+              description: 'קידום העסק שלך בפלטפורמה',
+            ),
+            const SizedBox(height: 12),
+            
+            _buildSubscriptionDetailItem(
+              icon: Icons.build,
+              title: 'שירותים נלווים',
+              description: 'ניהול שירותים נלווים',
+            ),
+            const SizedBox(height: 12),
+            
+            _buildSubscriptionDetailItem(
+              icon: Icons.business,
+              title: 'ניהול עסק',
+              description: 'כלי ניהול מתקדמים לעסק',
+            ),
+            const SizedBox(height: 16),
+            
+            _buildSubscriptionDetailItem(
               icon: Icons.payment,
-              title: l10n.paymentPerYear(70),
-              description: l10n.oneTimePaymentForFullYear,
+              title: 'עלות הפרסום: 90 ש"ח/שנה',
+              description: 'תשלום חד-פעמי לשנה מלאה',
             ),
             const SizedBox(height: 16),
             
@@ -6763,66 +6817,33 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       return;
     }
 
-    final l10n = AppLocalizations.of(context);
+    // בדיקה אם המשתמש הוא אורח זמני
+    final isTemporaryGuest = userProfile.isTemporaryGuest == true;
+    // בדיקה אם המשתמש הוא פרטי מנוי (יש מנוי פעיל אבל אין תחומי עיסוק)
+    final isPrivateUser = userProfile.isSubscriptionActive && 
+        (userProfile.businessCategories == null || userProfile.businessCategories!.isEmpty);
+    
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(l10n.selectSubscriptionType),
+        title: const Text('פרסם את העסק שלך'),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-            Text(l10n.chooseYourSubscriptionType),
-            const SizedBox(height: 16),
-            
-            // פרטי חינם - רק אם המשתמש לא במנוי
-            if (!userProfile.isSubscriptionActive) ...[
+            // עסקי מנוי בלבד
               _buildSubscriptionOption(
-                title: l10n.privateFree,
-                description: l10n.privateSubscriptionFeatures,
-                isSelected: true,
-                onTap: () => _updateSubscriptionType(UserType.personal, false, userProfile: userProfile),
-              ),
-              const SizedBox(height: 8),
-              // חץ למטה
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.arrow_downward, color: Theme.of(context).colorScheme.onSurfaceVariant, size: 24),
-                ],
-              ),
-              const SizedBox(height: 8),
-            ],
-            
-            // פרטי מנוי - רק אם המשתמש לא עסקי מנוי
-            if (!(userProfile.isSubscriptionActive && userProfile.businessCategories != null && userProfile.businessCategories!.isNotEmpty)) ...[
-              _buildSubscriptionOption(
-                title: '${l10n.privateSubscription} - 30₪/שנה',
-                description: l10n.privatePaidSubscriptionFeatures,
-                isSelected: userProfile.isSubscriptionActive && (userProfile.businessCategories == null || userProfile.businessCategories!.isEmpty),
-                onTap: () {
-                  debugPrint('🔍 User selected PERSONAL subscription');
-                  _updateSubscriptionType(UserType.personal, true, userProfile: userProfile);
-                },
-              ),
-              const SizedBox(height: 8),
-              // חץ למטה
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.arrow_downward, color: Theme.of(context).colorScheme.onSurfaceVariant, size: 24),
-                ],
-              ),
-              const SizedBox(height: 8),
-            ],
-            
-            // עסקי מנוי - תמיד זמין
-            _buildSubscriptionOption(
-              title: '${l10n.businessSubscription} - 70₪/שנה',
-              description: l10n.businessSubscriptionFeatures,
+              title: 'הפרסום כולל:',
+              description: '• בחירת תחומי עיסוק\n• הגדרת מחירים\n• הגדרת מיקום\n• הגדרת טווח חשיפה\n• קידום\n• שירותים נלווים\n• ניהול עסק\n\n• עלות הפרסום: 90 ש"ח/שנה',
               isSelected: userProfile.isSubscriptionActive && (userProfile.businessCategories != null && userProfile.businessCategories!.isNotEmpty),
               onTap: () {
                 debugPrint('🔍 User selected BUSINESS subscription');
+                // אם זה אורח זמני - לא להציג דיאלוג בחירת תחומי עיסוק
+                if (isTemporaryGuest) {
+                  Navigator.pop(context);
+                  return;
+                }
+                Navigator.pop(context);
                 _showBusinessCategoriesSelectionDialog(userProfile);
               },
             ),
@@ -6830,6 +6851,33 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
           ),
         ),
         actions: [
+          // אם זה אורח זמני - הוסף לחצן "לפרסום העסק עליך להירשם" משמאל ל"ביטול"
+          if (isTemporaryGuest)
+            TextButton(
+              onPressed: () async {
+                Navigator.pop(context);
+                await _deleteTemporaryGuestAndNavigateToAuth();
+              },
+              child: const Text('לפרסום העסק עליך להירשם'),
+            ),
+          // אם זה משתמש פרטי - הוסף לחצן "פרסם עכשיו"
+          if (isPrivateUser)
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => const BusinessManagementScreen(),
+                  ),
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).colorScheme.primary,
+                foregroundColor: Theme.of(context).colorScheme.onPrimary,
+              ),
+              child: const Text('פרסם עכשיו'),
+            ),
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('ביטול'),
@@ -8836,6 +8884,26 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     final editController = TextEditingController(text: _displayNameController.text);
     String? tempError;
     
+    // טעינת פרופיל המשתמש כדי לבדוק אם זה משתמש עסקי מנוי
+    UserProfile? currentUserProfile;
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        if (userDoc.exists) {
+          currentUserProfile = UserProfile.fromFirestore(userDoc);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading user profile: $e');
+    }
+    
+    final isBusinessSubscriber = currentUserProfile?.userType == UserType.business && 
+                                currentUserProfile?.isSubscriptionActive == true;
+    
     return showDialog(
       context: context,
       builder: (context) {
@@ -8856,7 +8924,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                       });
                     },
                     decoration: InputDecoration(
-                      hintText: 'הזן שם פרטי ומשפחה/חברה/עסק/כינוי',
+                      hintText: isBusinessSubscriber 
+                          ? 'הזן שם העסק/חברה/כינוי'
+                          : 'הזן שם פרטי ומשפחה/חברה/עסק/כינוי',
                       hintStyle: const TextStyle(
                         color: Colors.grey,
                         fontSize: 16,

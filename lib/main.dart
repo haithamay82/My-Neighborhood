@@ -17,9 +17,7 @@ import 'screens/profile_screen.dart';
 import 'screens/yoki_style_auth_screen.dart';
 import 'screens/tutorial_center_screen.dart';
 import 'screens/new_request_screen.dart';
-import 'screens/new_ad_screen.dart';
 import 'screens/my_requests_screen.dart';
-import 'screens/my_ads_screen.dart';
 import 'screens/admin_payments_screen.dart';
 import 'services/admin_auth_service.dart';
 import 'l10n/app_localizations.dart';
@@ -1414,24 +1412,11 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver, AudioMix
                       .snapshots()
                   : null,
               builder: (context, snapshot) {
-                bool canCreateAd = false;
-                if (snapshot.hasData && snapshot.data!.exists) {
-                  final userData = snapshot.data!.data() as Map<String, dynamic>;
-                  final userType = userData['userType'] as String? ?? 'personal';
-                  final isSubscriptionActive = userData['isSubscriptionActive'] as bool? ?? false;
-                  final businessCategories = userData['businessCategories'] as List?;
-                  
-                  // Guest עם קטגוריות או Business Subscriber
-                  canCreateAd = (userType == 'guest' && businessCategories != null && businessCategories.isNotEmpty) ||
-                               (userType == 'business' && isSubscriptionActive);
-                }
-                
                 return IndexedStack(
               index: _selectedIndex,
               children: [
                 const HomeScreen(),
                 const MyRequestsScreen(),
-                    if (canCreateAd) const MyAdsScreen(),
                 const NotificationsScreen(),
                 const ProfileScreen(),
                 if (AdminAuthService.isCurrentUserAdmin()) const AdminPaymentsScreen(),
@@ -1447,25 +1432,13 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver, AudioMix
                       .snapshots()
                   : null,
               builder: (context, snapshot) {
-                bool canCreateAd = false;
-                if (snapshot.hasData && snapshot.data!.exists) {
-                  final userData = snapshot.data!.data() as Map<String, dynamic>;
-                  final userType = userData['userType'] as String? ?? 'personal';
-                  final isSubscriptionActive = userData['isSubscriptionActive'] as bool? ?? false;
-                  final businessCategories = userData['businessCategories'] as List?;
-                  
-                  // Guest עם קטגוריות או Business Subscriber
-                  canCreateAd = (userType == 'guest' && businessCategories != null && businessCategories.isNotEmpty) ||
-                               (userType == 'business' && isSubscriptionActive);
-                }
-                
                 return BottomNavigationBar(
               type: BottomNavigationBarType.fixed,
               currentIndex: _selectedIndex,
               onTap: (index) {
                 setState(() => _selectedIndex = index);
                 // איפוס ספירת תשלומים ממתינים כאשר המנהל נכנס למסך ניהול תשלומים
-                    final adminIndex = canCreateAd ? 5 : 4;
+                    final adminIndex = 4;
                     if (AdminAuthService.isCurrentUserAdmin() && index == adminIndex) {
                   _clearPendingPaymentsCount();
                 }
@@ -1481,11 +1454,6 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver, AudioMix
                   icon: const Icon(Icons.assignment),
                   label: l10n.myRequestsMenu,
                     ),
-                    if (canCreateAd)
-                      BottomNavigationBarItem(
-                        icon: const Icon(Icons.campaign),
-                        label: 'מודעות שלי',
-                ),
                 BottomNavigationBarItem(
                   icon: StreamBuilder<int>(
                     stream: FirebaseAuth.instance.currentUser != null 
@@ -1578,50 +1546,10 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver, AudioMix
                             .snapshots()
                         : null,
                     builder: (context, snapshot) {
-                      bool canCreateAd = false;
-                      if (snapshot.hasData && snapshot.data!.exists) {
-                        final userData = snapshot.data!.data() as Map<String, dynamic>;
-                        final userType = userData['userType'] as String? ?? 'personal';
-                        final isSubscriptionActive = userData['isSubscriptionActive'] as bool? ?? false;
-                        final businessCategories = userData['businessCategories'] as List?;
-                        
-                        // Guest עם קטגוריות או Business Subscriber
-                        canCreateAd = (userType == 'guest' && businessCategories != null && businessCategories.isNotEmpty) ||
-                                     (userType == 'business' && isSubscriptionActive);
-                      }
-                      
                       return Column(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          // כפתור "מודעה חדשה" - רק אם המשתמש יכול
-                          if (canCreateAd) ...[
-                            Container(
-                              margin: const EdgeInsets.only(bottom: 12),
-                    decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(30),
-                                color: const Color(0xFF4CAF50), // ירוק
-                                border: Border.all(
-                                  color: const Color(0xFF2196F3),
-                                  width: 3,
-                                ),
-                              ),
-                              child: FloatingActionButton(
-                                heroTag: "new_ad",
-                                onPressed: () {
-                                  debugPrint('🔍 New Ad button pressed!');
-                                  _showNewAdDialog();
-                                },
-                                backgroundColor: Colors.transparent,
-                                foregroundColor: Colors.white,
-                                elevation: 0,
-                                child: const Icon(
-                                  Icons.campaign_rounded, // אייקון מודעה
-                                  size: 28,
-                                ),
-                              ),
-                            ),
-                          ],
                           // כפתור "בקשה חדשה"
                           Container(
                             decoration: BoxDecoration(
@@ -1728,56 +1656,6 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver, AudioMix
         );
       }
     }
-  }
-
-  void _showNewAdDialog() async {
-    // הוספת צליל לכפתור
-    await AudioService().playSound(AudioEvent.buttonClick);
-    
-    debugPrint('🔍 _showNewAdDialog: Starting');
-    
-    // בדיקה אם המשתמש הוא אורח זמני
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      try {
-        final userDoc = await FirebaseFirestore.instance
-            .collection('users')
-            .doc(user.uid)
-            .get();
-        
-        if (userDoc.exists) {
-          final userData = userDoc.data()!;
-          final isTemporaryGuest = userData['isTemporaryGuest'] ?? false;
-          
-          if (isTemporaryGuest) {
-            debugPrint('🔍 _showNewAdDialog: Temporary guest detected, blocking ad creation');
-            if (!mounted) return;
-            final l10n = AppLocalizations.of(context);
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(l10n.pleaseRegisterFirst),
-                backgroundColor: Colors.orange,
-                duration: const Duration(seconds: 3),
-              ),
-            );
-            return;
-          }
-        }
-      } catch (e) {
-        debugPrint('🔍 _showNewAdDialog: Error checking temporary guest status: $e');
-      }
-    }
-    
-    // Guard context usage after async gap
-    if (!mounted) return;
-    
-    debugPrint('🔍 _showNewAdDialog: Can create ad, navigating to NewAdScreen');
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => const NewAdScreen(),
-      ),
-    );
   }
 
   void _showNewRequestDialog() async {
