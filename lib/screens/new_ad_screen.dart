@@ -2021,41 +2021,41 @@ class _NewAdScreenState extends State<NewAdScreen> with NetworkAwareMixin {
                                   children: [
                                     Expanded(
                                       child: TextFormField(
-                                        controller: _priceController,
+                                  controller: _priceController,
                                         enabled: !_isCustomPrice,
-                                        decoration: InputDecoration(
-                                          labelText: 'מחיר',
-                                          hintText: 'לדוגמה: 100',
-                                          border: const OutlineInputBorder(),
-                                          suffixText: '₪',
-                                        ),
-                                        keyboardType: TextInputType.numberWithOptions(decimal: true),
-                                        onChanged: (value) {
-                                          if (value.isEmpty) {
-                                            setState(() {
-                                              _price = null;
-                                            });
-                                          } else {
-                                            final parsedPrice = double.tryParse(value);
-                                            setState(() {
-                                              _price = parsedPrice;
+                                  decoration: InputDecoration(
+                                    labelText: 'מחיר',
+                                    hintText: 'לדוגמה: 100',
+                                    border: const OutlineInputBorder(),
+                                    suffixText: '₪',
+                                  ),
+                                  keyboardType: TextInputType.numberWithOptions(decimal: true),
+                                  onChanged: (value) {
+                                    if (value.isEmpty) {
+                                      setState(() {
+                                        _price = null;
+                                      });
+                                    } else {
+                                      final parsedPrice = double.tryParse(value);
+                                      setState(() {
+                                        _price = parsedPrice;
                                               // אם המשתמש מזין מחיר, בטל את הצ'קבוקס
                                               if (parsedPrice != null && _isCustomPrice) {
                                                 _isCustomPrice = false;
                                               }
-                                            });
-                                          }
-                                        },
-                                        validator: (value) {
+                                      });
+                                    }
+                                  },
+                                  validator: (value) {
                                           if (!_isCustomPrice && value != null && value.isNotEmpty) {
-                                            final parsedPrice = double.tryParse(value);
-                                            if (parsedPrice == null || parsedPrice < 0) {
-                                              return 'אנא הזן מחיר תקין';
-                                            }
-                                          }
-                                          return null;
-                                        },
-                                      ),
+                                      final parsedPrice = double.tryParse(value);
+                                      if (parsedPrice == null || parsedPrice < 0) {
+                                        return 'אנא הזן מחיר תקין';
+                                      }
+                                    }
+                                    return null;
+                                  },
+                                ),
                                     ),
                                     const SizedBox(width: 16),
                                     Checkbox(
