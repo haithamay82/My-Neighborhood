@@ -2069,6 +2069,18 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
                       updateData['phoneNumber'] = phoneNumber;
                     }
                     
+                    // שמירת מיקום העסק
+                    if (_selectedLatitude != null && _selectedLongitude != null) {
+                      updateData['latitude'] = _selectedLatitude;
+                      updateData['longitude'] = _selectedLongitude;
+                      if (_selectedAddress != null && _selectedAddress!.isNotEmpty) {
+                        updateData['village'] = _selectedAddress;
+                      }
+                      if (_exposureRadius != null) {
+                        updateData['exposureRadius'] = _exposureRadius;
+                      }
+                    }
+                    
                     if (updateData.length > 1) { // יותר מ-updatedAt בלבד
                       await FirebaseFirestore.instance
                           .collection('users')
@@ -2518,6 +2530,18 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
                     // שמירת מספר הטלפון
                     if (finalPhone.isNotEmpty) {
                       updateData['phoneNumber'] = finalPhone;
+                    }
+                    
+                    // שמירת מיקום העסק
+                    if (_selectedLatitude != null && _selectedLongitude != null) {
+                      updateData['latitude'] = _selectedLatitude;
+                      updateData['longitude'] = _selectedLongitude;
+                      if (_selectedAddress != null && _selectedAddress!.isNotEmpty) {
+                        updateData['village'] = _selectedAddress;
+                      }
+                      if (_exposureRadius != null) {
+                        updateData['exposureRadius'] = _exposureRadius;
+                      }
                     }
                     
                     if (updateData.length > 1) { // יותר מ-updatedAt בלבד

@@ -880,6 +880,23 @@ paymeWebhookApp.post('/', async (req, res) => {
         console.log('📋 Found business categories in payment: ' + JSON.stringify(paymentRequestCategories));
       }
       
+      // שמירת מיקום העסק הקיים (אם יש) - כדי לא לאבד אותו בתהליך האישור
+      const locationData = {};
+      if (userDoc.exists) {
+        const userProfileData = userDoc.data();
+        if (userProfileData.latitude != null && userProfileData.longitude != null) {
+          locationData.latitude = userProfileData.latitude;
+          locationData.longitude = userProfileData.longitude;
+          console.log('📍 Preserving existing location: ' + userProfileData.latitude + ', ' + userProfileData.longitude);
+        }
+        if (userProfileData.village != null) {
+          locationData.village = userProfileData.village;
+        }
+        if (userProfileData.exposureRadius != null) {
+          locationData.exposureRadius = userProfileData.exposureRadius;
+        }
+      }
+      
       // Prepare update data based on subscription type
       const updateData = {
         isSubscriptionActive: true,
@@ -888,6 +905,7 @@ paymeWebhookApp.post('/', async (req, res) => {
         approvedPaymentId: transaction_id,
         approvedAt: admin.firestore.Timestamp.now(),
         paymentMethod: 'payme',
+        ...locationData, // הוספת מיקום העסק הקיים
       };
       
       if (subscriptionType === 'business') {

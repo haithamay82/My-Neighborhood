@@ -1105,15 +1105,29 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         return;
       }
 
+      // בדיקה אם המשתמש הוא עסקי מנוי
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      
+      final isBusinessUser = userDoc.exists && 
+          userDoc.data()?['userType'] == 'business' &&
+          userDoc.data()?['isSubscriptionActive'] == true;
+      
+      final locationTitle = isBusinessUser ? 'מחיקת מיקום העסק' : 'מחיקת מיקום קבוע';
+      final locationMessage = isBusinessUser 
+          ? 'האם אתה בטוח שברצונך למחוק את מיקום העסק?\n\n'
+            'לאחר המחיקה, תופיע במפות רק כששירות המיקום פעיל בטלפון.'
+          : 'האם אתה בטוח שברצונך למחוק את המיקום הקבוע?\n\n'
+            'לאחר המחיקה, תופיע במפות רק כששירות המיקום פעיל בטלפון.';
+
       // הצגת דיאלוג אישור
       final bool? shouldDelete = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('מחיקת מיקום קבוע'),
-          content: const Text(
-            'האם אתה בטוח שברצונך למחוק את המיקום הקבוע?\n\n'
-            'לאחר המחיקה, תופיע במפות רק כששירות המיקום פעיל בטלפון.',
-          ),
+          title: Text(locationTitle),
+          content: Text(locationMessage),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -2913,7 +2927,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                           Icon(Icons.location_on, color: Theme.of(context).colorScheme.primary),
                           const SizedBox(width: 8),
                           Text(
-                            l10n.fixedLocation,
+                            userProfile.userType == UserType.business && userProfile.isSubscriptionActive
+                                ? 'מיקום העסק'
+                                : l10n.fixedLocation,
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
                           const Spacer(),

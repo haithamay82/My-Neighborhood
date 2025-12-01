@@ -178,6 +178,23 @@ class ManualPaymentService {
         debugPrint('📋 Found business categories in payment request: $paymentRequestCategories');
       }
       
+      // שמירת מיקום העסק הקיים (אם יש) - כדי לא לאבד אותו בתהליך האישור
+      Map<String, dynamic> locationData = {};
+      if (userDoc.exists) {
+        final userData = userDoc.data()!;
+        if (userData['latitude'] != null && userData['longitude'] != null) {
+          locationData['latitude'] = userData['latitude'];
+          locationData['longitude'] = userData['longitude'];
+          debugPrint('📍 Preserving existing location: ${userData['latitude']}, ${userData['longitude']}');
+        }
+        if (userData['village'] != null) {
+          locationData['village'] = userData['village'];
+        }
+        if (userData['exposureRadius'] != null) {
+          locationData['exposureRadius'] = userData['exposureRadius'];
+        }
+      }
+      
       // עדכון לפי סוג המנוי שביקש
       Map<String, dynamic> updateData = {
         'isSubscriptionActive': true,
@@ -185,6 +202,7 @@ class ManualPaymentService {
         'subscriptionExpiry': Timestamp.fromDate(subscriptionExpiry),
         'approvedPaymentId': paymentId,
         'approvedAt': Timestamp.now(),
+        ...locationData, // הוספת מיקום העסק הקיים
       };
       
       if (requestedSubscriptionType == 'business') {
@@ -525,6 +543,23 @@ class ManualPaymentService {
         currentBusinessCategories = List<String>.from(userData['businessCategories'] ?? []);
       }
       
+      // שמירת מיקום העסק הקיים (אם יש) - כדי לא לאבד אותו בתהליך האישור
+      Map<String, dynamic> locationData = {};
+      if (userDoc.exists) {
+        final userData = userDoc.data()!;
+        if (userData['latitude'] != null && userData['longitude'] != null) {
+          locationData['latitude'] = userData['latitude'];
+          locationData['longitude'] = userData['longitude'];
+          debugPrint('📍 Preserving existing location: ${userData['latitude']}, ${userData['longitude']}');
+        }
+        if (userData['village'] != null) {
+          locationData['village'] = userData['village'];
+        }
+        if (userData['exposureRadius'] != null) {
+          locationData['exposureRadius'] = userData['exposureRadius'];
+        }
+      }
+      
       // עדכון לפי סוג המנוי שביקש
       Map<String, dynamic> updateData = {
         'isSubscriptionActive': true,
@@ -532,6 +567,7 @@ class ManualPaymentService {
         'subscriptionExpiry': Timestamp.fromDate(subscriptionExpiry),
         'approvedAt': Timestamp.now(),
         'approvedPaymentId': paymentQuery.docs.isNotEmpty ? paymentQuery.docs.first.id : null,
+        ...locationData, // הוספת מיקום העסק הקיים
       };
       
       if (requestedSubscriptionType == 'business') {

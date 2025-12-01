@@ -237,6 +237,23 @@ class PayMeWebhookHandler {
         currentBusinessCategories = List<String>.from(userData['businessCategories'] ?? []);
       }
       
+      // שמירת מיקום העסק הקיים (אם יש) - כדי לא לאבד אותו בתהליך האישור
+      Map<String, dynamic> locationData = {};
+      if (userDoc.exists) {
+        final userData = userDoc.data()!;
+        if (userData['latitude'] != null && userData['longitude'] != null) {
+          locationData['latitude'] = userData['latitude'];
+          locationData['longitude'] = userData['longitude'];
+          debugPrint('📍 Preserving existing location: ${userData['latitude']}, ${userData['longitude']}');
+        }
+        if (userData['village'] != null) {
+          locationData['village'] = userData['village'];
+        }
+        if (userData['exposureRadius'] != null) {
+          locationData['exposureRadius'] = userData['exposureRadius'];
+        }
+      }
+      
       // Prepare update data
       final updateData = <String, dynamic>{
         'isSubscriptionActive': true,
@@ -245,6 +262,7 @@ class PayMeWebhookHandler {
         'approvedPaymentId': transactionId,
         'approvedAt': Timestamp.now(),
         'paymentMethod': 'payme',
+        ...locationData, // הוספת מיקום העסק הקיים
       };
       
       if (subscriptionType == 'business') {
