@@ -287,12 +287,12 @@ class _EditRequestScreenState extends State<EditRequestScreen> {
               },
             );
           } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(l10n.cameraAccessPermissionRequired),
-                duration: Duration(seconds: 2),
-              ),
-            );
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(l10n.cameraAccessPermissionRequired),
+              duration: Duration(seconds: 2),
+            ),
+          );
           }
         }
         return;

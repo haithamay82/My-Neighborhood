@@ -683,8 +683,9 @@ class _MyRequestsScreenState extends State<MyRequestsScreen> {
     debugPrint('🗺️ latitude: ${request.latitude}');
     debugPrint('🗺️ longitude: ${request.longitude}');
     
-    // אם המשתמש בחר "כן, כל נותני השירות באיזור X"
-    if (request.showToProvidersOutsideRange == true && request.latitude != null) {
+    // אם המשתמש בחר "כן, כל נותני השירות באיזור X" או לא בחר (null = ברירת מחדל)
+    // רק אם המשתמש בחר במפורש "לא" (false), לא נציג את הפוליגון
+    if (request.showToProvidersOutsideRange != false && request.latitude != null) {
       final region = getGeographicRegion(request.latitude);
       debugPrint('🗺️ Region determined: $region');
       
@@ -716,8 +717,8 @@ class _MyRequestsScreenState extends State<MyRequestsScreen> {
       }
     } else {
       debugPrint('🗺️ ⚠️ Conditions not met for polygon creation');
-      if (request.showToProvidersOutsideRange != true) {
-        debugPrint('🗺️   Reason: showToProvidersOutsideRange is not true (value: ${request.showToProvidersOutsideRange})');
+      if (request.showToProvidersOutsideRange == false) {
+        debugPrint('🗺️   Reason: showToProvidersOutsideRange is false (user explicitly chose "no")');
       }
       if (request.latitude == null) {
         debugPrint('🗺️   Reason: latitude is null');
@@ -1997,38 +1998,38 @@ class _MyRequestsScreenState extends State<MyRequestsScreen> {
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
-                      children: [
+                children: [
                         Icon(Icons.map, size: 16, color: Theme.of(context).colorScheme.onPrimary),
-                        const SizedBox(width: 4),
-                        Text(
-                          l10n.mapOfRelevantHelpers,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
+                  const SizedBox(width: 4),
+                  Text(
+                        l10n.mapOfRelevantHelpers,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
                             color: Theme.of(context).colorScheme.onPrimary,
-                          ),
-                        ),
-                        const Spacer(),
-                        IconButton(
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
                           icon: Icon(Icons.fullscreen, size: 16, color: Theme.of(context).colorScheme.onPrimary),
-                          onPressed: () async {
-                            // נפתח מפה במסך מלא עם אותם עוזרים
-                            final helpers = await _loadRelevantHelpersForMap(request);
-                            // Guard context usage after async gap
-                            if (!context.mounted) return;
-                            _openFullScreenMap(context, request, helpers);
-                          },
-                          tooltip: AppLocalizations.of(context).openFullScreen,
-                        ),
-                        IconButton(
+                    onPressed: () async {
+                      // נפתח מפה במסך מלא עם אותם עוזרים
+                      final helpers = await _loadRelevantHelpersForMap(request);
+                          // Guard context usage after async gap
+                          if (!context.mounted) return;
+                      _openFullScreenMap(context, request, helpers);
+                    },
+                    tooltip: AppLocalizations.of(context).openFullScreen,
+                  ),
+                  IconButton(
                           icon: Icon(Icons.refresh, size: 16, color: Theme.of(context).colorScheme.onPrimary),
-                          onPressed: () {
-                            // רענון המפה
-                            setState(() {});
-                          },
-                          tooltip: 'רענון מפה',
-                        ),
-                      ],
+                    onPressed: () {
+                      // רענון המפה
+                      setState(() {});
+                    },
+                    tooltip: 'רענון מפה',
+                  ),
+                ],
                     ),
                   );
                 },

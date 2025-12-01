@@ -1723,6 +1723,24 @@ class _YokiStyleAuthScreenState extends State<YokiStyleAuthScreen>
     setState(() => _isLoading = true);
     try {
       final user = await GoogleAuthService.signInWithGoogle();
+      
+      // ב-web, אם יש redirect, הפונקציה מחזירה null כי המשתמש יעבור לדף Google
+      if (kIsWeb && user == null) {
+        // בדיקה אם יש redirect result (אחרי חזרה מ-Google)
+        // אם אין, זה אומר שהמשתמש עובר לדף Google עכשיו
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('מעביר לדף Google להתחברות...'),
+              backgroundColor: Colors.blue,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+        setState(() => _isLoading = false);
+        return; // נצא מהפונקציה כי המשתמש יעבור לדף Google
+      }
+      
       if (user != null) {
         // Firebase Auth כבר מטפל בבדיקת אימייל קיים
         // אם יש משתמש עם אותו אימייל, Firebase Auth יזרוק שגיאה

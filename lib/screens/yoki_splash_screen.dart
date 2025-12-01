@@ -127,11 +127,11 @@ class _YokiSplashScreenState extends State<YokiSplashScreen>
       // אתחול Firebase
       // על iOS, Firebase כבר מאותחל ב-AppDelegate.swift, אז לא צריך לאתחל שוב
       if (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) {
-        debugPrint('🔍 Initializing Firebase...');
-        await Firebase.initializeApp(
-          options: DefaultFirebaseOptions.currentPlatform,
-        );
-        debugPrint('Firebase initialized successfully');
+      debugPrint('🔍 Initializing Firebase...');
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+      debugPrint('Firebase initialized successfully');
       } else {
         // על iOS, Firebase כבר מאותחל - רק נבדוק שהוא זמין
         debugPrint('🔍 iOS detected - Firebase already initialized in AppDelegate');

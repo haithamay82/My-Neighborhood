@@ -10,12 +10,29 @@ class GoogleAuthService {
   static Future<User?> signInWithGoogle() async {
     try {
       if (kIsWeb) {
-        // 🌐 גרסת Web - מומלץ להשתמש ב-popup כדי למנוע redirect loop
+        // 🌐 גרסת Web - נשתמש ב-redirect כי popup יכול להיכשל בגלל Cross-Origin-Opener-Policy
+        debugPrint('🌐 Starting Google Sign-In on Web');
+        
+        // בדיקה אם יש redirect result קיים (אחרי חזרה מ-Google)
+        try {
+          final redirectResult = await _auth.getRedirectResult();
+          if (redirectResult.user != null) {
+            debugPrint('✅ Google Sign-In redirect successful: ${redirectResult.user!.email}');
+            return redirectResult.user;
+          }
+        } catch (e) {
+          debugPrint('⚠️ No redirect result or error: $e');
+        }
+        
+        // אם אין redirect result, נתחיל תהליך התחברות חדש
         final googleProvider = GoogleAuthProvider();
         googleProvider.setCustomParameters({'prompt': 'select_account'});
 
-        final userCredential = await _auth.signInWithPopup(googleProvider);
-        return userCredential.user;
+        debugPrint('🔄 Initiating Google Sign-In redirect...');
+        await _auth.signInWithRedirect(googleProvider);
+        debugPrint('✅ Redirect initiated, user will be redirected to Google');
+        // נחזור null כי המשתמש יעבור לדף Google
+        return null;
       } else {
         // 📱 גרסת מובייל - Google Sign-In
         // ביטול session קודם לפני התחברות חדשה

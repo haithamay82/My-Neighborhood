@@ -17,7 +17,9 @@ import 'screens/profile_screen.dart';
 import 'screens/yoki_style_auth_screen.dart';
 import 'screens/tutorial_center_screen.dart';
 import 'screens/new_request_screen.dart';
+import 'screens/new_ad_screen.dart';
 import 'screens/my_requests_screen.dart';
+import 'screens/my_ads_screen.dart';
 import 'screens/admin_payments_screen.dart';
 import 'services/admin_auth_service.dart';
 import 'l10n/app_localizations.dart';
@@ -44,9 +46,9 @@ void main() async {
   // אתחול Firebase
   // על iOS, Firebase כבר מאותחל ב-AppDelegate.swift, אז לא צריך לאתחל שוב
   if (!kIsWeb && defaultTargetPlatform != TargetPlatform.iOS) {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
   } else if (kIsWeb || defaultTargetPlatform == TargetPlatform.iOS) {
     // על iOS, FirebaseApp.configure() נקרא ב-AppDelegate.swift
     // על Web, צריך לאתחל
@@ -120,7 +122,7 @@ class CommunityApp extends StatefulWidget {
 
 class _CommunityAppState extends State<CommunityApp> {
   final ValueNotifier<Locale> _localeNotifier = ValueNotifier(const Locale('he'));
-  AppTheme _appTheme = AppTheme.dark; // ברירת מחדל כהה
+  AppTheme _appTheme = AppTheme.light; // ברירת מחדל בהיר
   bool _localeLoaded = false; // דגל שמציין אם השפה נטענה
 
   @override
@@ -188,7 +190,7 @@ class _CommunityAppState extends State<CommunityApp> {
   
   Future<void> _loadThemeMode() async {
     final prefs = await SharedPreferences.getInstance();
-    final themeIndex = prefs.getInt('app_theme') ?? 2; // 0 = system, 1 = light, 2 = dark, 3 = gold (ברירת מחדל: dark)
+    final themeIndex = prefs.getInt('app_theme') ?? 1; // 0 = system, 1 = light, 2 = dark, 3 = gold (ברירת מחדל: light)
     setState(() {
       _appTheme = AppTheme.values[themeIndex.clamp(0, AppTheme.values.length - 1)];
     });
@@ -1404,23 +1406,67 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver, AudioMix
                 ),
               ],
             ),
-            body: IndexedStack(
+            body: StreamBuilder<DocumentSnapshot>(
+              stream: FirebaseAuth.instance.currentUser != null
+                  ? FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(FirebaseAuth.instance.currentUser!.uid)
+                      .snapshots()
+                  : null,
+              builder: (context, snapshot) {
+                bool canCreateAd = false;
+                if (snapshot.hasData && snapshot.data!.exists) {
+                  final userData = snapshot.data!.data() as Map<String, dynamic>;
+                  final userType = userData['userType'] as String? ?? 'personal';
+                  final isSubscriptionActive = userData['isSubscriptionActive'] as bool? ?? false;
+                  final businessCategories = userData['businessCategories'] as List?;
+                  
+                  // Guest עם קטגוריות או Business Subscriber
+                  canCreateAd = (userType == 'guest' && businessCategories != null && businessCategories.isNotEmpty) ||
+                               (userType == 'business' && isSubscriptionActive);
+                }
+                
+                return IndexedStack(
               index: _selectedIndex,
               children: [
                 const HomeScreen(),
                 const MyRequestsScreen(),
+                    if (canCreateAd) const MyAdsScreen(),
                 const NotificationsScreen(),
                 const ProfileScreen(),
                 if (AdminAuthService.isCurrentUserAdmin()) const AdminPaymentsScreen(),
               ],
+                );
+              },
             ),
-            bottomNavigationBar: BottomNavigationBar(
+            bottomNavigationBar: StreamBuilder<DocumentSnapshot>(
+              stream: FirebaseAuth.instance.currentUser != null
+                  ? FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(FirebaseAuth.instance.currentUser!.uid)
+                      .snapshots()
+                  : null,
+              builder: (context, snapshot) {
+                bool canCreateAd = false;
+                if (snapshot.hasData && snapshot.data!.exists) {
+                  final userData = snapshot.data!.data() as Map<String, dynamic>;
+                  final userType = userData['userType'] as String? ?? 'personal';
+                  final isSubscriptionActive = userData['isSubscriptionActive'] as bool? ?? false;
+                  final businessCategories = userData['businessCategories'] as List?;
+                  
+                  // Guest עם קטגוריות או Business Subscriber
+                  canCreateAd = (userType == 'guest' && businessCategories != null && businessCategories.isNotEmpty) ||
+                               (userType == 'business' && isSubscriptionActive);
+                }
+                
+                return BottomNavigationBar(
               type: BottomNavigationBarType.fixed,
               currentIndex: _selectedIndex,
               onTap: (index) {
                 setState(() => _selectedIndex = index);
                 // איפוס ספירת תשלומים ממתינים כאשר המנהל נכנס למסך ניהול תשלומים
-                if (AdminAuthService.isCurrentUserAdmin() && index == 4) {
+                    final adminIndex = canCreateAd ? 5 : 4;
+                    if (AdminAuthService.isCurrentUserAdmin() && index == adminIndex) {
                   _clearPendingPaymentsCount();
                 }
               },
@@ -1434,6 +1480,11 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver, AudioMix
                 BottomNavigationBarItem(
                   icon: const Icon(Icons.assignment),
                   label: l10n.myRequestsMenu,
+                    ),
+                    if (canCreateAd)
+                      BottomNavigationBarItem(
+                        icon: const Icon(Icons.campaign),
+                        label: 'מודעות שלי',
                 ),
                 BottomNavigationBarItem(
                   icon: StreamBuilder<int>(
@@ -1515,34 +1566,91 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver, AudioMix
                     label: l10n.managePayments,
                   ),
               ],
+                );
+              },
             ),
             floatingActionButton: _selectedIndex == 0 // הצג רק במסך הבית (אינדקס 0)
-                ? (() {
-                    debugPrint('🔍 Building FloatingActionButton for home screen');
-                    return Container(
+                ? StreamBuilder<DocumentSnapshot>(
+                    stream: FirebaseAuth.instance.currentUser != null
+                        ? FirebaseFirestore.instance
+                            .collection('users')
+                            .doc(FirebaseAuth.instance.currentUser!.uid)
+                            .snapshots()
+                        : null,
+                    builder: (context, snapshot) {
+                      bool canCreateAd = false;
+                      if (snapshot.hasData && snapshot.data!.exists) {
+                        final userData = snapshot.data!.data() as Map<String, dynamic>;
+                        final userType = userData['userType'] as String? ?? 'personal';
+                        final isSubscriptionActive = userData['isSubscriptionActive'] as bool? ?? false;
+                        final businessCategories = userData['businessCategories'] as List?;
+                        
+                        // Guest עם קטגוריות או Business Subscriber
+                        canCreateAd = (userType == 'guest' && businessCategories != null && businessCategories.isNotEmpty) ||
+                                     (userType == 'business' && isSubscriptionActive);
+                      }
+                      
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          // כפתור "מודעה חדשה" - רק אם המשתמש יכול
+                          if (canCreateAd) ...[
+                            Container(
+                              margin: const EdgeInsets.only(bottom: 12),
                     decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(30), // עגול מושלם
+                                borderRadius: BorderRadius.circular(30),
+                                color: const Color(0xFF4CAF50), // ירוק
+                                border: Border.all(
+                                  color: const Color(0xFF2196F3),
+                                  width: 3,
+                                ),
+                              ),
+                              child: FloatingActionButton(
+                                heroTag: "new_ad",
+                                onPressed: () {
+                                  debugPrint('🔍 New Ad button pressed!');
+                                  _showNewAdDialog();
+                                },
+                                backgroundColor: Colors.transparent,
+                                foregroundColor: Colors.white,
+                                elevation: 0,
+                                child: const Icon(
+                                  Icons.campaign_rounded, // אייקון מודעה
+                                  size: 28,
+                                ),
+                              ),
+                            ),
+                          ],
+                          // כפתור "בקשה חדשה"
+                          Container(
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(30),
                       color: const Color(0xFFFFD700), // צהוב זהב
                       border: Border.all(
-                        color: const Color(0xFF2196F3), // מסגרת כחולה
-                        width: 3, // עובי המסגרת
+                                color: const Color(0xFF2196F3),
+                                width: 3,
                       ),
                     ),
                     child: FloatingActionButton(
+                              heroTag: "new_request",
                       onPressed: () {
                         debugPrint('🔍 FloatingActionButton pressed!');
                         _showNewRequestDialog();
                       },
-                      backgroundColor: Colors.transparent, // שקוף כדי שהצבע ייראה
+                              backgroundColor: Colors.transparent,
                       foregroundColor: Colors.white,
-                      elevation: 0, // ללא צל
+                              elevation: 0,
                       child: const Icon(
-                        Icons.add_rounded, // אייקון עגול יותר
+                                Icons.add_rounded,
                         size: 28,
                       ),
                     ),
+                          ),
+                        ],
                   );
-                })()
+                    },
+                  )
                 : null,
           ),
         );
@@ -1620,6 +1728,56 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver, AudioMix
         );
       }
     }
+  }
+
+  void _showNewAdDialog() async {
+    // הוספת צליל לכפתור
+    await AudioService().playSound(AudioEvent.buttonClick);
+    
+    debugPrint('🔍 _showNewAdDialog: Starting');
+    
+    // בדיקה אם המשתמש הוא אורח זמני
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        
+        if (userDoc.exists) {
+          final userData = userDoc.data()!;
+          final isTemporaryGuest = userData['isTemporaryGuest'] ?? false;
+          
+          if (isTemporaryGuest) {
+            debugPrint('🔍 _showNewAdDialog: Temporary guest detected, blocking ad creation');
+            if (!mounted) return;
+            final l10n = AppLocalizations.of(context);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(l10n.pleaseRegisterFirst),
+                backgroundColor: Colors.orange,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+            return;
+          }
+        }
+      } catch (e) {
+        debugPrint('🔍 _showNewAdDialog: Error checking temporary guest status: $e');
+      }
+    }
+    
+    // Guard context usage after async gap
+    if (!mounted) return;
+    
+    debugPrint('🔍 _showNewAdDialog: Can create ad, navigating to NewAdScreen');
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const NewAdScreen(),
+      ),
+    );
   }
 
   void _showNewRequestDialog() async {

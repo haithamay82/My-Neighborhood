@@ -123,7 +123,7 @@
         <!-- Google Maps API Key -->
         <meta-data
             android:name="com.google.android.geo.API_KEY"
-            android:value="AIzaSyDsHGnkVvAbZPPLpO04HEff1FCqBqb0JSE" />
+            android:value="AIzaSyBhAEQ7wNaBH1nmtRs51WqZPGHfPoRtFQs" />
             
         <!-- Facebook App ID -->
         <meta-data

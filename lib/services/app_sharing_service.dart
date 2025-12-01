@@ -911,9 +911,9 @@ iOS: $_appStoreUrl
                 size: 28,
               ),
               const SizedBox(width: 8),
-              const Text(
-                'המלץ לחברים',
-                style: TextStyle(
+              Text(
+                AppLocalizations.of(context).recommendToFriendsTitle,
+                style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                 ),
@@ -924,17 +924,17 @@ iOS: $_appStoreUrl
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'אהבת את האפליקציה? עזור לנו לצמוח!',
-                style: TextStyle(
+              Text(
+                AppLocalizations.of(context).lovedTheAppHelpUsGrow,
+                style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w500,
                 ),
               ),
               const SizedBox(height: 12),
-              const Text(
-                '🎯 שתף עם חברים\n⭐ דרג אותנו\n💬 ספר על החוויה שלך',
-                style: TextStyle(fontSize: 14),
+              Text(
+                '${AppLocalizations.of(context).shareWithFriends}\n${AppLocalizations.of(context).rateUs}\n${AppLocalizations.of(context).tellAboutYourExperience}',
+                style: const TextStyle(fontSize: 14),
               ),
               const SizedBox(height: 16),
               Container(
@@ -944,9 +944,9 @@ iOS: $_appStoreUrl
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: Colors.blue[200]!),
                 ),
-                child: const Text(
-                  'כל המלצה עוזרת לנו להגיע לעוד שכנים שמחפשים עזרה הדדית!',
-                  style: TextStyle(
+                child: Text(
+                  AppLocalizations.of(context).everyRecommendationHelps,
+                  style: const TextStyle(
                     fontSize: 12,
                     color: Colors.blue,
                     fontStyle: FontStyle.italic,
@@ -958,7 +958,7 @@ iOS: $_appStoreUrl
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('אולי מאוחר יותר'),
+              child: Text(AppLocalizations.of(context).maybeLater),
             ),
             ElevatedButton.icon(
               onPressed: () {
@@ -966,7 +966,7 @@ iOS: $_appStoreUrl
                 AppSharingService.shareApp(context);
               },
               icon: const Icon(Icons.share, size: 18),
-              label: const Text('שתף עכשיו'),
+              label: Text(AppLocalizations.of(context).shareNow),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.blue,
                 foregroundColor: Colors.white,

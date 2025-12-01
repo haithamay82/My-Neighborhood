@@ -416,6 +416,70 @@ class AppLocalizations {
       'shareAppTo5Friends': 'שתף את האפליקציה ל-5 חברים (WhatsApp, SMS, Email)',
       'rateApp5Stars': 'דרג את האפליקציה בחנות 5 כוכבים',
       'publishNewRequest': 'פרסם בקשה חדשה בכל תחום שתרצה',
+      'serviceRequiresAppointment': 'השירות דורש תור',
+      'serviceRequiresAppointmentHint': 'אם השירות דורש קביעת תור, בחר באפשרות זו',
+      'canReceiveByDelivery': 'אפשר לקבל במשלוח?',
+      'canReceiveByDeliveryHint': 'אפשר לקבל השירות באמצעות שליחים?',
+      'publishAd': 'פרסם מודעה',
+      // Subscription Details Dialogs
+      'yourBusinessSubscriptionDetails': 'פרטי המנוי העסקי שלך',
+      'yourPersonalSubscriptionDetails': 'פרטי המנוי הפרטי שלך',
+      'yourGuestSubscriptionDetails': 'פרטי המנוי האורח שלך',
+      'yourFreeSubscription': 'המנוי החינם שלך',
+      'yourBusinessSubscriptionIncludes': 'המנוי העסקי שלך כולל:',
+      'yourPersonalSubscriptionIncludes': 'המנוי הפרטי שלך כולל:',
+      'yourTrialPeriodIncludes': 'תקופת הניסיון שלך כוללת:',
+      'yourFreeSubscriptionIncludes': 'המנוי החינם שלך כולל:',
+      'requestsPerMonth': '{count} בקשות בחודש',
+      'publishUpToRequestsPerMonth': 'פרסום עד {count} בקשות בחודש',
+      'publishOneRequestPerMonth': 'פרסום בקשה אחת בלבד בחודש',
+      'rangeWithBonuses': 'טווח: {range} ק"מ + בונוסים',
+      'exposureUpToKm': 'חשיפה עד {km} קילומטר מהמיקום שלך',
+      'seesFreeAndPaidRequests': 'רואה בקשות חינם ובתשלום',
+      'seesOnlyFreeRequests': 'רואה רק בקשות חינם',
+      'accessToAllRequestTypes': 'גישה לכל סוגי הבקשות באפליקציה',
+      'accessToFreeRequestsOnly': 'גישה לבקשות חינם בלבד',
+      'selectedBusinessAreas': 'תחומי עיסוק נבחרים',
+      'yourBusinessAreas': 'תחומי העיסוק שלך: {areas}',
+      'noBusinessAreasSelected': 'לא נבחרו',
+      'paymentPerYear': 'תשלום: {amount}₪ לשנה',
+      'oneTimePaymentForFullYear': 'תשלום חד-פעמי לשנה שלמה',
+      'noPayment': 'ללא תשלום',
+      'freeSubscriptionAvailable': 'המנוי החינם זמין ללא עלות',
+      'trialPeriodDays': 'תקופת ניסיון: {days} ימים',
+      'fullAccessToAllFeatures': 'גישה מלאה לכל התכונות ללא תשלום',
+      'yourSubscriptionActiveUntil': 'המנוי שלך פעיל עד {date}',
+      'unknown': 'לא ידוע',
+      'yourTrialActiveForDays': 'תקופת הניסיון שלך פעילה עוד {days} ימים',
+      'subscriptionExpiredSwitchToFree': 'המנוי שלך עבר לסוג "פרטי חינם", שדרג עכשיו למנוי "פרטי מנוי" או "עסקי"',
+      'afterTrialAutoSwitchToFree': 'אחרי תקופת הניסיון, תעבור אוטומטית למנוי פרטי חינם. תוכל לשדרג בכל עת.',
+      // Subscription Type Selection Dialog
+      'selectSubscriptionType': 'בחירת סוג מנוי',
+      'chooseYourSubscriptionType': 'בחר את סוג המנוי שלך:',
+      'privateSubscriptionFeatures': '• 1 בקשה בחודש\n• טווח: 0-3 ק"מ\n• רואה רק בקשות חינם\n• ללא תחומי עיסוק',
+      'privatePaidSubscriptionFeatures': '• 5 בקשות בחודש\n• טווח: 0-5 ק"מ\n• רואה רק בקשות חינם\n• ללא תחומי עיסוק\n• תשלום: 30₪ לשנה',
+      'businessSubscriptionFeatures': '• 10 בקשות בחודש\n• טווח: 0-8 ק"מ\n• רואה בקשות חינם ובתשלום\n• בחירת תחומי עיסוק\n• תשלום: 70₪ לשנה',
+      // Activate Subscription Dialog
+      'activateSubscriptionWithType': 'הפעלת מנוי {type}',
+      'subscriptionTypeWithType': 'מנוי {type}',
+      'perYear': '₪{price} לשנה',
+      'businessAreas': 'תחומי עיסוק: {areas}',
+      'howToPay': 'איך לשלם:',
+      'paymentInstructions': '1. בחר דרך תשלום: BIT (PayMe) או כרטיס אשראי (PayMe)\n2. השלם את הסכום (₪{price}) - המנוי יופעל אוטומטית\n3. אם יש בעיה, פנה לתמיכה',
+      'payViaPayMe': 'שלם דרך PayMe (Bit או כרטיס אשראי)',
+      // Pending Approval Dialog
+      'requestPendingApprovalNew': 'בקשה בתהליך אישור ⏳',
+      'youHaveRequestForSubscription': 'יש לך בקשה ל{type} והיא בטיפול.',
+      'cannotSendAnotherRequest': 'לא ניתן לשלוח בקשה נוספת עד שהמנהל יאשר או ידחה את הבקשה הנוכחית.',
+      // System Admin Dialog
+      'systemAdministrator': 'מנהל מערכת',
+      'adminFullAccessMessage': 'כמנהל מערכת, יש לך גישה מלאה לכל הפונקציות ללא צורך בתשלום.\n\nסוג המנוי שלך קבוע: עסקי מנוי עם גישה לכל תחומי העיסוק.',
+      // Cash Payment Dialog
+      'cashPaymentTitle': 'دفع نقدي',
+      'subscriptionDetails': 'פרטי המנוי:',
+      'subscriptionTypeLabel': 'סוג מנוי: {type}',
+      'priceLabel': 'מחיר: ₪{price}',
+      'sendPaymentRequestNew': 'إرسال طلب الدفع',
       'completeAllActionsWithinHour': 'יש לבצע את כל הפעולות תוך שעה אחת',
       'granting14DayExtension': 'מעניק הארכה של 14 ימים...',
       'extensionGrantedSuccessfully': 'הארכה של 14 ימים ניתנה בהצלחה!',
@@ -495,6 +559,13 @@ class AppLocalizations {
       'creatingProfile': 'יוצר פרופיל...',
       'createProfile': 'צור פרופיל',
       'setBusinessFields': 'הגדר תחומי עיסוק',
+      'toReceiveRelevantNotifications': 'כדי לקבל התראות על בקשות רלוונטיות, עליך לבחור עד שני תחומי עיסוק:',
+      'iDoNotProvidePaidServices': 'אני לא נותן שירות כלשהו תמורת תשלום',
+      'ifYouSelectThisOption': 'אם תסמן אפשרות זו, תוכל לראות רק בקשות חינמיות במסך הבקשות.',
+      'orSelectBusinessAreas': 'או בחר תחומי עיסוק:',
+      'selectBusinessAreasToReceiveRelevantRequests': 'בחר תחומי עיסוק כדי לקבל בקשות רלוונטיות:',
+      'allAds': 'כל המודעות',
+      'adsCount': '{count} מודעות',
       'ifYouProvideService': 'אם אתה נותן שירות כלשהו, הגדר את תחומי העיסוק שלך וקבל גישה לבקשות בתשלום.\n\nתוכל לשנות את תחומי העיסוק שלך בכל עת בפרופיל שלך.',
       'later': 'מאוחר יותר',
       'chooseNow': 'בחר עכשיו',
@@ -826,7 +897,6 @@ class AppLocalizations {
       'edit': 'ערוך',
       'noBusinessFieldsDefined': 'אין תחומי עיסוק מוגדרים',
       'toReceiveNotifications': 'כדי לקבל התראות על בקשות רלוונטיות, עליך לבחור עד שני תחומי עיסוק:',
-      'iDoNotProvidePaidServices': 'אני לא נותן שירות כלשהו תמורת תשלום',
       'ifYouCheckThisOption': 'אם תסמן אפשרות זו, תוכל לראות רק בקשות חינמיות במסך הבקשות.',
       'monthlyRequests': 'בקשות חודשיות',
       'publishedRequestsThisMonth': 'פורסמו {count} בקשות החודש (ללא הגבלה)',
@@ -867,7 +937,6 @@ class AppLocalizations {
       'noUpgradeOptionsAvailable': 'אין אפשרויות שדרוג זמינות',
       'privateFreeType': 'פרטי (חינם)',
       'privateFreeDescription': '• 1 בקשה בחודש\n• טווח: 0-3 ק"מ\n• רואה רק בקשות חינם\n• ללא תחומי עיסוק',
-      'yourFreeSubscription': 'המנוי החינם שלך',
       'upgrade': 'שדרג',
       'deleteAccountTitle': 'מחיקת חשבון',
       'deleteAccountConfirm': 'האם אתה בטוח שברצונך למחוק את החשבון שלך?',
@@ -1240,7 +1309,6 @@ class AppLocalizations {
       'remainingRequests': 'נשארו לך רק {count} בקשות!',
       'wantMoreUpgrade': 'רוצה יותר? שדרג מנוי',
       'guest': 'אורח',
-      'unknown': 'לא ידוע',
       // Share Service
       'interestingRequestInApp': '🎯 בקשה מעניינת ב-"שכונתי"!',
       'locationNotSpecified': 'מיקום לא צוין',
@@ -1789,6 +1857,74 @@ class AppLocalizations {
       'shareAppTo5Friends': 'شارك التطبيق مع 5 أصدقاء (WhatsApp, SMS, Email)',
       'rateApp5Stars': 'قيم التطبيق في المتجر بـ 5 نجوم',
       'publishNewRequest': 'انشر طلباً جديداً في أي مجال تريده',
+      'serviceRequiresAppointment': 'الخدمة تتطلب موعداً',
+      'serviceRequiresAppointmentHint': 'إذا كانت الخدمة تتطلب تحديد موعد، اختر هذا الخيار',
+      'canReceiveByDelivery': 'هل يمكن الاستلام بالتوصيل؟',
+      'canReceiveByDeliveryHint': 'هل يمكن الحصول على الخدمة من خلال المندوبين؟',
+      'publishAd': 'انشر إعلاناً',
+      // Subscription Details Dialogs
+      'yourBusinessSubscriptionDetails': 'تفاصيل اشتراكك التجاري',
+      'yourPersonalSubscriptionDetails': 'تفاصيل اشتراكك الشخصي',
+      'yourGuestSubscriptionDetails': 'تفاصيل اشتراكك كضيف',
+      'yourFreeSubscription': 'اشتراكك المجاني',
+      'yourBusinessSubscriptionIncludes': 'يشمل اشتراكك التجاري:',
+      'yourPersonalSubscriptionIncludes': 'يشمل اشتراكك الشخصي:',
+      'yourTrialPeriodIncludes': 'تشمل فترة التجربة الخاصة بك:',
+      'yourFreeSubscriptionIncludes': 'يشمل اشتراكك المجاني:',
+      'requestsPerMonth': '{count} طلبات في الشهر',
+      'publishUpToRequestsPerMonth': 'نشر حتى {count} طلبات في الشهر',
+      'publishOneRequestPerMonth': 'نشر طلب واحد فقط في الشهر',
+      'rangeWithBonuses': 'النطاق: {range} كم + مكافآت',
+      'range': 'النطاق: {range} كم',
+      'exposureUpToKm': 'التعرض حتى {km} كيلومتر من موقعك',
+      'seesFreeAndPaidRequests': 'يرى الطلبات المجانية والمدفوعة',
+      'seesOnlyFreeRequests': 'يرى الطلبات المجانية فقط',
+      'accessToAllRequestTypes': 'الوصول إلى جميع أنواع الطلبات في التطبيق',
+      'accessToFreeRequestsOnly': 'الوصول إلى الطلبات المجانية فقط',
+      'selectedBusinessAreas': 'مجالات العمل المختارة',
+      'yourBusinessAreas': 'مجالات عملك: {areas}',
+      'noBusinessAreasSelected': 'لم يتم الاختيار',
+      'paymentPerYear': 'الدفع: {amount}₪ في السنة',
+      'oneTimePaymentForFullYear': 'دفعة واحدة لسنة كاملة',
+      'noPayment': 'بدون دفع',
+      'freeSubscriptionAvailable': 'الاشتراك المجاني متاح بدون تكلفة',
+      'trialPeriodDays': 'فترة التجربة: {days} يوم',
+      'fullAccessToAllFeatures': 'وصول كامل لجميع الميزات مجاناً',
+      'yourSubscriptionActiveUntil': 'اشتراكك نشط حتى {date}',
+      'unknown': 'غير معروف',
+      'yourTrialActiveForDays': 'فترة التجربة الخاصة بك نشطة لمدة {days} أيام أخرى',
+      'subscriptionExpiredSwitchToFree': 'انتقل اشتراكك إلى نوع "شخصي مجاني"، قم بالترقية الآن إلى اشتراك "شخصي" أو "تجاري"',
+      'afterTrialAutoSwitchToFree': 'بعد فترة التجربة، ستنتقل تلقائياً إلى اشتراك شخصي مجاني. يمكنك الترقية في أي وقت.',
+      // Subscription Type Selection Dialog
+      'selectSubscriptionType': 'اختيار نوع الاشتراك',
+      'chooseYourSubscriptionType': 'اختر نوع اشتراكك:',
+      'privateFree': 'شخصي (مجاني)',
+      'privateSubscription': 'شخصي (اشتراك)',
+      'businessSubscription': 'تجاري (اشتراك)',
+      'privateSubscriptionFeatures': '• طلب واحد في الشهر\n• النطاق: 0-3 كم\n• يرى الطلبات المجانية فقط\n• بدون مجالات عمل',
+      'privatePaidSubscriptionFeatures': '• 5 طلبات في الشهر\n• النطاق: 0-5 كم\n• يرى الطلبات المجانية فقط\n• بدون مجالات عمل\n• الدفع: 30₪ في السنة',
+      'businessSubscriptionFeatures': '• 10 طلبات في الشهر\n• النطاق: 0-8 كم\n• يرى الطلبات المجانية والمدفوعة\n• اختيار مجالات العمل\n• الدفع: 70₪ في السنة',
+      // Activate Subscription Dialog
+      'activateSubscriptionWithType': 'تفعيل اشتراك {type}',
+      'subscriptionTypeWithType': 'اشتراك {type}',
+      'perYear': '₪{price} في السنة',
+      'businessAreas': 'مجالات العمل: {areas}',
+      'howToPay': 'كيفية الدفع:',
+      'paymentInstructions': '1. اختر طريقة الدفع: BIT (PayMe) أو بطاقة ائتمان (PayMe)\n2. ادفع المبلغ (₪{price}) - سيتم تفعيل الاشتراك تلقائياً\n3. إذا كانت هناك مشكلة، اتصل بالدعم',
+      'payViaPayMe': 'ادفع عبر PayMe (Bit أو بطاقة ائتمان)',
+      // Pending Approval Dialog
+      'requestPendingApprovalNew': 'طلب قيد الموافقة ⏳',
+      'youHaveRequestForSubscription': 'لديك طلب لـ {type} وهو قيد المعالجة.',
+      'cannotSendAnotherRequest': 'لا يمكن إرسال طلب آخر حتى يوافق المدير أو يرفض الطلب الحالي.',
+      // System Admin Dialog
+      'systemAdministrator': 'مدير النظام',
+      'adminFullAccessMessage': 'كمدير للنظام، لديك وصول كامل لجميع الوظائف دون الحاجة إلى الدفع.\n\nنوع اشتراكك ثابت: اشتراك تجاري مع الوصول إلى جميع مجالات العمل.',
+      // Cash Payment Dialog
+      'cashPaymentTitle': 'دفع نقدي',
+      'subscriptionDetails': 'تفاصيل الاشتراك:',
+      'subscriptionTypeLabel': 'نوع الاشتراك: {type}',
+      'priceLabel': 'السعر: ₪{price}',
+      'sendPaymentRequestNew': 'إرسال طلب الدفع',
       'completeAllActionsWithinHour': 'يجب تنفيذ جميع الإجراءات خلال ساعة واحدة',
       'granting14DayExtension': 'تمديد 14 يوماً...',
       'extensionGrantedSuccessfully': 'تم منح التمديد لمدة 14 يوماً بنجاح!',
@@ -1867,6 +2003,13 @@ class AppLocalizations {
       'creatingProfile': 'جاري إنشاء الملف الشخصي...',
       'createProfile': 'إنشاء ملف شخصي',
       'setBusinessFields': 'تعيين مجالات العمل',
+      'toReceiveRelevantNotifications': 'لتلقي إشعارات حول الطلبات ذات الصلة، يجب عليك اختيار ما يصل إلى مجالين عمل:',
+      'iDoNotProvidePaidServices': 'أنا لا أقدم أي خدمة مقابل الدفع',
+      'ifYouSelectThisOption': 'إذا قمت بتحديد هذا الخيار، ستتمكن من رؤية الطلبات المجانية فقط في شاشة الطلبات.',
+      'orSelectBusinessAreas': 'أو اختر مجالات العمل:',
+      'selectBusinessAreasToReceiveRelevantRequests': 'اختر مجالات العمل لتلقي الطلبات ذات الصلة:',
+      'allAds': 'جميع الإعلانات',
+      'adsCount': '{count} إعلان',
       'ifYouProvideService': 'إذا كنت تقدم خدمة ما، قم بتعيين مجالات عملك واحصل على الوصول إلى الطلبات المدفوعة.\n\nيمكنك تغيير مجالات عملك في أي وقت في ملفك الشخصي.',
       'later': 'لاحقاً',
       'chooseNow': 'اختر الآن',
@@ -1923,7 +2066,6 @@ class AppLocalizations {
       'edit': 'تعديل',
       'noBusinessFieldsDefined': 'لم يتم تحديد مجالات العمل',
       'toReceiveNotifications': 'لتلقي إشعارات حول الطلبات ذات الصلة، يجب عليك اختيار ما يصل إلى مجالين للعمل:',
-      'iDoNotProvidePaidServices': 'لا أقدم أي خدمة مقابل الدفع',
       'ifYouCheckThisOption': 'إذا قمت بتحديد هذا الخيار، يمكنك رؤية الطلبات المجانية فقط في شاشة الطلبات.',
       'monthlyRequests': 'الطلبات الشهرية',
       'publishedRequestsThisMonth': 'تم نشر {count} طلبات هذا الشهر (بدون حد)',
@@ -1964,7 +2106,6 @@ class AppLocalizations {
       'noUpgradeOptionsAvailable': 'لا توجد خيارات ترقية متاحة',
       'privateFreeType': 'خاص (مجاني)',
       'privateFreeDescription': '• 1 طلب في الشهر\n• النطاق: 0-3 كم\n• يرى فقط الطلبات المجانية\n• بدون مجالات عمل',
-      'yourFreeSubscription': 'اشتراكك المجاني',
       'upgrade': 'ترقية',
       'deleteAccountTitle': 'حذف الحساب',
       'deleteAccountConfirm': 'هل أنت متأكد من أنك تريد حذف حسابك؟',
@@ -2446,7 +2587,6 @@ class AppLocalizations {
       'updatesEvery30Seconds': 'يتم التحديث كل 10 ثواني',
       'yourRequestLocation': 'موقع طلبك',
       'subscribedHelpers': 'مقدمو الخدمات المشتركون',
-      'range': 'النطاق',
       'chatWith': 'محادثة مع {name}',
       'chatClosedWith': 'محادثة مغلقة مع {name}',
       'markAsCompleted': 'ضع علامة كتم التعامل معه',
@@ -2543,9 +2683,6 @@ class AppLocalizations {
       'errorDeletingImages': 'خطأ في حذف الصور: {error}',
       'errorOpeningChat': 'خطأ في فتح الدردشة: {error}',
       // Home Screen
-      'privateFree': 'شخصي مجاني',
-      'privateSubscription': 'شخصي مشترك',
-      'businessSubscription': 'تجاري مشترك',
       'businessNoSubscription': 'تجاري بدون اشتراك',
       'admin': 'مدير',
       'rangeInfo': 'معلومات عن نطاقك',
@@ -2612,7 +2749,6 @@ class AppLocalizations {
       'remainingRequests': 'تبقى لك فقط {count} طلبات!',
       'wantMoreUpgrade': 'تريد المزيد؟ قم بالترقية',
       'guest': 'ضيف',
-      'unknown': 'غير معروف',
       // Share Service
       'interestingRequestInApp': '🎯 طلب مثير للاهتمام في "حارتي"!',
       'locationNotSpecified': 'الموقع غير محدد',
@@ -3018,6 +3154,69 @@ class AppLocalizations {
       // Additional messages
       'welcomeMessage': 'Welcome!',
       'welcomeToApp': 'Welcome to "Neighborhood" app!',
+      // Subscription Details Dialogs
+      'yourBusinessSubscriptionDetails': 'Your Business Subscription Details',
+      'yourPersonalSubscriptionDetails': 'Your Personal Subscription Details',
+      'yourGuestSubscriptionDetails': 'Your Guest Subscription Details',
+      'yourFreeSubscription': 'Your Free Subscription',
+      'yourBusinessSubscriptionIncludes': 'Your business subscription includes:',
+      'yourPersonalSubscriptionIncludes': 'Your personal subscription includes:',
+      'yourTrialPeriodIncludes': 'Your trial period includes:',
+      'yourFreeSubscriptionIncludes': 'Your free subscription includes:',
+      'requestsPerMonth': '{count} requests per month',
+      'publishUpToRequestsPerMonth': 'Publish up to {count} requests per month',
+      'publishOneRequestPerMonth': 'Publish one request only per month',
+      'rangeWithBonuses': 'Range: {range} km + bonuses',
+      'range': 'Range: {range} km',
+      'exposureUpToKm': 'Exposure up to {km} kilometers from your location',
+      'seesFreeAndPaidRequests': 'Sees free and paid requests',
+      'seesOnlyFreeRequests': 'Sees only free requests',
+      'accessToAllRequestTypes': 'Access to all types of requests in the app',
+      'accessToFreeRequestsOnly': 'Access to free requests only',
+      'selectedBusinessAreas': 'Selected business areas',
+      'yourBusinessAreas': 'Your business areas: {areas}',
+      'noBusinessAreasSelected': 'Not selected',
+      'paymentPerYear': 'Payment: {amount}₪ per year',
+      'oneTimePaymentForFullYear': 'One-time payment for a full year',
+      'noPayment': 'No payment',
+      'freeSubscriptionAvailable': 'Free subscription available at no cost',
+      'trialPeriodDays': 'Trial period: {days} days',
+      'fullAccessToAllFeatures': 'Full access to all features for free',
+      'yourSubscriptionActiveUntil': 'Your subscription is active until {date}',
+      'unknown': 'Unknown',
+      'yourTrialActiveForDays': 'Your trial period is active for {days} more days',
+      'subscriptionExpiredSwitchToFree': 'Your subscription has switched to "Free Private" type, upgrade now to "Personal Subscription" or "Business"',
+      'afterTrialAutoSwitchToFree': 'After the trial period, you will automatically switch to a free private subscription. You can upgrade at any time.',
+      // Subscription Type Selection Dialog
+      'selectSubscriptionType': 'Subscription Type Selection',
+      'chooseYourSubscriptionType': 'Choose your subscription type:',
+      'privateFree': 'Private (Free)',
+      'privateSubscription': 'Private (Subscription)',
+      'businessSubscription': 'Business (Subscription)',
+      'privateSubscriptionFeatures': '• 1 request per month\n• Range: 0-3 km\n• Sees only free requests\n• No business areas',
+      'privatePaidSubscriptionFeatures': '• 5 requests per month\n• Range: 0-5 km\n• Sees only free requests\n• No business areas\n• Payment: 30₪ per year',
+      'businessSubscriptionFeatures': '• 10 requests per month\n• Range: 0-8 km\n• Sees free and paid requests\n• Selection of business areas\n• Payment: 70₪ per year',
+      // Activate Subscription Dialog
+      'activateSubscriptionWithType': 'Activate {type} Subscription',
+      'subscriptionTypeWithType': '{type} Subscription',
+      'perYear': '₪{price} per year',
+      'businessAreas': 'Business areas: {areas}',
+      'howToPay': 'How to pay:',
+      'paymentInstructions': '1. Choose payment method: BIT (PayMe) or credit card (PayMe)\n2. Pay the amount (₪{price}) - the subscription will be activated automatically\n3. If there is a problem, contact support',
+      'payViaPayMe': 'Pay via PayMe (Bit or credit card)',
+      // Pending Approval Dialog
+      'requestPendingApprovalNew': 'Request Pending Approval ⏳',
+      'youHaveRequestForSubscription': 'You have a request for {type} and it is being processed.',
+      'cannotSendAnotherRequest': 'Cannot send another request until the administrator approves or rejects the current request.',
+      // System Admin Dialog
+      'systemAdministrator': 'System Administrator',
+      'adminFullAccessMessage': 'As a system administrator, you have full access to all functions without payment.\n\nYour subscription type is fixed: Business subscription with access to all business areas.',
+      // Cash Payment Dialog
+      'cashPaymentTitle': 'Cash Payment',
+      'subscriptionDetails': 'Subscription Details:',
+      'subscriptionTypeLabel': 'Subscription Type: {type}',
+      'priceLabel': 'Price: ₪{price}',
+      'sendPaymentRequestNew': 'Send Payment Request',
       'fillAllFields': 'Please fill in all fields',
       'rememberMe': 'Remember me',
       'saveCredentialsQuestion': 'Would you like to save your login credentials?',
@@ -3149,6 +3348,11 @@ class AppLocalizations {
       'shareAppTo5Friends': 'Share the app to 5 friends (WhatsApp, SMS, Email)',
       'rateApp5Stars': 'Rate the app 5 stars in the store',
       'publishNewRequest': 'Publish a new request in any field you want',
+      'serviceRequiresAppointment': 'Service requires appointment',
+      'serviceRequiresAppointmentHint': 'If the service requires scheduling an appointment, select this option',
+      'canReceiveByDelivery': 'Can it be received by delivery?',
+      'canReceiveByDeliveryHint': 'Can the service be received via couriers?',
+      'publishAd': 'Publish Ad',
       'completeAllActionsWithinHour': 'All actions must be completed within one hour',
       'granting14DayExtension': 'Granting 14-day extension...',
       'extensionGrantedSuccessfully': '14-day extension granted successfully!',
@@ -3334,6 +3538,8 @@ class AppLocalizations {
       'toReceiveNotifications': 'To receive notifications about relevant requests, you must select up to two business fields:',
       'iDoNotProvidePaidServices': 'I do not provide any service for payment',
       'ifYouCheckThisOption': 'If you check this option, you can see only free requests in the requests screen.',
+      'allAds': 'All Ads',
+      'adsCount': '{count} ads',
       'monthlyRequests': 'Monthly requests',
       'publishedRequestsThisMonth': 'Published {count} requests this month (no limit)',
       'remainingRequestsThisMonth': 'You have {count} requests remaining to publish this month',
@@ -3373,7 +3579,6 @@ class AppLocalizations {
       'noUpgradeOptionsAvailable': 'No upgrade options available',
       'privateFreeType': 'Private (free)',
       'privateFreeDescription': '• 1 request per month\n• Range: 0-3 km\n• See only free requests\n• No business fields',
-      'yourFreeSubscription': 'Your free subscription',
       'upgrade': 'Upgrade',
       'deleteAccountTitle': 'Delete account',
       'deleteAccountConfirm': 'Are you sure you want to delete your account?',
@@ -3824,9 +4029,6 @@ Payments:
       'errorDeletingImages': 'Error deleting images: {error}',
       'errorOpeningChat': 'Error opening chat: {error}',
       // Home Screen
-      'privateFree': 'Private free',
-      'privateSubscription': 'Private subscription',
-      'businessSubscription': 'Business subscription',
       'businessNoSubscription': 'Business no subscription',
       'admin': 'Admin',
       'rangeInfo': 'Information about your range',
@@ -3893,7 +4095,6 @@ Payments:
       'remainingRequests': 'You only have {count} requests left!',
       'wantMoreUpgrade': 'Want more? Upgrade subscription',
       'guest': 'Guest',
-      'unknown': 'Unknown',
       // Share Service
       'interestingRequestInApp': '🎯 Interesting request in "Shchunati"!',
       'locationNotSpecified': 'Location not specified',
@@ -4462,6 +4663,68 @@ Payments:
   String get shareAppTo5Friends => _safeGet('shareAppTo5Friends', fallback: 'Share the app to 5 friends (WhatsApp, SMS, Email)');
   String get rateApp5Stars => _safeGet('rateApp5Stars', fallback: 'Rate the app 5 stars in the store');
   String get publishNewRequest => _safeGet('publishNewRequest', fallback: 'Publish a new request in any field you want');
+  String get serviceRequiresAppointment => _safeGet('serviceRequiresAppointment', fallback: 'Service requires appointment');
+  String get serviceRequiresAppointmentHint => _safeGet('serviceRequiresAppointmentHint', fallback: 'If the service requires scheduling an appointment, select this option');
+  String get canReceiveByDelivery => _safeGet('canReceiveByDelivery', fallback: 'Can it be received by delivery?');
+  String get canReceiveByDeliveryHint => _safeGet('canReceiveByDeliveryHint', fallback: 'Can the service be received via couriers?');
+  String get publishAd => _safeGet('publishAd', fallback: 'Publish Ad');
+  // Subscription Details Dialogs
+  String get yourBusinessSubscriptionDetails => _safeGet('yourBusinessSubscriptionDetails', fallback: 'Your Business Subscription Details');
+  String get yourPersonalSubscriptionDetails => _safeGet('yourPersonalSubscriptionDetails', fallback: 'Your Personal Subscription Details');
+  String get yourGuestSubscriptionDetails => _safeGet('yourGuestSubscriptionDetails', fallback: 'Your Guest Subscription Details');
+  String get yourBusinessSubscriptionIncludes => _safeGet('yourBusinessSubscriptionIncludes', fallback: 'Your business subscription includes:');
+  String get yourPersonalSubscriptionIncludes => _safeGet('yourPersonalSubscriptionIncludes', fallback: 'Your personal subscription includes:');
+  String get yourTrialPeriodIncludes => _safeGet('yourTrialPeriodIncludes', fallback: 'Your trial period includes:');
+  String get yourFreeSubscriptionIncludes => _safeGet('yourFreeSubscriptionIncludes', fallback: 'Your free subscription includes:');
+  String requestsPerMonth(int count) => _safeGet('requestsPerMonth', fallback: '{count} requests per month').replaceAll('{count}', count.toString());
+  String publishUpToRequestsPerMonth(int count) => _safeGet('publishUpToRequestsPerMonth', fallback: 'Publish up to {count} requests per month').replaceAll('{count}', count.toString());
+  String get publishOneRequestPerMonth => _safeGet('publishOneRequestPerMonth', fallback: 'Publish one request only per month');
+  String rangeWithBonuses(String range) => _safeGet('rangeWithBonuses', fallback: 'Range: {range} km + bonuses').replaceAll('{range}', range);
+  String exposureUpToKm(int km) => _safeGet('exposureUpToKm', fallback: 'Exposure up to {km} kilometers from your location').replaceAll('{km}', km.toString());
+  String get seesFreeAndPaidRequests => _safeGet('seesFreeAndPaidRequests', fallback: 'Sees free and paid requests');
+  String get seesOnlyFreeRequests => _safeGet('seesOnlyFreeRequests', fallback: 'Sees only free requests');
+  String get accessToAllRequestTypes => _safeGet('accessToAllRequestTypes', fallback: 'Access to all types of requests in the app');
+  String get accessToFreeRequestsOnly => _safeGet('accessToFreeRequestsOnly', fallback: 'Access to free requests only');
+  String get selectedBusinessAreas => _safeGet('selectedBusinessAreas', fallback: 'Selected business areas');
+  String yourBusinessAreas(String areas) => _safeGet('yourBusinessAreas', fallback: 'Your business areas: {areas}').replaceAll('{areas}', areas);
+  String get noBusinessAreasSelected => _safeGet('noBusinessAreasSelected', fallback: 'Not selected');
+  String paymentPerYear(int amount) => _safeGet('paymentPerYear', fallback: 'Payment: {amount}₪ per year').replaceAll('{amount}', amount.toString());
+  String get oneTimePaymentForFullYear => _safeGet('oneTimePaymentForFullYear', fallback: 'One-time payment for a full year');
+  String get noPayment => _safeGet('noPayment', fallback: 'No payment');
+  String get freeSubscriptionAvailable => _safeGet('freeSubscriptionAvailable', fallback: 'Free subscription available at no cost');
+  String trialPeriodDays(int days) => _safeGet('trialPeriodDays', fallback: 'Trial period: {days} days').replaceAll('{days}', days.toString());
+  String get fullAccessToAllFeatures => _safeGet('fullAccessToAllFeatures', fallback: 'Full access to all features for free');
+  String yourSubscriptionActiveUntil(String date) => _safeGet('yourSubscriptionActiveUntil', fallback: 'Your subscription is active until {date}').replaceAll('{date}', date);
+  String yourTrialActiveForDays(int days) => _safeGet('yourTrialActiveForDays', fallback: 'Your trial period is active for {days} more days').replaceAll('{days}', days.toString());
+  String get subscriptionExpiredSwitchToFree => _safeGet('subscriptionExpiredSwitchToFree', fallback: 'Your subscription has switched to "Free Private" type, upgrade now to "Personal Subscription" or "Business"');
+  String get afterTrialAutoSwitchToFree => _safeGet('afterTrialAutoSwitchToFree', fallback: 'After the trial period, you will automatically switch to a free private subscription. You can upgrade at any time.');
+  // Subscription Type Selection Dialog
+  String get selectSubscriptionType => _safeGet('selectSubscriptionType', fallback: 'Subscription Type Selection');
+  String get chooseYourSubscriptionType => _safeGet('chooseYourSubscriptionType', fallback: 'Choose your subscription type:');
+  String get privateSubscriptionFeatures => _safeGet('privateSubscriptionFeatures', fallback: '• 1 request per month\n• Range: 0-3 km\n• Sees only free requests\n• No business areas');
+  String get privatePaidSubscriptionFeatures => _safeGet('privatePaidSubscriptionFeatures', fallback: '• 5 requests per month\n• Range: 0-5 km\n• Sees only free requests\n• No business areas\n• Payment: 30₪ per year');
+  String get businessSubscriptionFeatures => _safeGet('businessSubscriptionFeatures', fallback: '• 10 requests per month\n• Range: 0-8 km\n• Sees free and paid requests\n• Selection of business areas\n• Payment: 70₪ per year');
+  // Activate Subscription Dialog
+  String activateSubscriptionWithType(String type) => _safeGet('activateSubscriptionWithType', fallback: 'Activate {type} Subscription').replaceAll('{type}', type);
+  String subscriptionTypeWithType(String type) => _safeGet('subscriptionTypeWithType', fallback: '{type} Subscription').replaceAll('{type}', type);
+  String perYear(int price) => _safeGet('perYear', fallback: '₪{price} per year').replaceAll('{price}', price.toString());
+  String businessAreas(String areas) => _safeGet('businessAreas', fallback: 'Business areas: {areas}').replaceAll('{areas}', areas);
+  String get howToPay => _safeGet('howToPay', fallback: 'How to pay:');
+  String paymentInstructions(int price) => _safeGet('paymentInstructions', fallback: '1. Choose payment method: BIT (PayMe) or credit card (PayMe)\n2. Pay the amount (₪{price}) - the subscription will be activated automatically\n3. If there is a problem, contact support').replaceAll('{price}', price.toString());
+  String get payViaPayMe => _safeGet('payViaPayMe', fallback: 'Pay via PayMe (Bit or credit card)');
+  // Pending Approval Dialog
+  String get requestPendingApprovalNew => _safeGet('requestPendingApprovalNew', fallback: 'Request Pending Approval ⏳');
+  String youHaveRequestForSubscription(String type) => _safeGet('youHaveRequestForSubscription', fallback: 'You have a request for {type} and it is being processed.').replaceAll('{type}', type);
+  String get cannotSendAnotherRequest => _safeGet('cannotSendAnotherRequest', fallback: 'Cannot send another request until the administrator approves or rejects the current request.');
+  // System Admin Dialog
+  String get systemAdministrator => _safeGet('systemAdministrator', fallback: 'System Administrator');
+  String get adminFullAccessMessage => _safeGet('adminFullAccessMessage', fallback: 'As a system administrator, you have full access to all functions without payment.\n\nYour subscription type is fixed: Business subscription with access to all business areas.');
+  // Cash Payment Dialog
+  String get cashPaymentTitle => _safeGet('cashPaymentTitle', fallback: 'Cash Payment');
+  String get subscriptionDetails => _safeGet('subscriptionDetails', fallback: 'Subscription Details:');
+  String subscriptionTypeLabel(String type) => _safeGet('subscriptionTypeLabel', fallback: 'Subscription Type: {type}').replaceAll('{type}', type);
+  String priceLabel(int price) => _safeGet('priceLabel', fallback: 'Price: ₪{price}').replaceAll('{price}', price.toString());
+  String get sendPaymentRequestNew => _safeGet('sendPaymentRequestNew', fallback: 'Send Payment Request');
   String get completeAllActionsWithinHour => _safeGet('completeAllActionsWithinHour', fallback: 'All actions must be completed within one hour');
   String get granting14DayExtension => _safeGet('granting14DayExtension', fallback: 'Granting 14-day extension...');
   String get extensionGrantedSuccessfully => _safeGet('extensionGrantedSuccessfully', fallback: '14-day extension granted successfully!');
@@ -5238,6 +5501,12 @@ Payments:
   String get selectUpToTwoFields => _safeGet('selectUpToTwoFields', fallback: 'To receive notifications about relevant requests, you must select up to two business fields:');
   String get iDoNotProvidePaidServices => _safeGet('iDoNotProvidePaidServices', fallback: 'I do not provide any service for payment');
   String get onlyFreeRequestsMessage => _safeGet('onlyFreeRequestsMessage', fallback: 'If you check this option, you will only be able to see free requests on the requests screen.');
+  String get toReceiveRelevantNotifications => _safeGet('toReceiveRelevantNotifications', fallback: 'To receive notifications about relevant requests, you must choose up to two business areas:');
+  String get ifYouSelectThisOption => _safeGet('ifYouSelectThisOption', fallback: 'If you select this option, you will only be able to see free requests on the requests screen.');
+  String get orSelectBusinessAreas => _safeGet('orSelectBusinessAreas', fallback: 'Or select business areas:');
+  String get selectBusinessAreasToReceiveRelevantRequests => _safeGet('selectBusinessAreasToReceiveRelevantRequests', fallback: 'Select business areas to receive relevant requests:');
+  String get allAds => _safeGet('allAds', fallback: 'All Ads');
+  String adsCount(int count) => _safeGet('adsCount', fallback: '{count} ads').replaceAll('{count}', count.toString());
   String get systemAdmin => _safeGet('systemAdmin', fallback: 'System administrator - Full access to all functions (Business subscription)');
   String get manageUsers => _safeGet('manageUsers', fallback: 'Manage users');
   String get requestStatistics => _safeGet('requestStatistics', fallback: 'Request statistics');

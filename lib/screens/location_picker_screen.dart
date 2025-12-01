@@ -199,7 +199,19 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
       
       if (position != null) {
         debugPrint('Position obtained: ${position.latitude}, ${position.longitude}');
-        _selectedLocation = LatLng(position.latitude, position.longitude);
+        final newLocation = LatLng(position.latitude, position.longitude);
+        
+        setState(() {
+          _selectedLocation = newLocation;
+        });
+        
+        // עדכון המפה למיקום החדש
+        if (_mapController != null) {
+          _mapController!.animateCamera(
+            CameraUpdate.newLatLngZoom(newLocation, 15.0),
+          );
+          debugPrint('✅ Map camera updated to new location');
+        }
         
         // קבלת כתובת
         try {
@@ -213,19 +225,41 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
         _calculateMaxRadiusForUser();
         } catch (e) {
           debugPrint('Error getting address: $e');
-          _selectedAddress = 'מיקום לא ידוע';
+          setState(() {
+            _selectedAddress = 'מיקום לא ידוע';
+          });
         }
       } else {
         debugPrint('No position obtained, using default location');
         // ברירת מחדל - תל אביב
-        _selectedLocation = const LatLng(32.0853, 34.7818);
-        _selectedAddress = 'תל אביב, ישראל';
+        final defaultLocation = const LatLng(32.0853, 34.7818);
+        setState(() {
+          _selectedLocation = defaultLocation;
+          _selectedAddress = 'תל אביב, ישראל';
+        });
+        
+        // עדכון המפה למיקום ברירת מחדל
+        if (_mapController != null) {
+          _mapController!.animateCamera(
+            CameraUpdate.newLatLngZoom(defaultLocation, 12.0),
+          );
+        }
       }
     } catch (e) {
       debugPrint('Error in _getCurrentLocation: $e');
       // ברירת מחדל - תל אביב
-      _selectedLocation = const LatLng(32.0853, 34.7818);
-      _selectedAddress = 'תל אביב, ישראל';
+      final defaultLocation = const LatLng(32.0853, 34.7818);
+      setState(() {
+        _selectedLocation = defaultLocation;
+        _selectedAddress = 'תל אביב, ישראל';
+      });
+      
+      // עדכון המפה למיקום ברירת מחדל
+      if (_mapController != null) {
+        _mapController!.animateCamera(
+          CameraUpdate.newLatLngZoom(defaultLocation, 12.0),
+        );
+      }
     }
 
     setState(() {
@@ -294,9 +328,32 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
     
     // עדכון מיידי - המפה נטענה
     if (mounted) {
-      setState(() {
-        _isLoading = false;
-        _mapError = null;
+        setState(() {
+          _isLoading = false;
+          _mapError = null;
+        });
+    }
+    
+    // עדכון המפה למיקום הנבחר אם קיים
+    if (_selectedLocation != null && mounted) {
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (_mapController != null && mounted) {
+          _mapController!.animateCamera(
+            CameraUpdate.newLatLngZoom(_selectedLocation!, 15.0),
+          );
+          debugPrint('✅ Map camera updated to selected location: ${_selectedLocation!.latitude}, ${_selectedLocation!.longitude}');
+        }
+      });
+    } else if (_selectedLocation == null && mounted) {
+      // אם אין מיקום נבחר, נעדכן את המפה למיקום ברירת מחדל
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (_mapController != null && mounted) {
+          final defaultLocation = const LatLng(32.0853, 34.7818);
+          _mapController!.animateCamera(
+            CameraUpdate.newLatLngZoom(defaultLocation, 12.0),
+          );
+          debugPrint('✅ Map camera updated to default location');
+        }
       });
     }
     
@@ -312,9 +369,9 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
               region.northeast.longitude == region.southwest.longitude) {
             debugPrint('⚠️ Map region is invalid - possible API issue');
             if (mounted) {
-              setState(() {
+            setState(() {
                 _mapError = 'המפה לא נטענה כראוי - ייתכן שיש בעיה עם Google Maps API או הרשאות מיקום';
-              });
+            });
             }
           } else {
             debugPrint('✅ Map is working correctly');
@@ -327,17 +384,17 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
         }).catchError((error) {
           debugPrint('❌ Error getting visible region: $error');
           if (mounted) {
-            setState(() {
+          setState(() {
               _mapError = 'שגיאה בטעינת המפה. אנא בדוק:\n• חיבור לאינטרנט\n• הרשאות מיקום\n• נסה לבחור מיקום ידנית';
-            });
+          });
           }
         });
       } else {
         debugPrint('⚠️ Map controller is null after delay');
         if (mounted) {
-          setState(() {
+        setState(() {
             _mapError = 'המפה לא נטענה כראוי. אנא נסה שוב או בחר מיקום ידנית';
-          });
+        });
         }
       }
     });
@@ -524,30 +581,8 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
 
-    return Directionality(
-      textDirection: l10n.isRTL ? TextDirection.rtl : TextDirection.ltr,
-      child: Scaffold(
-        appBar: AppBar(
-          title: Text(l10n.selectLocationTitle),
-          backgroundColor: Theme.of(context).brightness == Brightness.dark 
-    ? const Color(0xFF9C27B0) // סגול יפה
-    : Theme.of(context).colorScheme.primary,
-          foregroundColor: Colors.white,
-          actions: [
-            TextButton(
-              onPressed: _confirmLocation,
-              child: Text(
-                l10n.confirm,
-                style: const TextStyle(color: Colors.white, fontSize: 16),
-              ),
-            ),
-          ],
-        ),
-        body: _isLoading
-            ? const Center(child: CircularProgressIndicator())
-            : SafeArea(
-                child: Column(
-                  children: [
+    // בניית רשימת children דינמית
+    final List<Widget> columnChildren = [
                     // כפתורי מיקום
                     Container(
                       padding: const EdgeInsets.all(16),
@@ -626,7 +661,7 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                                           max: _maxRadius,
                                           divisions: ((_maxRadius - _minRadius) * 10).round(), // קפיצות של 0.1 ק"מ
                                           activeColor: Colors.blue,
-                                          inactiveColor: Colors.blue.withValues(alpha: 0.3),
+                                          inactiveColor: Colors.blue.withOpacity(0.3),
                                           onChanged: (value) {
                                             setState(() {
                                               // עיגול לקפיצות של 0.1 ק"מ
@@ -703,225 +738,221 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
                   
                   // מפה
                   Expanded(
-                    child: _mapError != null
-                        ? Container(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.error_outline,
-                                  size: 64,
-                                  color: Theme.of(context).colorScheme.error,
-                                ),
-                                const SizedBox(height: 16),
-                                Text(
-                                  'שגיאה בטעינת המפה',
-                                  style: TextStyle(
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.bold,
-                                    color: Theme.of(context).colorScheme.error,
-                                  ),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  _mapError!,
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(
-                                    color: Theme.of(context).colorScheme.error,
-                                    fontSize: 14,
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-                                ElevatedButton.icon(
-                                  onPressed: () {
-                                    setState(() {
-                                      _mapError = null;
-                                      _isLoading = true;
-                                    });
-                                    _initializeLocation();
-                                  },
-                                  icon: const Icon(Icons.refresh),
-                                  label: const Text('נסה שוב'),
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.blue,
-                                    foregroundColor: Colors.white,
-                                  ),
-                                ),
-                                const SizedBox(height: 16),
-                                const Text(
-                                  'אם הבעיה נמשכת, אנא בדוק:',
-                                  style: TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                                const SizedBox(height: 8),
-                                const Text(
-                                  '• חיבור לאינטרנט\n• מפתח Google Maps API תקין\n• הרשאות מיקום\n• נסה לבחור מיקום ידנית',
-                                  textAlign: TextAlign.center,
-                                  style: TextStyle(fontSize: 12),
-                                ),
-                              ],
-                            ),
-                          )
-                        : Stack(
-                            children: [
-                              GoogleMap(
-                                onMapCreated: _onMapCreated,
-                                initialCameraPosition: CameraPosition(
-                                  target: _selectedLocation ?? const LatLng(32.0853, 34.7818),
-                                  zoom: 15,
-                                ),
-                                onTap: _onMapTap,
-                                mapType: MapType.normal,
-                                myLocationEnabled: true,
-                                myLocationButtonEnabled: false,
-                                zoomControlsEnabled: true,
-                                compassEnabled: true,
-                                buildingsEnabled: true,
-                                trafficEnabled: false,
-                                mapToolbarEnabled: false,
-                                markers: _selectedLocation != null
-                                    ? {
-                                        Marker(
-                                          markerId: const MarkerId('selected_location'),
-                                          position: _selectedLocation!,
-                                          infoWindow: InfoWindow(
-                                            title: l10n.selectedLocation,
-                                            snippet: _selectedAddress,
-                                          ),
-                                        ),
-                                      }
-                                    : {},
-                                circles: _selectedLocation != null && _shouldShowExposureCircle
-                                    ? {
-                                        Circle(
-                                          circleId: const CircleId('exposure_circle'),
-                                          center: _selectedLocation!,
-                                          radius: _getRadiusInMeters(), // שימוש בפונקציה החדשה
-                                          fillColor: Colors.blue.withValues(alpha: 0.2),
-                                          strokeColor: Colors.blue,
-                                          strokeWidth: 2,
-                                        ),
-                                      }
-                                    : {},
-                                onCameraMove: (CameraPosition position) {
-                              // עדכון המיקום הנבחר בזמן תנועה
-                              if (_selectedLocation == null) {
-                                setState(() {
-                                  _selectedLocation = position.target;
-                                });
-                                _updateAddressFromLocation(position.target);
-                              }
-                            },
-                            onCameraIdle: () {
-                              // עדכון המיקום הנבחר כשהמצלמה נעצרת
-                              if (_mapController != null) {
-                                _mapController!.getVisibleRegion().then((region) {
-                                  final center = LatLng(
-                                    (region.northeast.latitude + region.southwest.latitude) / 2,
-                                    (region.northeast.longitude + region.southwest.longitude) / 2,
-                                  );
-                                  setState(() {
-                                    _selectedLocation = center;
-                                  });
-                                  _updateAddressFromLocation(center);
-                                });
-                              }
-                            },
+                    child: Stack(
+                      children: [
+                        GoogleMap(
+                          key: const ValueKey('google_map'),
+                          onMapCreated: _onMapCreated,
+                          initialCameraPosition: CameraPosition(
+                            target: _selectedLocation ?? const LatLng(32.0853, 34.7818),
+                            zoom: 15,
                           ),
-                              // אינדיקטור טעינה
-                              if (_isLoading)
-                                Container(
-                                  color: Colors.white.withValues(alpha: 0.8),
-                                  child: const Center(
-                                    child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        CircularProgressIndicator(),
-                                        SizedBox(height: 16),
-                                        Text('טוען מפה...'),
-                                      ],
+                          onTap: _onMapTap,
+                          mapType: MapType.normal,
+                          myLocationEnabled: true,
+                          myLocationButtonEnabled: false,
+                          zoomControlsEnabled: true,
+                          compassEnabled: true,
+                          buildingsEnabled: true,
+                          trafficEnabled: false,
+                          mapToolbarEnabled: false,
+                          markers: _selectedLocation != null
+                              ? {
+                                  Marker(
+                                    markerId: const MarkerId('selected_location'),
+                                    position: _selectedLocation!,
+                                    infoWindow: InfoWindow(
+                                      title: l10n.selectedLocation,
+                                      snippet: _selectedAddress,
                                     ),
                                   ),
-                                ),
-                              // הודעת דיבוג
-                              if (_mapController == null && !_isLoading)
-                                Positioned(
-                                  top: 16,
-                                  left: 16,
-                                  right: 16,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      color: Colors.orange.withValues(alpha: 0.9),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: const Text(
-                                      'המפה נטענת... אם זה נמשך יותר מ-8 שניות, ייתכן שיש בעיה עם Google Maps API',
-                                      style: TextStyle(color: Colors.white, fontSize: 12),
-                                    ),
+                                }
+                              : {},
+                          circles: _selectedLocation != null && _shouldShowExposureCircle
+                              ? {
+                                  Circle(
+                                    circleId: const CircleId('exposure_circle'),
+                                    center: _selectedLocation!,
+                                    radius: _getRadiusInMeters(),
+                                    fillColor: Colors.blue.withOpacity(0.2),
+                                    strokeColor: Colors.blue,
+                                    strokeWidth: 2,
                                   ),
+                                }
+                              : {},
+                          onCameraMove: (CameraPosition position) {
+                            // עדכון המיקום הנבחר בזמן תנועה
+                            if (_selectedLocation == null) {
+                              setState(() {
+                                _selectedLocation = position.target;
+                              });
+                              _updateAddressFromLocation(position.target);
+                            }
+                          },
+                          onCameraIdle: () {
+                            // עדכון המיקום הנבחר כשהמצלמה נעצרת
+                            if (_mapController != null) {
+                              _mapController!.getVisibleRegion().then((region) {
+                                final center = LatLng(
+                                  (region.northeast.latitude + region.southwest.latitude) / 2,
+                                  (region.northeast.longitude + region.southwest.longitude) / 2,
+                                );
+                                setState(() {
+                                  _selectedLocation = center;
+                                });
+                                _updateAddressFromLocation(center);
+                              });
+                            }
+                          },
+                        ),
+                        // אינדיקטור טעינה - מוצג מעל המפה רק אם המפה לא נטענה
+                        if (_isLoading && _mapController == null)
+                          Positioned.fill(
+                            child: Container(
+                              color: Colors.white.withOpacity(0.9),
+                              child: const Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    CircularProgressIndicator(),
+                                    SizedBox(height: 16),
+                                    Text('טוען מפה...'),
+                                  ],
                                 ),
-                              // הודעת שגיאה אם המפה לא נטענת
-                              if (_mapError != null)
-                                Positioned(
-                                  top: 16,
-                                  left: 16,
-                                  right: 16,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(12),
-                                    decoration: BoxDecoration(
-                                      color: Colors.red.withValues(alpha: 0.9),
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
+                              ),
+                            ),
+                          ),
+                        // הודעת דיבוג
+                        if (_mapController == null && !_isLoading)
+                          Positioned(
+                            top: 16,
+                            left: 16,
+                            right: 16,
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.withOpacity(0.9),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Text(
+                                'המפה נטענת... אם זה נמשך יותר מ-8 שניות, ייתכן שיש בעיה עם Google Maps API',
+                                style: TextStyle(color: Colors.white, fontSize: 12),
+                              ),
+                            ),
+                          ),
+                        // הודעת שגיאה אם המפה לא נטענת - מוצגת מעל המפה
+                        if (_mapError != null)
+                          Positioned(
+                            top: 16,
+                            left: 16,
+                            right: 16,
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.withOpacity(0.95),
+                                borderRadius: BorderRadius.circular(8),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.2),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 20),
+                                  const SizedBox(width: 8),
+                                  Expanded(
                                     child: Text(
                                       _mapError!,
                                       style: const TextStyle(color: Colors.white, fontSize: 12),
                                     ),
                                   ),
-                                ),
-                            ],
-                          ),
-                  ),
-                  
-                  // מידע על המיקום הנבחר
-                  if (_selectedLocation != null)
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.surfaceContainer,
-                        border: Border(
-                          top: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            l10n.selectedLocationLabel,
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                  IconButton(
+                                    icon: const Icon(Icons.close, color: Colors.white, size: 18),
+                                    onPressed: () {
+                                      setState(() {
+                                        _mapError = null;
+                                      });
+                                    },
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                          const SizedBox(height: 8),
-                          Text(
-                            _selectedAddress ?? 'מיקום לא ידוע',
-                            style: const TextStyle(fontSize: 16),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'קואורדינטות: ${_selectedLocation!.latitude.toStringAsFixed(6)}, ${_selectedLocation!.longitude.toStringAsFixed(6)}',
-                            style: TextStyle(
-                              fontSize: 12,
-                                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
+                      ],
                     ),
-                ],
+                  ),
+    ];
+    
+    // הוספת מידע על המיקום הנבחר אם קיים
+    if (_selectedLocation != null) {
+      columnChildren.add(
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainer,
+            border: Border(
+              top: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                l10n.selectedLocationLabel,
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _selectedAddress ?? 'מיקום לא ידוע',
+                style: const TextStyle(fontSize: 16),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'קואורדינטות: ${_selectedLocation!.latitude.toStringAsFixed(6)}, ${_selectedLocation!.longitude.toStringAsFixed(6)}',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Directionality(
+      textDirection: l10n.isRTL ? TextDirection.rtl : TextDirection.ltr,
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(l10n.selectLocationTitle),
+          backgroundColor: Theme.of(context).brightness == Brightness.dark 
+    ? const Color(0xFF9C27B0) // סגול יפה
+    : Theme.of(context).colorScheme.primary,
+          foregroundColor: Colors.white,
+          actions: [
+            TextButton(
+              onPressed: _confirmLocation,
+              child: Text(
+                l10n.confirm,
+                style: const TextStyle(color: Colors.white, fontSize: 16),
               ),
             ),
+          ],
+        ),
+        body: SafeArea(
+          child: Column(
+            children: columnChildren,
+          ),
+        ),
       ),
     );
   }

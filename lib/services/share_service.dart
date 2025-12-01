@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
 import '../models/request.dart';
+import '../models/ad.dart';
 
 class ShareService {
   /// שיתוף בקשה ב-WhatsApp
@@ -119,5 +120,89 @@ $deepLink
     } else {
       return 'עכשיו';
     }
+  }
+
+  // ========== פונקציות שיתוף למודעות ==========
+  
+  /// שיתוף מודעה ב-WhatsApp
+  static Future<void> shareAdViaWhatsApp(Ad ad) async {
+    try {
+      final message = _buildAdShareMessage(ad);
+      final whatsappUrl = 'https://wa.me/?text=${Uri.encodeComponent(message)}';
+      
+      final uri = Uri.parse(whatsappUrl);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+      } else {
+        debugPrint('Could not launch WhatsApp');
+      }
+    } catch (e) {
+      debugPrint('Error sharing ad via WhatsApp: $e');
+    }
+  }
+
+  /// שיתוף מודעה ב-SMS
+  static Future<void> shareAdViaSMS(Ad ad) async {
+    try {
+      final message = _buildAdShareMessage(ad);
+      final smsUrl = 'sms:?body=${Uri.encodeComponent(message)}';
+      
+      final uri = Uri.parse(smsUrl);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri);
+      } else {
+        debugPrint('Could not launch SMS');
+      }
+    } catch (e) {
+      debugPrint('Error sharing ad via SMS: $e');
+    }
+  }
+
+  /// שיתוף כללי של מודעה (מערכת)
+  static Future<void> shareAdGeneral(Ad ad) async {
+    try {
+      final message = _buildAdShareMessage(ad);
+      // TODO: Replace with SharePlus.instance.share() when ShareParams API is stable
+      // ignore: deprecated_member_use
+      await Share.share(message);
+    } catch (e) {
+      debugPrint('Error sharing ad: $e');
+    }
+  }
+
+  /// בניית הודעת השיתוף למודעה
+  static String _buildAdShareMessage(Ad ad) {
+    final appUrl = 'https://nearme-970f3.web.app';
+    final deepLink = '$appUrl/ad/${ad.adId}';
+    
+    // בניית פרטי המודעה
+    final categoryName = ad.category.categoryDisplayName;
+    final priceText = ad.price != null ? '💰 מחיר: ${ad.price!.toStringAsFixed(0)} ₪' : '🆓 חינם';
+    final appointmentText = ad.requiresAppointment ? '📅 דורש תור' : '';
+    final deliveryText = ad.requiresDelivery ? '🚚 אפשר לקבל במשלוח' : '';
+    
+    return '''
+📢 מודעה מעניינת ב-"שכונתי"!
+
+📝 ${ad.title}
+📍 ${ad.address ?? ad.location?.name ?? 'מיקום לא צוין'}
+🏷️ קטגוריה: $categoryName
+$priceText $appointmentText $deliveryText
+📅 פורסם: ${_formatDate(ad.createdAt)}
+
+📄 תיאור:
+${ad.description}
+
+💡 רוצה לראות עוד? הורד את האפליקציה "שכונתי"!
+
+📱 הורד עכשיו:
+$appUrl
+
+🔗 או לחץ כאן לפתיחת המודעה:
+$deepLink
+
+🤝 בואו נבנה קהילה חזקה יותר יחד!
+#שכונתי #מודעות #קהילה #ישראל
+''';
   }
 }

@@ -418,7 +418,7 @@ async function createReceiptForPayment(transactionId, paymentData, webhookData, 
       return;
     }
     
-    // Get PayMe API key from environment
+    // Get PayMe API key from environment (for Authorization header)
     const paymeApiKey = process.env.PAYME_API_KEY || functions.config().payme?.api_key;
     console.log(`🔑 PAYME_API_KEY check: ${paymeApiKey ? 'Found (length: ' + paymeApiKey.length + ')' : 'NOT FOUND'}`);
     if (!paymeApiKey) {
@@ -430,15 +430,56 @@ async function createReceiptForPayment(transactionId, paymentData, webhookData, 
       return;
     }
     
+    // Get PayMe Client Key (different from API key - this is the client identifier)
+    // According to PayMe support: should be 'paid_vA3PGRAL' and NOT the API key
+    const paymeClientKey = 'paid_vA3PGRAL';
+    console.log(`🔑 PayMe Client Key: ${paymeClientKey}`);
+    
     // Get PayMe Seller ID - according to PayMe support, we should use seller_payme_id
     const sellerPaymeId = 'MPL17601-96851APW-EG42UA4J-RPUPW2AZ';
     console.log(`🔑 Seller PayMe ID: ${sellerPaymeId}`);
     console.log(`🔑 PayMe API Key (first 10 chars): ${paymeApiKey ? paymeApiKey.substring(0, 10) + '...' : 'NOT FOUND'}`);
     
-    // Extract buyer information from webhook or payment data
-    const buyerNameFinal = buyerName || webhookData.buyer_name || paymentData.userName || 'לקוח';
-    const buyerEmailFinal = buyerEmail || webhookData.buyer_email || paymentData.email || paymentData.userEmail || '';
-    console.log(`👤 Buyer info - Name: ${buyerNameFinal}, Email: ${buyerEmailFinal}`);
+    // Extract buyer information - PRIORITIZE PayMe webhook data (from payment form) over app user data
+    // PayMe webhook may contain: buyer_name, buyer_email, first_name, last_name, email, etc.
+    // BIT payment form also sends email in the webhook - check all possible email fields
+    const paymeBuyerName = webhookData.buyer_name || 
+                           (webhookData.first_name && webhookData.last_name ? `${webhookData.first_name} ${webhookData.last_name}` : null) ||
+                           webhookData.first_name || 
+                           webhookData.last_name ||
+                           webhookData.customer_name ||
+                           webhookData.name;
+    // Check all possible email fields from PayMe/BIT webhook
+    const paymeBuyerEmail = webhookData.buyer_email || 
+                           webhookData.email || 
+                           webhookData.customer_email ||
+                           webhookData.user_email ||
+                           webhookData.payer_email ||
+                           webhookData.billing_email;
+    
+    // Use PayMe data first, then fallback to function parameters, then payment data, then user data
+    const buyerNameFinal = paymeBuyerName || 
+                          buyerName || 
+                          paymentData.buyer_name || 
+                          paymentData.userName || 
+                          paymentData.name || 
+                          'לקוח';
+    
+    // For email, prioritize PayMe webhook email (from payment form) over app user email
+    const buyerEmailFinal = paymeBuyerEmail || 
+                           buyerEmail || 
+                           paymentData.buyer_email || 
+                           paymentData.email || 
+                           paymentData.userEmail || 
+                           '';
+    
+    console.log(`👤 Buyer info extraction:`);
+    console.log(`   - PayMe webhook name: ${paymeBuyerName || 'NOT FOUND'}`);
+    console.log(`   - PayMe webhook email: ${paymeBuyerEmail || 'NOT FOUND'}`);
+    console.log(`   - Function param name: ${buyerName || 'NOT FOUND'}`);
+    console.log(`   - Function param email: ${buyerEmail || 'NOT FOUND'}`);
+    console.log(`   - Final name: ${buyerNameFinal}`);
+    console.log(`   - Final email: ${buyerEmailFinal}`);
     if (!buyerEmailFinal) {
       console.warn(`⚠️ WARNING: No buyer email found for receipt! Available data:`, {
         buyerEmail,
@@ -450,7 +491,7 @@ async function createReceiptForPayment(transactionId, paymentData, webhookData, 
     }
     
     // Get product name from payment data (not hardcoded)
-    const productName = paymentData.productName || 'מנוי NearMe';
+    const productName = paymentData.productName || 'מנוי שכונתי';
     console.log(`📦 Product name: ${productName}, Amount: ${amountIls} ILS`);
     
     // Get payme_sale_id from webhook or payment data to link receipt to the original sale
@@ -463,15 +504,19 @@ async function createReceiptForPayment(transactionId, paymentData, webhookData, 
     // According to the API, we need to use cash, credit_card, bank_transfer, paypal, or cheques objects
     // Since payment was made via PayMe (which can be card or Bit), we'll use credit_card
     // PayMe API requires both seller_payme_id AND payme_client_key in the payload
+    // According to PayMe support: payme_client_key should be 'paid_vA3PGRAL' (NOT the API key)
     // Adding payme_sale_id to link the receipt to the original sale
     const receiptPayload = {
       seller_payme_id: sellerPaymeId,
-      payme_client_key: paymeApiKey, // PayMe API requires this in the payload (not just in Authorization header)
+      payme_client_key: paymeClientKey, // PayMe Client Key: 'paid_vA3PGRAL' (NOT the API key)
       doc_type: 100, // Receipt (קבלה) - 100 for receipt, 200 for invoice
       buyer_name: buyerNameFinal,
       buyer_email: buyerEmailFinal,
       currency: 'ILS',
-      doc_title: 'קבלה על תשלום שכונתי',
+      doc_title: 'קבלה מס\' על תשלום שכונתי', // Changed from "הזמנה" to "קבלה מס'"
+      // Try to add seller/business information if PayMe API supports it
+      // Note: Some fields may need to be configured in PayMe Console
+      seller_name: 'שכונתי - Extreme Technologies', // Business name with company name
       language: 'he',
       total_sum_including_vat: amountIls,
       total_paid: amountIls,
@@ -501,12 +546,15 @@ async function createReceiptForPayment(transactionId, paymentData, webhookData, 
     
     console.log(`📤 Sending receipt creation request to PayMe Documents API for payment: ${transactionId}`);
     console.log(`📋 Receipt payload:`, JSON.stringify(receiptPayload, null, 2));
+    console.log(`🔑 PayMe Client Key in payload: ${receiptPayload.payme_client_key}`);
+    console.log(`🔑 PayMe Seller ID in payload: ${receiptPayload.seller_payme_id}`);
     
     // Call PayMe Documents API - according to new documentation
     // Note: The documentation shows sandbox.payme.io, but we're using live.payme.io for production
     // If this fails, we might need to check if the endpoint is correct or if we need different credentials
     const documentsApiUrl = 'https://live.payme.io/api/documents';
     console.log(`🌐 Calling PayMe Documents API: ${documentsApiUrl}`);
+    console.log(`🔐 Authorization header: Bearer ${paymeApiKey ? paymeApiKey.substring(0, 10) + '...' : 'NOT SET'}`);
     const response = await fetch(documentsApiUrl, {
       method: 'POST',
       headers: {
@@ -584,15 +632,13 @@ async function sendReceiptEmail(buyerEmail, buyerName, receiptUrl, receiptId) {
     
     const emailHtml = `
       <div dir="rtl" style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <h2 style="color: #333;">שלום ${buyerName},</h2>
+        <h2 style="color: #333;">שלום ${buyerName || 'לקוח'},</h2>
         <p style="font-size: 16px; color: #333; margin: 20px 0;">
           התשלום שלך התקבל בהצלחה ✔
         </p>
-        ${receiptId ? `<p style="font-size: 14px; color: #666; margin: 10px 0;">
-          מספר קבלה: <strong>${receiptId}</strong>
-        </p>` : ''}
+        <!-- Removed receipt number from email - doc_id is internal UUID, not the actual receipt number -->
         <p style="font-size: 16px; color: #333; margin: 20px 0;">
-          להלן הקבלה:
+           הקבלה:
         </p>
         <p style="margin: 20px 0;">
           <a href="${receiptUrl}" 
@@ -601,26 +647,29 @@ async function sendReceiptEmail(buyerEmail, buyerName, receiptUrl, receiptId) {
           </a>
         </p>
         <p style="font-size: 14px; color: #666; margin-top: 30px;">
-          תודה על השימוש ב-NearMe
+        תודה  
+        ובהצלחה בשכונה החכמה שלך!
+        שכונתי
         </p>
       </div>
     `;
     
     const emailText = `
-שלום ${buyerName},
+שלום ${buyerName || 'לקוח'},
 
 התשלום שלך התקבל בהצלחה ✔
-${receiptId ? `\nמספר קבלה: ${receiptId}` : ''}
 
-להלן הקבלה: ${receiptUrl}
+הקבלה: ${receiptUrl}
 
-תודה על השימוש ב-NearMe
-    `;
+תודה  
+        ובהצלחה בשכונה החכמה שלך!
+        שכונתי 
+           `;
     
     const mailOptions = {
-      from: `"NearMe" <${functions.config().email?.user || process.env.EMAIL_USER}>`,
+      from: `"My Neighborhood" <${functions.config().email?.user || process.env.EMAIL_USER}>`,
       to: buyerEmail,
-      subject: 'קבלה על תשלום - NearMe',
+      subject: 'קבלה על תשלום - שכונתי',
       text: emailText,
       html: emailHtml,
       replyTo: functions.config().email?.user || process.env.EMAIL_USER,
@@ -651,6 +700,24 @@ paymeWebhookApp.post('/', async (req, res) => {
     // PayMe sends callbacks as x-www-form-urlencoded
     // Express bodyParser already converts this to an object automatically
     const webhookData = req.body;
+    
+    // Log all webhook data to see what PayMe sends (for debugging buyer info)
+    console.log('📋 Full webhook data keys:', Object.keys(webhookData));
+    console.log('📋 Webhook data for buyer info:', {
+      buyer_name: webhookData.buyer_name,
+      buyer_email: webhookData.buyer_email,
+      first_name: webhookData.first_name,
+      last_name: webhookData.last_name,
+      email: webhookData.email,
+      name: webhookData.name,
+      customer_name: webhookData.customer_name,
+      customer_email: webhookData.customer_email,
+      user_email: webhookData.user_email,
+      payer_email: webhookData.payer_email,
+      billing_email: webhookData.billing_email,
+      // Log all keys to see what PayMe/BIT actually sends
+      allKeys: Object.keys(webhookData),
+    });
     
     // Extract data (PayMe webhook format)
     // PayMe sends notify_type (sale-complete, sale-authorized, sale-failure, etc.) and sale_status (completed, etc.)
@@ -771,7 +838,15 @@ paymeWebhookApp.post('/', async (req, res) => {
       
       const userData = userDoc.data();
       const userEmail = userData.email || '';
-      const userName = userData.name || 'משתמש';
+      const userName = userData.displayName || userData.name || 'משתמש';
+      
+      // Log user data for debugging
+      console.log('👤 User data from Firestore:', {
+        email: userEmail,
+        name: userName,
+        displayName: userData.displayName,
+        name_field: userData.name,
+      });
       
       // Determine subscription type based on amount
       // TODO: Return to production prices after testing: personal=30 ILS, business=70 ILS
