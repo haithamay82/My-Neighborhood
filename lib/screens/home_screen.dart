@@ -13,6 +13,8 @@ import '../l10n/app_localizations.dart';
 import '../models/request.dart';
 import '../models/user_profile.dart';
 import '../models/week_availability.dart';
+import '../models/appointment.dart';
+import '../models/order.dart' as order_model;
 import '../services/chat_service.dart';
 import '../services/notification_service.dart';
 import '../services/notification_service_local.dart';
@@ -2709,6 +2711,108 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                   ),
                 ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// הצגת דיאלוג עם מפה שמציגה את מיקום נותן השירות
+  void _showProviderLocationDialog(BuildContext context, UserProfile provider) {
+    final latitude = provider.latitude ?? provider.mobileLatitude;
+    final longitude = provider.longitude ?? provider.mobileLongitude;
+    
+    if (latitude == null || longitude == null) return;
+    
+    final l10n = AppLocalizations.of(context);
+    
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Container(
+          width: MediaQuery.of(context).size.width * 0.9,
+          height: MediaQuery.of(context).size.height * 0.7,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // כותרת הדיאלוג
+              Row(
+                children: [
+                  Icon(
+                    Icons.location_on,
+                    color: Theme.of(context).colorScheme.primary,
+                    size: 28,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      provider.village ?? provider.displayName,
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              // מפה
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: GoogleMap(
+                    initialCameraPosition: CameraPosition(
+                      target: LatLng(latitude, longitude),
+                      zoom: 15.0,
+                    ),
+                    markers: {
+                      Marker(
+                        markerId: const MarkerId('provider_location'),
+                        position: LatLng(latitude, longitude),
+                        infoWindow: InfoWindow(
+                          title: provider.displayName,
+                          snippet: provider.village ?? l10n.locationNotSpecified,
+                        ),
+                        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
+                      ),
+                    },
+                    mapType: MapType.normal,
+                    myLocationButtonEnabled: false,
+                    zoomControlsEnabled: true,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              // כפתור לפתיחת Waze
+              ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.of(context).pop();
+                  _openWazeNavigation(latitude, longitude);
+                },
+                icon: Image.asset(
+                  'assets/images/waze.png',
+                  width: 24,
+                  height: 24,
+                ),
+                label: const Text('פתח ב-Waze'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                ),
+              ),
             ],
           ),
         ),
@@ -10152,6 +10256,70 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
   }
 
   // כרטיס skeleton לטעינת נותן שירות
+  // טעינת שירותים עסקיים עבור משתמש מסוים
+  Future<List<Map<String, dynamic>>> _loadBusinessServicesForProvider(String userId) async {
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .get();
+      
+      if (!userDoc.exists) return [];
+      
+      final userData = userDoc.data()!;
+      final services = userData['businessServices'] as List<dynamic>?;
+      
+      if (services == null) return [];
+      
+      return services.map((s) => s as Map<String, dynamic>).toList();
+    } catch (e) {
+      debugPrint('Error loading business services for provider $userId: $e');
+      return [];
+    }
+  }
+
+  // טעינת שדות משלוח ותור עבור משתמש מסוים
+  Future<Map<String, bool>> _loadProviderServiceSettings(String userId) async {
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .get();
+      
+      if (!userDoc.exists) {
+        return {'requiresAppointment': false, 'requiresDelivery': false};
+      }
+      
+      final userData = userDoc.data()!;
+      return {
+        'requiresAppointment': userData['requiresAppointment'] as bool? ?? false,
+        'requiresDelivery': userData['requiresDelivery'] as bool? ?? false,
+      };
+    } catch (e) {
+      debugPrint('Error loading provider service settings for $userId: $e');
+      return {'requiresAppointment': false, 'requiresDelivery': false};
+    }
+  }
+
+  // טעינת הגדרות תורים עבור משתמש מסוים
+  Future<AppointmentSettings?> _loadAppointmentSettings(String userId) async {
+    try {
+      final appointmentsDoc = await FirebaseFirestore.instance
+          .collection('appointments')
+          .doc(userId)
+          .get();
+      
+      if (!appointmentsDoc.exists) {
+        return null;
+      }
+      
+      return AppointmentSettings.fromFirestore(appointmentsDoc);
+    } catch (e) {
+      debugPrint('Error loading appointment settings for $userId: $e');
+      return null;
+    }
+  }
+
   Widget _buildServiceProviderSkeletonCard() {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -10209,26 +10377,201 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
     );
   }
 
+  // המרת DateTime.weekday ל-DayOfWeek enum index
+  // DateTime.weekday: 1=שני, 2=שלישי, ..., 7=ראשון
+  // DayOfWeek index: 0=ראשון, 1=שני, ..., 6=שבת
+  int _convertWeekdayToDayOfWeekIndex(int weekday) {
+    // אם זה ראשון (7), מחזיר 0
+    // אחרת מחזיר weekday כמו שהוא (1=שני->1, 2=שלישי->2, וכו')
+    return weekday == 7 ? 0 : weekday;
+  }
+
+  // בדיקה אם העסק פתוח כרגע
+  Future<bool> _isProviderOpenNow(String userId) async {
+    try {
+      final now = DateTime.now();
+      final currentDayOfWeek = _convertWeekdayToDayOfWeekIndex(now.weekday); // 0 = ראשון, 1 = שני, ..., 6 = שבת
+      final currentTimeStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+      
+      // טעינת נתוני המשתמש
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .get();
+      
+      if (!userDoc.exists) return false;
+      
+      final userData = userDoc.data()!;
+      
+      // בדיקה אם זמין כל השבוע
+      final availableAllWeek = userData['availableAllWeek'] as bool? ?? false;
+      if (availableAllWeek) {
+        return true;
+      }
+      
+      // בדיקה אם משתמש בתורים או זמינות
+      final appointmentsDoc = await FirebaseFirestore.instance
+          .collection('appointments')
+          .doc(userId)
+          .get();
+      
+      final useAppointments = appointmentsDoc.exists 
+          ? (appointmentsDoc.data()?['useAppointments'] as bool? ?? false)
+          : false;
+      
+      if (useAppointments) {
+        // בדיקה לפי תורים
+        final slots = (appointmentsDoc.data()?['slots'] as List<dynamic>?)
+            ?.map((e) => AppointmentSlot.fromMap(e as Map<String, dynamic>))
+            .toList() ?? [];
+        
+        final todaySlot = slots.firstWhere(
+          (slot) => slot.dayOfWeek == currentDayOfWeek,
+          orElse: () => AppointmentSlot(
+            dayOfWeek: currentDayOfWeek,
+            startTime: '00:00',
+            endTime: '00:00',
+            durationMinutes: 30,
+          ),
+        );
+        
+        // בדיקה אם השעה הנוכחית בתוך שעות העבודה
+        if (!_isTimeInRange(currentTimeStr, todaySlot.startTime, todaySlot.endTime)) {
+          return false;
+        }
+        
+        // בדיקה אם השעה הנוכחית בתוך הפסקה
+        for (final breakTime in todaySlot.breaks) {
+          if (_isTimeInRange(currentTimeStr, breakTime.startTime, breakTime.endTime)) {
+            return false; // בתוך הפסקה = סגור
+          }
+        }
+        
+        return true;
+      } else {
+        // בדיקה לפי זמינות
+        final weekAvailabilityData = userData['weekAvailability'] as List<dynamic>?;
+        if (weekAvailabilityData == null || weekAvailabilityData.isEmpty) {
+          return false;
+        }
+        
+        final weekAvailability = WeekAvailability.fromFirestore(weekAvailabilityData);
+        final todayAvailability = weekAvailability.days.firstWhere(
+          (day) => day.day.index == currentDayOfWeek,
+          orElse: () => DayAvailability(day: DayOfWeek.values[currentDayOfWeek], isAvailable: false),
+        );
+        
+        if (!todayAvailability.isAvailable) {
+          return false;
+        }
+        
+        // בדיקה אם השעה הנוכחית בתוך שעות העבודה
+        if (todayAvailability.startTime != null && todayAvailability.endTime != null) {
+          return _isTimeInRange(
+            currentTimeStr,
+            todayAvailability.startTime!,
+            todayAvailability.endTime!,
+          );
+        }
+        
+        return todayAvailability.isAvailable;
+      }
+    } catch (e) {
+      debugPrint('Error checking if provider is open: $e');
+      return false;
+    }
+  }
+
+  // בדיקה אם שעה נמצאת בטווח זמן
+  bool _isTimeInRange(String timeStr, String startTime, String endTime) {
+    try {
+      final time = _parseTimeString(timeStr);
+      final start = _parseTimeString(startTime);
+      final end = _parseTimeString(endTime);
+      
+      // אם שעת הסיום קטנה משעת ההתחלה, זה אומר שהטווח עובר את חצות הלילה
+      if (end.isBefore(start) || end.isAtSameMomentAs(start)) {
+        return time.isAfter(start) || time.isBefore(end) || time.isAtSameMomentAs(start) || time.isAtSameMomentAs(end);
+      }
+      
+      return (time.isAfter(start) || time.isAtSameMomentAs(start)) &&
+             (time.isBefore(end) || time.isAtSameMomentAs(end));
+    } catch (e) {
+      debugPrint('Error parsing time: $e');
+      return false;
+    }
+  }
+
+  // המרת מחרוזת זמן ל-DateTime (עם תאריך בסיס)
+  DateTime _parseTimeString(String timeStr) {
+    final parts = timeStr.split(':');
+    final hour = int.parse(parts[0]);
+    final minute = int.parse(parts[1]);
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day, hour, minute);
+  }
+
   // כרטיס להצגת נותן שירות
   Widget _buildServiceProviderCard(UserProfile provider, AppLocalizations l10n) {
     final region = getGeographicRegion(provider.latitude ?? provider.mobileLatitude);
-    final userTypeText = provider.userType == UserType.guest 
-        ? 'אורח' 
-        : provider.userType == UserType.business 
-            ? 'עסקי מנוי' 
-            : 'פרטי';
     
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       elevation: 2,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // שם וסוג משתמש
-            Row(
+      child: Stack(
+        children: [
+          // תצוגת פתוח/סגור בפינה השמאלית העליונה
+          Positioned(
+            top: 8,
+            left: 8,
+            child: FutureBuilder<bool>(
+              future: _isProviderOpenNow(provider.userId),
+              builder: (context, snapshot) {
+                final isOpen = snapshot.data ?? false;
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: isOpen ? Colors.green : Colors.red,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 4,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isOpen ? Icons.check_circle : Icons.cancel,
+                        color: Colors.white,
+                        size: 14,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        isOpen ? 'פתוח' : 'סגור',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // שם העסק
+                Row(
+                  children: [
                 // תמונת פרופיל או אייקון
                 CircleAvatar(
                   radius: 30,
@@ -10251,42 +10594,95 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        userTypeText,
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      // מספר טלפון מתחת לשם העסק
+                      if (provider.phoneNumber != null && provider.allowPhoneDisplay == true) ...[
+                        const SizedBox(height: 4),
+                        InkWell(
+                          onTap: () => _makePhoneCall(provider.phoneNumber!),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.phone, size: 14, color: Colors.blue[600]),
+                              const SizedBox(width: 4),
+                              Text(
+                                provider.phoneNumber!,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.blue[700],
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
+                      ],
+                      // מיקום אחרי מספר הטלפון
+                      if (provider.village != null || (provider.latitude != null && provider.longitude != null)) ...[
+                        const SizedBox(height: 4),
+                        InkWell(
+                          onTap: () {
+                            if (provider.latitude != null && provider.longitude != null) {
+                              _showProviderLocationDialog(context, provider);
+                            }
+                          },
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.location_on, 
+                                size: 14, 
+                                color: provider.latitude != null && provider.longitude != null
+                                    ? Colors.green[600]
+                                    : Colors.grey[600],
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  provider.village ?? 
+                                  (provider.latitude != null && provider.longitude != null
+                                      ? '${provider.latitude!.toStringAsFixed(4)}, ${provider.longitude!.toStringAsFixed(4)}'
+                                      : ''),
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: provider.latitude != null && provider.longitude != null
+                                        ? Colors.green[700]
+                                        : Colors.grey[600],
+                                    decoration: provider.latitude != null && provider.longitude != null
+                                        ? TextDecoration.underline
+                                        : TextDecoration.none,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      // איזור מתחת למיקום
+                      if (provider.village != null || (provider.latitude != null && provider.longitude != null)) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.map, size: 14, color: Colors.grey[600]),
+                            const SizedBox(width: 4),
+                            Text(
+                              region.getDisplayNameHebrew(),
+                              style: const TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 16),
-            
-            // מספר טלפון
-            if (provider.phoneNumber != null && provider.allowPhoneDisplay == true) ...[
-              InkWell(
-                onTap: () => _makePhoneCall(provider.phoneNumber!),
-                child: Row(
-                  children: [
-                    Icon(Icons.phone, size: 16, color: Colors.blue[600]),
-                    const SizedBox(width: 8),
-                    Text(
-                      provider.phoneNumber!,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.blue[700],
-                        decoration: TextDecoration.underline,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 12),
-            ],
             
             // תחומי עיסוק
             if (provider.businessCategories != null && provider.businessCategories!.isNotEmpty) ...[
@@ -10304,98 +10700,322 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
               const SizedBox(height: 12),
             ],
             
-            // מיקום קבוע
-            if (provider.village != null) ...[
-              Row(
-                children: [
-                  Icon(Icons.location_on, size: 16, color: Colors.grey[600]),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      provider.village!,
-                      style: const TextStyle(fontSize: 14),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-            ],
-            
-            // איזור
-            Row(
-              children: [
-                Icon(Icons.map, size: 16, color: Colors.grey[600]),
-                const SizedBox(width: 8),
-                Text(
-                  region.getDisplayNameHebrew(),
-                  style: const TextStyle(fontSize: 14),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            
-            // זמינות
-            if (provider.availableAllWeek == true) ...[
-              Row(
-                children: [
-                  Icon(Icons.access_time, size: 16, color: Colors.green[600]),
-                  const SizedBox(width: 8),
-                  Text(
-                    'זמין כל השבוע',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.green[700],
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-            ] else if (provider.weekAvailability != null) ...[
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+            // שירותים עסקיים
+            if (provider.userType == UserType.business && provider.isSubscriptionActive) ...[
+              FutureBuilder<List<Map<String, dynamic>>>(
+                future: _loadBusinessServicesForProvider(provider.userId),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const SizedBox.shrink();
+                  }
+                  
+                  final allServices = snapshot.data ?? [];
+                  // סינון רק שירותים זמינים
+                  final services = allServices.where((service) {
+                    return service['isAvailable'] as bool? ?? true; // ברירת מחדל זמין
+                  }).toList();
+                  
+                  if (services.isEmpty) {
+                    return const SizedBox.shrink();
+                  }
+                  
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.access_time, size: 16, color: Colors.grey[600]),
-                      const SizedBox(width: 8),
-                      Text(
-                        'זמינות:',
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  ...provider.weekAvailability!.days
-                      .where((day) => day.isAvailable)
-                      .map((day) {
-                    final timeText = day.startTime != null && day.endTime != null
-                        ? '${day.startTime} - ${day.endTime}'
-                        : day.startTime != null
-                            ? 'מ-${day.startTime}'
-                            : day.endTime != null
-                                ? 'עד ${day.endTime}'
-                                : 'כל היום';
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 4),
-                      child: Row(
+                      const Divider(),
+                      const SizedBox(height: 8),
+                      Row(
                         children: [
-                          const SizedBox(width: 24),
+                          Icon(Icons.business_center, size: 16, color: Colors.green[600]),
+                          const SizedBox(width: 8),
                           Text(
-                            '${day.day.displayName}: $timeText',
-                            style: const TextStyle(fontSize: 13),
+                            'שירותים:',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.green[700],
+                            ),
                           ),
                         ],
                       ),
-                    );
-                  }),
-                ],
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: services.take(5).map((service) {
+                          final name = service['name'] as String? ?? '';
+                          final price = service['price'] as double?;
+                          final isCustomPrice = service['isCustomPrice'] as bool? ?? false;
+                          final priceText = isCustomPrice 
+                              ? 'בהתאמה אישית'
+                              : price != null 
+                                  ? '₪${price.toStringAsFixed(0)}'
+                                  : '';
+                          
+                          return Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.green[50],
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: Colors.green[200]!),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  name,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                if (priceText.isNotEmpty) ...[
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    priceText,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.green[700],
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                      if (services.length > 5) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          '+${services.length - 5} שירותים נוספים',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey[600],
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      // הצגת משלוחים/תור מתחת לשירותים
+                      FutureBuilder<Map<String, bool>>(
+                        future: _loadProviderServiceSettings(provider.userId),
+                        builder: (context, settingsSnapshot) {
+                          if (settingsSnapshot.connectionState == ConnectionState.waiting) {
+                            return const SizedBox.shrink();
+                          }
+                          
+                          final requiresDelivery = settingsSnapshot.data?['requiresDelivery'] ?? false;
+                          final requiresAppointment = settingsSnapshot.data?['requiresAppointment'] ?? false;
+                          
+                          if (!requiresDelivery && !requiresAppointment) {
+                            return const SizedBox.shrink();
+                          }
+                          
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (requiresDelivery) ...[
+                                Row(
+                                  children: [
+                                    Icon(Icons.local_shipping, size: 16, color: Colors.blue[600]),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'זמין במשלוחים',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.blue[700],
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                              ],
+                              if (requiresAppointment) ...[
+                                Row(
+                                  children: [
+                                    Icon(Icons.calendar_today, size: 16, color: Colors.orange[600]),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'יש לקבוע תור',
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: Colors.orange[700],
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ],
+                          );
+                        },
+                      ),
+                    ],
+                  );
+                },
               ),
-              const SizedBox(height: 12),
             ],
+            
+            const SizedBox(height: 12),
+            
+            // לחצן "הזמן עכשיו" - מוצג רק אם יש שירותים עסקיים
+            if (provider.userType == UserType.business && provider.isSubscriptionActive) ...[
+              FutureBuilder<List<Map<String, dynamic>>>(
+                future: _loadBusinessServicesForProvider(provider.userId),
+                builder: (context, servicesSnapshot) {
+                  final hasServices = servicesSnapshot.data?.isNotEmpty ?? false;
+                  if (!hasServices) {
+                    return const SizedBox.shrink();
+                  }
+                  
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () => _showOrderDialog(context, provider),
+                        icon: const Icon(Icons.shopping_cart),
+                        label: const Text('הזמן עכשיו'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green[600],
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
+            
+            // זמינות / תורים
+            FutureBuilder<AppointmentSettings?>(
+              future: _loadAppointmentSettings(provider.userId),
+              builder: (context, appointmentsSnapshot) {
+                final appointmentSettings = appointmentsSnapshot.data;
+                final useAppointments = appointmentSettings?.useAppointments ?? false;
+                
+                // אם משתמש בתורים - הצג תורים
+                if (useAppointments && appointmentSettings != null && appointmentSettings.slots.isNotEmpty) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.calendar_today, size: 16, color: Colors.blue[600]),
+                          const SizedBox(width: 8),
+                          Text(
+                            'תורים:',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                              color: Colors.blue[700],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      ...appointmentSettings.slots.map((slot) {
+                        const days = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+                        final dayName = days[slot.dayOfWeek];
+                        final timeText = '${slot.startTime} - ${slot.endTime}';
+                        final breaksText = slot.breaks.isNotEmpty
+                            ? ' (הפסקות: ${slot.breaks.map((b) => '${b.startTime}-${b.endTime}').join(', ')})'
+                            : '';
+                        
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Row(
+                            children: [
+                              const SizedBox(width: 24),
+                              Expanded(
+                                child: Text(
+                                  '$dayName: $timeText$breaksText',
+                                  style: const TextStyle(fontSize: 13),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                      const SizedBox(height: 12),
+                    ],
+                  );
+                }
+                
+                // אחרת - הצג זמינות רגילה
+                if (provider.availableAllWeek == true) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.access_time, size: 16, color: Colors.green[600]),
+                          const SizedBox(width: 8),
+                          Text(
+                            'זמין כל השבוע',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.green[700],
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                  );
+                } else if (provider.weekAvailability != null) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.access_time, size: 16, color: Colors.grey[600]),
+                          const SizedBox(width: 8),
+                          Text(
+                            'זמינות:',
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      ...provider.weekAvailability!.days
+                          .where((day) => day.isAvailable)
+                          .map((day) {
+                        final timeText = day.startTime != null && day.endTime != null
+                            ? '${day.startTime} - ${day.endTime}'
+                            : day.startTime != null
+                                ? 'מ-${day.startTime}'
+                                : day.endTime != null
+                                    ? 'עד ${day.endTime}'
+                                    : 'כל היום';
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Row(
+                            children: [
+                              const SizedBox(width: 24),
+                              Text(
+                                '${day.day.displayName}: $timeText',
+                                style: const TextStyle(fontSize: 13),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                      const SizedBox(height: 12),
+                    ],
+                  );
+                }
+                
+                return const SizedBox.shrink();
+              },
+            ),
             
             // דירוגים
             if (provider.averageRating != null || provider.reliability != null) ...[
@@ -10481,10 +11101,1097 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                 ),
               ],
             ),
-          ],
-        ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
+  }
+
+  // דיאלוג הזמנה
+  Future<void> _showOrderDialog(BuildContext context, UserProfile provider) async {
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) return;
+
+    // טעינת פרטי המשתמש הנוכחי
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(currentUser.uid)
+        .get();
+    
+    if (!userDoc.exists) return;
+    
+    final userData = userDoc.data()!;
+    final userName = userData['displayName'] ?? userData['name'] ?? currentUser.email ?? 'משתמש';
+    final userPhone = userData['phoneNumber'] as String? ?? '';
+
+    // טעינת שירותים של נותן השירות - רק זמינים
+    final allServices = await _loadBusinessServicesForProvider(provider.userId);
+    final services = allServices.where((service) {
+      return service['isAvailable'] as bool? ?? true; // ברירת מחדל זמין
+    }).toList();
+    
+    if (services.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('לא נמצאו שירותים זמינים')),
+      );
+      return;
+    }
+
+    // טעינת הגדרות שירות (משלוח)
+    final serviceSettings = await _loadProviderServiceSettings(provider.userId);
+    final requiresDelivery = serviceSettings['requiresDelivery'] ?? false;
+
+    // משתנים לדיאלוג - שינוי לוגיקה: שירות -> כמות -> מרכיבים
+    // List<Map> - כל הזמנה היא ייחודית, גם אם זה אותו שירות
+    final List<Map<String, dynamic>> selectedServices = [];
+    final List<int> nextServiceId = [0]; // מונה ייחודי לכל הזמנה - List כדי שיהיה mutable
+    String? deliveryType; // 'pickup' או 'delivery'
+    String? selectedDeliveryCategory; // קטגוריית משלוח (foodDelivery, groceryDelivery, smallMoving, largeMoving)
+    Map<String, dynamic>? selectedLocation; // {latitude, longitude, address}
+    String? paymentType; // 'cash', 'bit', 'credit'
+
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          // חישוב מחיר לפי המבנה החדש
+          double recalculatedTotalPrice = 0.0;
+          bool hasSelectedItems = selectedServices.isNotEmpty;
+          
+          for (final serviceData in selectedServices) {
+            final serviceName = serviceData['serviceName'] as String? ?? '';
+            final quantity = serviceData['quantity'] as int? ?? 0;
+            final service = services.firstWhere((s) => s['name'] == serviceName, orElse: () => {});
+            
+            if (quantity > 0 && service.isNotEmpty) {
+              final isCustomPrice = service['isCustomPrice'] as bool? ?? false;
+              if (!isCustomPrice) {
+                final price = (service['price'] as num?)?.toDouble() ?? 0.0;
+                recalculatedTotalPrice += price * quantity;
+                
+                // הוספת מחיר מרכיבים
+                final selectedIngredients = serviceData['ingredients'] as List<String>? ?? [];
+                final ingredients = service['ingredients'] as List<dynamic>? ?? [];
+                for (final ingredientName in selectedIngredients) {
+                  final ingredient = ingredients.firstWhere(
+                    (ing) => (ing['name'] as String?) == ingredientName,
+                    orElse: () => {},
+                  );
+                  if (ingredient.isNotEmpty) {
+                    final ingredientCost = (ingredient['cost'] as num?)?.toDouble() ?? 0.0;
+                    recalculatedTotalPrice += ingredientCost * quantity;
+                  }
+                }
+              }
+            }
+          }
+
+          return AlertDialog(
+            title: const Text('הזמנה'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // שם העסק
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.blue[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.blue[200]!),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.business, color: Colors.blue[700]),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            provider.displayName,
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue[700],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // שם המשתמש
+                  TextField(
+                    enabled: false,
+                    controller: TextEditingController(text: userName),
+                    decoration: const InputDecoration(
+                      labelText: 'שם',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // מספר טלפון
+                  TextField(
+                    enabled: false,
+                    controller: TextEditingController(text: userPhone),
+                    decoration: const InputDecoration(
+                      labelText: 'מספר טלפון',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // בחירת שירותים
+                  const Text(
+                    'שירותים:',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  
+                  // רשימת שירותים שנבחרו
+                  ...selectedServices.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final serviceData = entry.value;
+                    final serviceName = serviceData['serviceName'] as String? ?? '';
+                    final quantity = serviceData['quantity'] as int? ?? 0;
+                    final selectedIngredients = serviceData['ingredients'] as List<String>? ?? [];
+                    final service = services.firstWhere((s) => s['name'] == serviceName, orElse: () => {});
+                    final price = (service['price'] as num?)?.toDouble();
+                    final isCustomPrice = service['isCustomPrice'] as bool? ?? false;
+                    final ingredients = service['ingredients'] as List<dynamic>? ?? [];
+                    
+                    return Card(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      color: Colors.green[50],
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    serviceName,
+                                    style: const TextStyle(fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                                if (price != null && !isCustomPrice)
+                                  Text('₪${price.toStringAsFixed(0)}'),
+                                if (isCustomPrice)
+                                  const Text('בהתאמה אישית', style: TextStyle(fontSize: 12)),
+                                IconButton(
+                                  icon: const Icon(Icons.close, size: 18),
+                                  onPressed: () {
+                                    setDialogState(() {
+                                      selectedServices.removeAt(index);
+                                    });
+                                  },
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.remove_circle_outline),
+                                  onPressed: () {
+                                    setDialogState(() {
+                                      if (quantity > 1) {
+                                        serviceData['quantity'] = quantity - 1;
+                                      } else {
+                                        selectedServices.removeAt(index);
+                                      }
+                                    });
+                                  },
+                                ),
+                                Text('${quantity}'),
+                                IconButton(
+                                  icon: const Icon(Icons.add_circle_outline),
+                                  onPressed: () {
+                                    setDialogState(() {
+                                      serviceData['quantity'] = (quantity + 1);
+                                    });
+                                  },
+                                ),
+                              ],
+                            ),
+                            // בחירת מרכיבים
+                            if (ingredients.isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              const Text(
+                                'בחר מרכיבים:',
+                                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+                              ),
+                              const SizedBox(height: 4),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 4,
+                                children: ingredients.map((ingredient) {
+                                  final ingredientName = ingredient['name'] as String? ?? '';
+                                  final ingredientCost = (ingredient['cost'] as num?)?.toDouble() ?? 0.0;
+                                  final isSelected = selectedIngredients.contains(ingredientName);
+                                  
+                                  return FilterChip(
+                                    label: Text('$ingredientName${ingredientCost > 0 ? ' (+₪${ingredientCost.toStringAsFixed(0)})' : ''}'),
+                                    selected: isSelected,
+                                    onSelected: (selected) {
+                                      setDialogState(() {
+                                        if (selected) {
+                                          if (!selectedIngredients.contains(ingredientName)) {
+                                            selectedIngredients.add(ingredientName);
+                                          }
+                                        } else {
+                                          selectedIngredients.remove(ingredientName);
+                                        }
+                                        serviceData['ingredients'] = selectedIngredients;
+                                      });
+                                    },
+                                  );
+                                }).toList(),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    );
+                  }),
+                  
+                  // כפתור להוספת שירות חדש
+                  DropdownButtonFormField<String>(
+                    decoration: const InputDecoration(
+                      labelText: 'הוסף שירות',
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.add),
+                    ),
+                    items: services.map((service) {
+                      final serviceName = service['name'] as String;
+                      final price = (service['price'] as num?)?.toDouble();
+                      final isCustomPrice = service['isCustomPrice'] as bool? ?? false;
+                      final displayText = isCustomPrice 
+                          ? '$serviceName (בהתאמה אישית)'
+                          : price != null
+                              ? '$serviceName - ₪${price.toStringAsFixed(0)}'
+                              : serviceName;
+                      
+                      return DropdownMenuItem(
+                        value: serviceName,
+                        child: Text(displayText),
+                      );
+                    }).toList(),
+                    onChanged: (selectedServiceName) {
+                      if (selectedServiceName != null) {
+                        setDialogState(() {
+                          // תמיד מוסיף הזמנה חדשה, גם אם השירות כבר קיים
+                          // כך אפשר להזמין אותו שירות עם מרכיבים שונים
+                          selectedServices.add({
+                            'id': nextServiceId[0]++,
+                            'serviceName': selectedServiceName,
+                            'quantity': 1,
+                            'ingredients': <String>[],
+                          });
+                        });
+                      }
+                    },
+                  ),
+                  
+                  // סך הכל מחיר
+                  if (recalculatedTotalPrice > 0) ...[
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.green[50],
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.green[200]!),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'סך הכל:',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            '₪${recalculatedTotalPrice.toStringAsFixed(0)}',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.green[700],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  
+                  // בחירת משלוח/איסוף (אם יש שירות עם משלוח)
+                  if (hasSelectedItems && requiresDelivery) ...[
+                    const SizedBox(height: 16),
+                    const Text(
+                      'סוג שירות:',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    RadioListTile<String>(
+                      title: const Text('איסוף עצמי'),
+                      value: 'pickup',
+                      groupValue: deliveryType,
+                      onChanged: (value) {
+                        setDialogState(() {
+                          deliveryType = value;
+                          selectedLocation = null; // איפוס מיקום אם בוחרים איסוף עצמי
+                        });
+                      },
+                    ),
+                    RadioListTile<String>(
+                      title: const Text('משלוח באמצעות שליח'),
+                      value: 'delivery',
+                      groupValue: deliveryType,
+                      onChanged: (value) {
+                        setDialogState(() {
+                          deliveryType = value;
+                          selectedDeliveryCategory = null; // איפוס בחירת תחום
+                        });
+                      },
+                    ),
+                    
+                    // בחירת תחום משלוח (אם בחר משלוח)
+                    if (deliveryType == 'delivery') ...[
+                      const SizedBox(height: 16),
+                      const Text(
+                        'בחר תחום משלוח:',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      RadioListTile<String>(
+                        title: const Text('משלוחי אוכל'),
+                        value: 'foodDelivery',
+                        groupValue: selectedDeliveryCategory,
+                        onChanged: (value) {
+                          setDialogState(() {
+                            selectedDeliveryCategory = value;
+                          });
+                        },
+                      ),
+                      RadioListTile<String>(
+                        title: const Text('משלוחי קניות מהסופר'),
+                        value: 'groceryDelivery',
+                        groupValue: selectedDeliveryCategory,
+                        onChanged: (value) {
+                          setDialogState(() {
+                            selectedDeliveryCategory = value;
+                          });
+                        },
+                      ),
+                      RadioListTile<String>(
+                        title: const Text('הובלות קטנות'),
+                        value: 'smallMoving',
+                        groupValue: selectedDeliveryCategory,
+                        onChanged: (value) {
+                          setDialogState(() {
+                            selectedDeliveryCategory = value;
+                          });
+                        },
+                      ),
+                      RadioListTile<String>(
+                        title: const Text('הובלות גדולות'),
+                        value: 'largeMoving',
+                        groupValue: selectedDeliveryCategory,
+                        onChanged: (value) {
+                          setDialogState(() {
+                            selectedDeliveryCategory = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      ElevatedButton.icon(
+                        onPressed: () async {
+                          final result = await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => LocationPickerScreen(),
+                            ),
+                          );
+                          
+                          if (result != null) {
+                            setDialogState(() {
+                              selectedLocation = {
+                                'latitude': result['latitude'],
+                                'longitude': result['longitude'],
+                                'address': result['address'],
+                              };
+                            });
+                          }
+                        },
+                        icon: const Icon(Icons.location_on),
+                        label: Text(selectedLocation != null 
+                            ? selectedLocation!['address'] 
+                            : 'בחר מיקום'),
+                      ),
+                    ],
+                  ],
+                  
+                  // בחירת סוג תשלום
+                  const SizedBox(height: 16),
+                  const Text(
+                    'סוג תשלום:',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 8),
+                  RadioListTile<String>(
+                    title: const Text('מזומן'),
+                    value: 'cash',
+                    groupValue: paymentType,
+                    onChanged: (value) {
+                      setDialogState(() {
+                        paymentType = value;
+                      });
+                    },
+                  ),
+                  RadioListTile<String>(
+                    title: const Text('BIT'),
+                    value: 'bit',
+                    groupValue: paymentType,
+                    onChanged: (value) {
+                      setDialogState(() {
+                        paymentType = value;
+                      });
+                    },
+                  ),
+                  RadioListTile<String>(
+                    title: const Text('כרטיס אשראי'),
+                    value: 'credit',
+                    groupValue: paymentType,
+                    onChanged: (value) {
+                      setDialogState(() {
+                        paymentType = value;
+                      });
+                    },
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('ביטול'),
+              ),
+              // לחצן "צור הזמנה" או "שלם"
+              // בדיקת תקינות: שירותים נבחרו, תשלום נבחר, ואם נדרש משלוח - סוג שירות נבחר
+              Builder(
+                builder: (context) {
+                  final isValidOrder = hasSelectedItems && 
+                      paymentType != null &&
+                      (!requiresDelivery || deliveryType != null) &&
+                      (!requiresDelivery || deliveryType != 'delivery' || (selectedLocation != null && selectedDeliveryCategory != null));
+                  
+                  if (isValidOrder) {
+                    if (paymentType == 'cash') {
+                      return ElevatedButton(
+                        onPressed: () async {
+                          // סגירת דיאלוג ההזמנה
+                          Navigator.pop(context);
+                          // הצגת דיאלוג אישור
+                          await _showOrderConfirmationDialog(
+                            context,
+                            provider,
+                            selectedServices,
+                            recalculatedTotalPrice,
+                            deliveryType,
+                            selectedLocation,
+                            selectedDeliveryCategory,
+                            paymentType!, // כבר נבדק שהוא לא null
+                            userName,
+                            userPhone,
+                            services,
+                          );
+                        },
+                        child: const Text('צור הזמנה'),
+                      );
+                    } else {
+                      return ElevatedButton(
+                        onPressed: () {
+                          // TODO: לוגיקה לתשלום (BIT או כרטיס אשראי)
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('מעבר לתשלום...')),
+                          );
+                        },
+                        child: const Text('שלם'),
+                      );
+                    }
+                  } else if (hasSelectedItems && paymentType != null && requiresDelivery && deliveryType == null) {
+                    // הודעת שגיאה אם חסר סוג שירות
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        'אנא בחר סוג שירות (איסוף עצמי או משלוח)',
+                        style: TextStyle(
+                          color: Colors.red[700],
+                          fontSize: 12,
+                        ),
+                      ),
+                    );
+                  }
+                  return const SizedBox.shrink();
+                },
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // דיאלוג אישור הזמנה
+  Future<void> _showOrderConfirmationDialog(
+    BuildContext context,
+    UserProfile provider,
+    List<Map<String, dynamic>> selectedServices,
+    double totalPrice,
+    String? deliveryType,
+    Map<String, dynamic>? selectedLocation,
+    String? selectedDeliveryCategory,
+    String paymentType,
+    String customerName,
+    String customerPhone,
+    List<Map<String, dynamic>> allServices,
+  ) async {
+    // בניית רשימת OrderItems
+    final orderItems = <order_model.OrderItem>[];
+    for (final serviceData in selectedServices) {
+      final serviceName = serviceData['serviceName'] as String? ?? '';
+      final quantity = serviceData['quantity'] as int? ?? 0;
+      final selectedIngredients = serviceData['ingredients'] as List<String>? ?? [];
+      final service = allServices.firstWhere((s) => s['name'] == serviceName, orElse: () => {});
+      
+      if (service.isNotEmpty && quantity > 0) {
+        final servicePrice = (service['price'] as num?)?.toDouble();
+        final isCustomPrice = service['isCustomPrice'] as bool? ?? false;
+        final ingredients = service['ingredients'] as List<dynamic>? ?? [];
+        
+        // חישוב מחיר כולל מרכיבים
+        double itemTotalPrice = 0.0;
+        if (!isCustomPrice && servicePrice != null) {
+          itemTotalPrice = servicePrice * quantity;
+          
+          // הוספת מחיר מרכיבים
+          for (final ingredientName in selectedIngredients) {
+            final ingredient = ingredients.firstWhere(
+              (ing) => (ing['name'] as String?) == ingredientName,
+              orElse: () => {},
+            );
+            if (ingredient.isNotEmpty) {
+              final ingredientCost = (ingredient['cost'] as num?)?.toDouble() ?? 0.0;
+              itemTotalPrice += ingredientCost * quantity;
+            }
+          }
+        }
+        
+        orderItems.add(order_model.OrderItem(
+          serviceName: serviceName,
+          quantity: quantity,
+          selectedIngredients: selectedIngredients,
+          servicePrice: servicePrice,
+          isCustomPrice: isCustomPrice,
+          totalItemPrice: itemTotalPrice > 0 ? itemTotalPrice : null,
+        ));
+      }
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('אישור הזמנה'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // שם העסק
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue[200]!),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.business, color: Colors.blue[700]),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        provider.displayName,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue[700],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              
+              // פרטי הלקוח
+              const Text(
+                'פרטי הלקוח:',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Text('שם: $customerName'),
+              Text('טלפון: $customerPhone'),
+              const SizedBox(height: 16),
+              
+              // פירוט השירותים
+              const Text(
+                'פירוט השירותים:',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              ...orderItems.map((item) {
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                item.serviceName,
+                                style: const TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                            Text('כמות: ${item.quantity}'),
+                          ],
+                        ),
+                        if (item.selectedIngredients.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            'מרכיבים: ${item.selectedIngredients.join(', ')}',
+                            style: const TextStyle(fontSize: 12, color: Colors.grey),
+                          ),
+                        ],
+                        if (item.totalItemPrice != null) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            'מחיר: ₪${item.totalItemPrice!.toStringAsFixed(0)}',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.green[700],
+                            ),
+                          ),
+                        ] else if (item.isCustomPrice) ...[
+                          const SizedBox(height: 4),
+                          const Text(
+                            'מחיר: בהתאמה אישית',
+                            style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                );
+              }),
+              
+              // סוג שירות
+              if (deliveryType != null) ...[
+                const SizedBox(height: 16),
+                const Text(
+                  'סוג שירות:',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                Text(deliveryType == 'pickup' ? 'איסוף עצמי' : 'משלוח באמצעות שליח'),
+                if (deliveryType == 'delivery' && selectedLocation != null) ...[
+                  const SizedBox(height: 4),
+                  Text('מיקום: ${selectedLocation['address']}'),
+                ],
+              ],
+              
+              // סוג תשלום
+              const SizedBox(height: 16),
+              const Text(
+                'סוג תשלום:',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                paymentType == 'cash' 
+                    ? 'מזומן'
+                    : paymentType == 'bit'
+                        ? 'BIT'
+                        : 'כרטיס אשראי',
+              ),
+              
+              // סך הכל
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green[200]!),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'סך הכל:',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    Text(
+                      '₪${totalPrice.toStringAsFixed(0)}',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green[700],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('ביטול'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.green,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('אשר הזמנה'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      await _createOrder(
+        provider: provider,
+        orderItems: orderItems,
+        totalPrice: totalPrice,
+        deliveryType: deliveryType,
+        deliveryLocation: selectedLocation,
+        deliveryCategory: selectedDeliveryCategory,
+        paymentType: paymentType,
+        customerName: customerName,
+        customerPhone: customerPhone,
+      );
+    }
+  }
+
+  // קבלת מספר הזמנה הבא עבור עסק מסוים
+  Future<int> _getNextOrderNumber(String providerId) async {
+    try {
+      final counterRef = FirebaseFirestore.instance
+          .collection('order_counters')
+          .doc(providerId);
+      
+      // קריאה אטומית - הגדלת המספר ב-1
+      await counterRef.set({
+        'lastOrderNumber': FieldValue.increment(1),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      
+      // קבלת המספר החדש
+      final counterDoc = await counterRef.get();
+      final counterData = counterDoc.data();
+      int lastNumber = (counterData?['lastOrderNumber'] as num?)?.toInt() ?? 99; // אם זה הראשון, נתחיל מ-100
+      
+      // אם המספר קטן מ-100, נגדיר אותו ל-100
+      if (lastNumber < 100) {
+        await counterRef.set({
+          'lastOrderNumber': 100,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+        return 100;
+      }
+      
+      return lastNumber;
+    } catch (e) {
+      debugPrint('Error getting next order number: $e');
+      // במקרה של שגיאה, נחזיר 100
+      return 100;
+    }
+  }
+
+  // יצירת הזמנה ב-Firestore
+  Future<void> _createOrder({
+    required UserProfile provider,
+    required List<order_model.OrderItem> orderItems,
+    required double totalPrice,
+    String? deliveryType,
+    Map<String, dynamic>? deliveryLocation,
+    String? deliveryCategory,
+    required String paymentType,
+    required String customerName,
+    required String customerPhone,
+  }) async {
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) return;
+
+      // קבלת מספר הזמנה הבא עבור העסק
+      final orderNumber = await _getNextOrderNumber(provider.userId);
+
+      final order = order_model.Order(
+        orderId: '', // יוגדר ב-Firestore
+        customerId: currentUser.uid,
+        customerName: customerName,
+        customerPhone: customerPhone,
+        providerId: provider.userId,
+        providerName: provider.displayName,
+        items: orderItems,
+        totalPrice: totalPrice,
+        deliveryType: deliveryType,
+        deliveryLocation: deliveryLocation,
+        deliveryCategory: deliveryCategory,
+        paymentType: paymentType,
+        status: 'pending',
+        orderNumber: orderNumber,
+        createdAt: DateTime.now(),
+      );
+
+      final orderDocRef = await FirebaseFirestore.instance
+          .collection('orders')
+          .add(order.toFirestore());
+      
+      final orderId = orderDocRef.id;
+
+      // אם ההזמנה היא עם משלוח, שלח התראות לשליחים
+      if (deliveryType == 'delivery' && deliveryLocation != null && deliveryCategory != null) {
+        await _notifyCouriersForOrder(
+          orderId: orderId,
+          provider: provider,
+          deliveryLocation: deliveryLocation,
+          deliveryCategory: deliveryCategory,
+        );
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('ההזמנה נוצרה בהצלחה'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error creating order: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה ביצירת ההזמנה: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // פונקציה לשליחת התראות לשליחים על הזמנה חדשה
+  Future<void> _notifyCouriersForOrder({
+    required String orderId,
+    required UserProfile provider,
+    required Map<String, dynamic> deliveryLocation,
+    required String deliveryCategory,
+  }) async {
+    try {
+      final deliveryLat = (deliveryLocation['latitude'] as num?)?.toDouble();
+      final deliveryLng = (deliveryLocation['longitude'] as num?)?.toDouble();
+      
+      if (deliveryLat == null || deliveryLng == null) {
+        debugPrint('❌ Invalid delivery location coordinates');
+        return;
+      }
+
+      // המרת שם הקטגוריה הנבחרת ל-RequestCategory
+      RequestCategory? selectedCategory;
+      try {
+        selectedCategory = RequestCategory.values.firstWhere(
+          (cat) => cat.name == deliveryCategory,
+        );
+      } catch (e) {
+        debugPrint('❌ Invalid delivery category: $deliveryCategory');
+        return;
+      }
+
+      debugPrint('🔍 Looking for couriers with category: ${selectedCategory.name}');
+      debugPrint('📍 Delivery location: lat=$deliveryLat, lng=$deliveryLng');
+
+      // מציאת כל המשתמשים העסקיים עם קטגוריות של שליחים
+      final usersSnapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .where('userType', isEqualTo: 'business')
+          .where('isSubscriptionActive', isEqualTo: true)
+          .get();
+
+      debugPrint('👥 Found ${usersSnapshot.docs.length} business users with active subscription');
+
+      final eligibleCouriers = <String, UserProfile>{};
+
+      for (var userDoc in usersSnapshot.docs) {
+        try {
+          final userData = userDoc.data();
+          final businessCategories = userData['businessCategories'] as List<dynamic>?;
+          
+          if (businessCategories == null || businessCategories.isEmpty) {
+            debugPrint('⏭️ Skipping user ${userDoc.id} - no business categories');
+            continue;
+          }
+
+          debugPrint('🔍 Checking user ${userDoc.id} (${userData['displayName'] ?? 'no name'})');
+          debugPrint('   Categories: $businessCategories');
+
+          // בדיקה אם המשתמש הוא שליח עם התחום הנבחר
+          bool hasMatchingCategory = false;
+          final selectedCategoryName = selectedCategory.name; // שם באנגלית
+          final selectedCategoryDisplayName = selectedCategory.categoryDisplayName; // שם בעברית
+          
+          for (var category in businessCategories) {
+            String categoryName;
+            // טיפול בכמה פורמטים אפשריים
+            if (category is String) {
+              categoryName = category;
+            } else {
+              // אם זה לא string, נסה לחלץ את השם
+              final categoryStr = category.toString();
+              if (categoryStr.startsWith('RequestCategory.')) {
+                categoryName = categoryStr.replaceFirst('RequestCategory.', '');
+              } else {
+                categoryName = categoryStr;
+              }
+            }
+            
+            debugPrint('   Checking category: "$categoryName" vs "$selectedCategoryName" (EN) or "$selectedCategoryDisplayName" (HE)');
+            
+            // בדיקה אם הקטגוריה תואמת לתחום הנבחר
+            // נבדוק גם לפי שם באנגלית וגם לפי שם בעברית
+            bool matches = false;
+            
+            // בדיקה לפי שם באנגלית (case-insensitive)
+            if (categoryName.toLowerCase() == selectedCategoryName.toLowerCase()) {
+              matches = true;
+            }
+            
+            // בדיקה לפי שם בעברית
+            if (!matches && categoryName == selectedCategoryDisplayName) {
+              matches = true;
+            }
+            
+            // אם הקטגוריה היא string, נסה למצוא את ה-RequestCategory המתאים ולבדוק
+            if (!matches && category is String) {
+              try {
+                // נסה למצוא את הקטגוריה לפי שם בעברית
+                final matchingCategory = RequestCategory.values.firstWhere(
+                  (cat) => cat.categoryDisplayName == categoryName,
+                  orElse: () => RequestCategory.plumbing,
+                );
+                if (matchingCategory == selectedCategory) {
+                  matches = true;
+                }
+              } catch (e) {
+                // אם לא מצאנו, נמשיך
+              }
+            }
+            
+            if (matches) {
+              hasMatchingCategory = true;
+              debugPrint('   ✅ Category matches!');
+              break;
+            }
+          }
+
+          if (!hasMatchingCategory) {
+            debugPrint('   ❌ No matching category');
+            continue;
+          }
+
+          // בדיקת מיקום קבוע וטווח חשיפה
+          final userLat = (userData['latitude'] as num?)?.toDouble();
+          final userLng = (userData['longitude'] as num?)?.toDouble();
+          final maxRadius = (userData['maxRadius'] as num?)?.toDouble();
+
+          debugPrint('   Location: lat=$userLat, lng=$userLng, maxRadius=$maxRadius');
+
+          // חייב להיות מיקום קבוע וטווח חשיפה
+          if (userLat == null || userLng == null || maxRadius == null) {
+            debugPrint('   ❌ Missing location or radius');
+            continue;
+          }
+
+          // בדיקת מיקום בטווח
+          final distance = LocationService.calculateDistance(
+            userLat,
+            userLng,
+            deliveryLat,
+            deliveryLng,
+          );
+
+          debugPrint('   📏 Distance: ${distance.toStringAsFixed(2)} km (max: $maxRadius km)');
+
+          if (distance <= maxRadius) {
+            final userProfile = UserProfile.fromFirestore(userDoc);
+            eligibleCouriers[userDoc.id] = userProfile;
+            debugPrint('   ✅ Courier eligible!');
+          } else {
+            debugPrint('   ❌ Out of range');
+          }
+        } catch (e) {
+          debugPrint('❌ Error processing courier ${userDoc.id}: $e');
+          continue;
+        }
+      }
+
+      debugPrint('📦 Found ${eligibleCouriers.length} eligible couriers for order $orderId');
+
+      // שליחת התראות לכל השליחים המתאימים
+      for (var entry in eligibleCouriers.entries) {
+        final courierId = entry.key;
+        final courierProfile = entry.value;
+
+        // קבלת שם התצוגה של הקטגוריה
+        final categoryDisplayName = selectedCategory.categoryDisplayName;
+
+        await NotificationService.sendNotification(
+          toUserId: courierId,
+          title: 'הזמנה חדשה למשלוח',
+          message: 'התקבלה הזמנה חדשה מ-${provider.displayName} בתחום $categoryDisplayName בטווח שלך',
+          type: 'order_delivery',
+          data: {
+            'orderId': orderId,
+            'providerId': provider.userId,
+            'providerName': provider.displayName,
+            'deliveryCategory': deliveryCategory,
+            'deliveryLat': deliveryLat.toString(),
+            'deliveryLng': deliveryLng.toString(),
+            'address': deliveryLocation['address']?.toString() ?? '',
+          },
+        );
+
+        debugPrint('✅ Notification sent to courier: ${courierProfile.displayName}');
+      }
+    } catch (e) {
+      debugPrint('❌ Error notifying couriers: $e');
+    }
   }
 
   // פונקציה לעיצוב תאריך

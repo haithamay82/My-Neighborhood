@@ -18,6 +18,7 @@ import 'screens/yoki_style_auth_screen.dart';
 import 'screens/tutorial_center_screen.dart';
 import 'screens/new_request_screen.dart';
 import 'screens/my_requests_screen.dart';
+import 'screens/my_orders_screen.dart';
 import 'screens/admin_payments_screen.dart';
 import 'services/admin_auth_service.dart';
 import 'l10n/app_localizations.dart';
@@ -51,9 +52,15 @@ void main() async {
     // על iOS, FirebaseApp.configure() נקרא ב-AppDelegate.swift
     // על Web, צריך לאתחל
     if (kIsWeb) {
+      final webOptions = DefaultFirebaseOptions.currentPlatform;
+      debugPrint('🌐 Initializing Firebase for Web');
+      debugPrint('   App ID: ${webOptions.appId}');
+      debugPrint('   Project ID: ${webOptions.projectId}');
+      debugPrint('   Auth Domain: ${webOptions.authDomain}');
       await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
+        options: webOptions,
       );
+      debugPrint('✅ Firebase initialized for Web successfully');
     }
     // על iOS, Firebase כבר מאותחל - רק נבדוק שהוא זמין
     try {
@@ -787,32 +794,53 @@ class _AuthWrapperState extends State<AuthWrapper> {
   Future<User?> _getRedirectResult() async {
     if (kIsWeb) {
       try {
-        // הוספת timeout כדי למנוע חסימה ארוכה
+        debugPrint('🔍 Checking for Google Sign-In redirect result...');
+        // הגדלת timeout ל-5 שניות כדי לאפשר זמן ל-redirect result להתעדכן
         final result = await FirebaseAuth.instance
             .getRedirectResult()
             .timeout(
-              const Duration(seconds: 2),
+              const Duration(seconds: 5),
               onTimeout: () {
                 debugPrint('⏱️ getRedirectResult timeout - returning null');
                 throw TimeoutException('getRedirectResult timeout');
               },
             );
+        
         if (result.user != null) {
           debugPrint('✅ Google Sign-In redirect successful: ${result.user!.email}');
+          debugPrint('   User ID: ${result.user!.uid}');
           // הודעה תוצג ב-build method דרך ScaffoldMessenger
           return result.user;
         } else {
-          debugPrint('ℹ️ No Google Sign-In redirect result');
+          debugPrint('ℹ️ No Google Sign-In redirect result (user is null)');
+          // בדיקה אם יש user מחובר כבר (למקרה שה-redirect result לא עובד אבל המשתמש כבר מחובר)
+          final currentUser = FirebaseAuth.instance.currentUser;
+          if (currentUser != null) {
+            debugPrint('✅ Found current user already authenticated: ${currentUser.email}');
+            return currentUser;
+          }
           return null;
         }
       } on TimeoutException {
-        debugPrint('⏱️ getRedirectResult timeout');
+        debugPrint('⏱️ getRedirectResult timeout - checking current user');
+        // גם אחרי timeout, נבדוק אם יש user מחובר
+        final currentUser = FirebaseAuth.instance.currentUser;
+        if (currentUser != null) {
+          debugPrint('✅ Found current user after timeout: ${currentUser.email}');
+          return currentUser;
+        }
         return null;
       } catch (e) {
         debugPrint('❌ Google Sign-In redirect error: $e');
         // התעלם משגיאות minified - זה לא קריטי
         if (e.toString().contains('minified')) {
           debugPrint('⚠️ Ignoring minified error - this is a known issue with getRedirectResult');
+        }
+        // גם אחרי שגיאה, נבדוק אם יש user מחובר
+        final currentUser = FirebaseAuth.instance.currentUser;
+        if (currentUser != null) {
+          debugPrint('✅ Found current user after error: ${currentUser.email}');
+          return currentUser;
         }
         return null;
       }
@@ -893,7 +921,31 @@ class _AuthWrapperState extends State<AuthWrapper> {
             }
 
             if (snapshot.connectionState == ConnectionState.waiting) {
-              debugPrint('⏳ AuthWrapper - Waiting for auth state, showing loading');
+              debugPrint('⏳ AuthWrapper - Waiting for auth state');
+              // אם יש redirect result ב-waiting state, נציג את MainApp
+              if (redirectSnapshot.hasData && redirectSnapshot.data != null) {
+                debugPrint('✅ AuthWrapper - Redirect user found in waiting state, showing MainApp');
+                if (!mounted || !context.mounted) return const SizedBox.shrink();
+                return MainApp(
+                  onLocaleChange: widget.onLocaleChange, 
+                  localeNotifier: widget.localeNotifier,
+                  onThemeChange: widget.onThemeChange,
+                  currentThemeMode: widget.currentThemeMode,
+                );
+              }
+              // בדיקה אם יש user מחובר כבר (למקרה שה-redirect result לא עובד אבל המשתמש כבר מחובר)
+              final currentUser = FirebaseAuth.instance.currentUser;
+              if (currentUser != null) {
+                debugPrint('✅ AuthWrapper - Found current user in waiting state: ${currentUser.email}');
+                if (!mounted || !context.mounted) return const SizedBox.shrink();
+                return MainApp(
+                  onLocaleChange: widget.onLocaleChange, 
+                  localeNotifier: widget.localeNotifier,
+                  onThemeChange: widget.onThemeChange,
+                  currentThemeMode: widget.currentThemeMode,
+                );
+              }
+              debugPrint('⏳ AuthWrapper - Showing loading');
               if (!mounted || !context.mounted) return const SizedBox.shrink();
               // הצג loading - אם זה לוקח יותר מדי זמן, ה-StreamBuilder יתעדכן אוטומטית
               return const Scaffold(
@@ -1417,6 +1469,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver, AudioMix
               children: [
                 const HomeScreen(),
                 const MyRequestsScreen(),
+                const MyOrdersScreen(),
                 const NotificationsScreen(),
                 const ProfileScreen(),
                 if (AdminAuthService.isCurrentUserAdmin()) const AdminPaymentsScreen(),
@@ -1438,7 +1491,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver, AudioMix
               onTap: (index) {
                 setState(() => _selectedIndex = index);
                 // איפוס ספירת תשלומים ממתינים כאשר המנהל נכנס למסך ניהול תשלומים
-                    final adminIndex = 4;
+                    final adminIndex = AdminAuthService.isCurrentUserAdmin() ? 5 : 4;
                     if (AdminAuthService.isCurrentUserAdmin() && index == adminIndex) {
                   _clearPendingPaymentsCount();
                 }
@@ -1453,6 +1506,10 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver, AudioMix
                 BottomNavigationBarItem(
                   icon: const Icon(Icons.assignment),
                   label: l10n.myRequestsMenu,
+                    ),
+                BottomNavigationBarItem(
+                  icon: const Icon(Icons.shopping_cart),
+                  label: 'הזמנות שלי',
                     ),
                 BottomNavigationBarItem(
                   icon: StreamBuilder<int>(

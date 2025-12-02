@@ -13,6 +13,13 @@ class GoogleAuthService {
         // 🌐 גרסת Web - נשתמש ב-redirect כי popup יכול להיכשל בגלל Cross-Origin-Opener-Policy
         debugPrint('🌐 Starting Google Sign-In on Web');
         
+        // בדיקה אם יש user מחובר כבר (למקרה שהמשתמש חזר מ-Google redirect)
+        final currentUser = _auth.currentUser;
+        if (currentUser != null) {
+          debugPrint('✅ User already authenticated: ${currentUser.email}');
+          return currentUser;
+        }
+        
         // בדיקה אם יש redirect result קיים (אחרי חזרה מ-Google)
         try {
           final redirectResult = await _auth.getRedirectResult();
@@ -24,7 +31,7 @@ class GoogleAuthService {
           debugPrint('⚠️ No redirect result or error: $e');
         }
         
-        // אם אין redirect result, נתחיל תהליך התחברות חדש
+        // אם אין redirect result ואין user מחובר, נתחיל תהליך התחברות חדש
         final googleProvider = GoogleAuthProvider();
         googleProvider.setCustomParameters({'prompt': 'select_account'});
 

@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/push_notification_service.dart';
 import '../services/admin_auth_service.dart';
 import '../services/google_signin_service.dart';
+import '../services/google_auth_service.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../services/network_service.dart';
 import '../widgets/network_aware_widget.dart';
 import '../services/audio_service.dart';
@@ -38,6 +40,62 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
     super.initState();
     // טעינת פרטי כניסה שמורים אם קיימים
     _loadSavedCredentials();
+    
+    // טיפול ב-Google Sign-In redirect ב-web (אחרי שהמסך נבנה)
+    if (kIsWeb) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _handleGoogleRedirect();
+      });
+    }
+  }
+
+  /// טיפול ב-Google Sign-In redirect ב-web
+  Future<void> _handleGoogleRedirect() async {
+    try {
+      // המתנה קצרה כדי לאפשר ל-redirect result להתעדכן
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      final redirectResult = await FirebaseAuth.instance.getRedirectResult();
+      if (redirectResult.user != null) {
+        debugPrint('✅ Google Sign-In redirect detected: ${redirectResult.user!.email}');
+        
+        // שמירת המשתמש ב-Firestore
+        await _saveGoogleUserToFirestore(redirectResult.user!);
+        
+        // בדיקה אם המשתמש הוא מנהל
+        if (redirectResult.user!.email != null) {
+          final isAdmin = await GoogleSignInService.isAdmin(redirectResult.user!.email!);
+          if (isAdmin) {
+            try {
+              await AdminAuthService.ensureAdminProfile();
+              debugPrint('✅ Admin profile updated successfully');
+            } catch (e) {
+              debugPrint('⚠️ Admin profile update failed: $e');
+            }
+          }
+        }
+        
+        if (!mounted) return;
+        
+        // הצגת הודעה והתחברות
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('התחברת בהצלחה עם Google!'),
+          backgroundColor: Colors.green,
+        ));
+        
+        // קריאה ל-callback אם קיים
+        if (widget.onLoginSuccess != null) {
+          widget.onLoginSuccess!();
+        } else {
+          if (mounted) {
+            Navigator.pushReplacementNamed(context, '/main');
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error handling Google redirect: $e');
+      // התעלם משגיאות - זה לא קריטי
+    }
   }
 
   @override
@@ -601,17 +659,44 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
     setState(() => _isLoading = true);
 
     try {
-      final userCredential = await GoogleSignInService.signInWithGoogle();
+      User? user;
       
-      if (userCredential == null) {
-        // המשתמש ביטל את הכניסה
-        return;
-      }
+      if (kIsWeb) {
+        // 🌐 גרסת Web - משתמש ב-GoogleAuthService עם redirect
+        debugPrint('🌐 Using GoogleAuthService for Web');
+        user = await GoogleAuthService.signInWithGoogle();
+        
+        // אם זה redirect, המשתמש יעבור לדף Google ואז יחזור
+        // נטפל ב-redirect result ב-initState או ב-build
+        if (user == null) {
+          // המשתמש הועבר לדף Google - נחכה ל-redirect
+          debugPrint('🔄 User redirected to Google, waiting for redirect result...');
+          if (mounted) {
+            setState(() => _isLoading = false);
+          }
+          return;
+        }
+      } else {
+        // 📱 גרסת מובייל - משתמש ב-GoogleSignInService
+        debugPrint('📱 Using GoogleSignInService for Mobile');
+        final userCredential = await GoogleSignInService.signInWithGoogle();
+        
+        if (userCredential == null) {
+          // המשתמש ביטל את הכניסה
+          if (mounted) {
+            setState(() => _isLoading = false);
+          }
+          return;
+        }
 
-      final user = userCredential.user;
-      if (user == null) {
-        debugPrint('❌ Google Sign-In failed: User is null');
-        return;
+        user = userCredential.user;
+        if (user == null) {
+          debugPrint('❌ Google Sign-In failed: User is null');
+          if (mounted) {
+            setState(() => _isLoading = false);
+          }
+          return;
+        }
       }
       
       debugPrint('✅ Google Sign-In successful: ${user.email}');
@@ -619,7 +704,15 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
       // בדיקה אם המשתמש הוא מנהל
       if (user.email == null) {
         debugPrint('❌ Google Sign-In failed: User email is null');
+        if (mounted) {
+          setState(() => _isLoading = false);
+        }
         return;
+      }
+      
+      // שמירת המשתמש ב-Firestore (אם לא קיים)
+      if (kIsWeb) {
+        await _saveGoogleUserToFirestore(user);
       }
       
       final isAdmin = await GoogleSignInService.isAdmin(user.email!);
@@ -634,12 +727,14 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
         }
       }
       
-      // עדכון FCM token
-      try {
-        await PushNotificationService.updateUserToken();
-        debugPrint('✅ FCM token updated');
-      } catch (e) {
-        debugPrint('⚠️ FCM token update failed: $e');
+      // עדכון FCM token (רק במובייל)
+      if (!kIsWeb) {
+        try {
+          await PushNotificationService.updateUserToken();
+          debugPrint('✅ FCM token updated');
+        } catch (e) {
+          debugPrint('⚠️ FCM token update failed: $e');
+        }
       }
       
       if (!mounted) return;
@@ -660,6 +755,8 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
     } catch (e) {
       if (!mounted) return;
       
+      debugPrint('❌ Google Sign-In error: $e');
+      
       // הצגת הודעת שגיאה מותאמת
       showError(context, e, onRetry: () {
         _handleGoogleSignIn();
@@ -668,6 +765,102 @@ class _AuthScreenState extends State<AuthScreen> with NetworkAwareMixin, AudioMi
       if (mounted) {
         setState(() => _isLoading = false);
       }
+    }
+  }
+
+  /// שמירת משתמש Google ב-Firestore (ל-web)
+  Future<void> _saveGoogleUserToFirestore(User user) async {
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      
+      // בדיקה אם המשתמש הוא מנהל
+      final isAdminUser = user.email != null 
+          ? await GoogleSignInService.isAdmin(user.email!) 
+          : false;
+      
+      if (!userDoc.exists) {
+        // יצירת משתמש חדש
+        final userData = {
+          'uid': user.uid,
+          'email': user.email,
+          'displayName': user.displayName ?? user.email?.split('@')[0] ?? 'משתמש',
+          'name': user.displayName ?? user.email?.split('@')[0] ?? 'משתמש',
+          'photoURL': user.photoURL ?? '',
+          'phoneNumber': user.phoneNumber ?? '',
+          'isActive': true,
+          'role': isAdminUser ? 'business' : 'personal',
+          'createdAt': FieldValue.serverTimestamp(),
+          'lastLoginAt': FieldValue.serverTimestamp(),
+          'signInMethod': 'google',
+        };
+        
+        // אם זה מנהל, הוסף פרטים נוספים
+        if (isAdminUser) {
+          userData.addAll({
+            'userType': 'business',
+            'isSubscriptionActive': true,
+            'subscriptionStatus': 'active',
+            'subscriptionExpiry': Timestamp.fromDate(
+              DateTime.now().add(const Duration(days: 365 * 10)) // 10 שנים
+            ),
+            'businessCategories': [], // יוגדר ב-ensureAdminProfile
+            'isAdmin': true,
+          });
+        } else {
+          // משתמש רגיל - הגדר כפרטי מנוי
+          userData.addAll({
+            'userType': 'personal',
+            'isSubscriptionActive': true,
+            'subscriptionStatus': 'active',
+            'subscriptionExpiry': Timestamp.fromDate(
+              DateTime.now().add(const Duration(days: 365)) // שנה אחת
+            ),
+            'emailVerified': user.emailVerified,
+            'accountStatus': 'active',
+            'maxRequestsPerMonth': 5,
+            'maxRadius': 10.0,
+            'canCreatePaidRequests': false,
+            'businessCategories': [],
+            'hasAcceptedTerms': true,
+          });
+        }
+        
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .set(userData);
+        
+        debugPrint('✅ New Google user saved to Firestore: ${user.email}');
+      } else {
+        // עדכון זמן הכניסה האחרון
+        final updateData = {
+          'lastLoginAt': FieldValue.serverTimestamp(),
+          'signInMethod': 'google',
+        };
+        
+        // אם זה מנהל, וודא שהפרטים נכונים
+        if (isAdminUser) {
+          updateData.addAll({
+            'isAdmin': true,
+            'userType': 'business',
+            'isSubscriptionActive': true,
+            'subscriptionStatus': 'active',
+          });
+        }
+        
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .update(updateData);
+        
+        debugPrint('✅ Existing Google user updated: ${user.email}');
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error saving Google user to Firestore: $e');
+      // לא נזרוק שגיאה - זה לא קריטי
     }
   }
 

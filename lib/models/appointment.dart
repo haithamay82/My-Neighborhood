@@ -156,27 +156,72 @@ class AppointmentSettings {
   }
 }
 
+/// מודל להפסקה (BreakTime)
+class BreakTime {
+  final String startTime; // פורמט: "HH:mm"
+  final String endTime; // פורמט: "HH:mm"
+
+  BreakTime({
+    required this.startTime,
+    required this.endTime,
+  });
+
+  // Factory method from map
+  factory BreakTime.fromMap(Map<String, dynamic> map) {
+    return BreakTime(
+      startTime: map['startTime'] ?? '12:00',
+      endTime: map['endTime'] ?? '13:00',
+    );
+  }
+
+  // Convert to map
+  Map<String, dynamic> toMap() {
+    return {
+      'startTime': startTime,
+      'endTime': endTime,
+    };
+  }
+
+  // Copy with method
+  BreakTime copyWith({
+    String? startTime,
+    String? endTime,
+  }) {
+    return BreakTime(
+      startTime: startTime ?? this.startTime,
+      endTime: endTime ?? this.endTime,
+    );
+  }
+}
+
 /// מודל לתור בודד (AppointmentSlot)
 class AppointmentSlot {
   final int dayOfWeek; // 0 = ראשון, 1 = שני, ..., 6 = שבת
   final String startTime; // פורמט: "HH:mm"
   final String endTime; // פורמט: "HH:mm"
   final int durationMinutes; // משך תור בדקות
+  final List<BreakTime> breaks; // רשימת הפסקות
 
   AppointmentSlot({
     required this.dayOfWeek,
     required this.startTime,
     required this.endTime,
     required this.durationMinutes,
+    this.breaks = const [],
   });
 
   // Factory method from map
   factory AppointmentSlot.fromMap(Map<String, dynamic> map) {
+    final breaksList = (map['breaks'] as List<dynamic>?)
+        ?.map((e) => BreakTime.fromMap(e as Map<String, dynamic>))
+        .toList() ?? [];
+    
     return AppointmentSlot(
       dayOfWeek: map['dayOfWeek'] ?? 0,
       startTime: map['startTime'] ?? '09:00',
       endTime: map['endTime'] ?? '17:00',
       durationMinutes: map['durationMinutes'] ?? 30,
+      breaks: breaksList,
     );
   }
 
@@ -187,7 +232,25 @@ class AppointmentSlot {
       'startTime': startTime,
       'endTime': endTime,
       'durationMinutes': durationMinutes,
+      'breaks': breaks.map((b) => b.toMap()).toList(),
     };
+  }
+
+  // Copy with method
+  AppointmentSlot copyWith({
+    int? dayOfWeek,
+    String? startTime,
+    String? endTime,
+    int? durationMinutes,
+    List<BreakTime>? breaks,
+  }) {
+    return AppointmentSlot(
+      dayOfWeek: dayOfWeek ?? this.dayOfWeek,
+      startTime: startTime ?? this.startTime,
+      endTime: endTime ?? this.endTime,
+      durationMinutes: durationMinutes ?? this.durationMinutes,
+      breaks: breaks ?? this.breaks,
+    );
   }
 
   // Helper method to get day name in Hebrew

@@ -28,6 +28,7 @@ import '../services/auto_login_service.dart';
 import '../services/monthly_requests_tracker.dart';
 import '../widgets/tutorial_dialog.dart';
 import '../widgets/two_level_category_selector.dart';
+import 'order_management_screen.dart';
 import '../widgets/trial_extension_process_dialog.dart';
 import 'location_picker_screen.dart';
 import 'contact_screen.dart';
@@ -38,6 +39,7 @@ import 'admin_guest_management_screen.dart';
 import 'admin_requests_statistics_screen.dart';
 import 'appointment_settings_screen.dart';
 import 'business_management_screen.dart';
+import 'business_services_edit_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -75,6 +77,10 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
   // הגדרת תורים - null = לא נטען, true = תורים, false = זמינות
   bool? _useAppointments;
 
+  // שדות עבור שירותים עסקיים
+  bool _requiresAppointment = false; // האם השירות דורש תור
+  bool _requiresDelivery = false; // האם השירות ניתן במשלוח
+
   @override
   void initState() {
     super.initState();
@@ -86,6 +92,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       if (mounted) {
       _checkGuestCategories();
       _loadAppointmentSettings();
+      _loadServiceSettings();
       }
     });
   }
@@ -2006,6 +2013,47 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                                         ),
                                       ),
                                     ),
+                                    // כפתור ניהול הזמנות למשתמש עסקי
+                                    if (userProfile.userType == UserType.business && userProfile.isSubscriptionActive) ...[
+                                      const SizedBox(width: 8),
+                                      GestureDetector(
+                                        onTap: () {
+                                          Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (context) => const OrderManagementScreen(),
+                                            ),
+                                          );
+                                        },
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                          decoration: BoxDecoration(
+                                            color: Colors.green[600],
+                                            borderRadius: BorderRadius.circular(12),
+                                            border: Border.all(color: Colors.green[700]!, width: 1),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                Icons.shopping_cart,
+                                                color: Colors.white,
+                                                size: 14,
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                'ניהול הזמנות',
+                                                style: TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                     // כפתור שדרג מנוי למשתמשי אורח ומשתמשי פרטי מנוי - ליד הלחצן
                                     if ((userProfile.userType == UserType.guest && userProfile.isTemporaryGuest != true) ||
                                         (userProfile.isSubscriptionActive && 
@@ -2520,6 +2568,15 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 const SizedBox(height: 16),
               ],
 
+              // שירותים - רק למשתמש עסקי מנוי
+              if (userProfile.userType == UserType.business && 
+                  userProfile.isSubscriptionActive &&
+                  userProfile.businessCategories != null &&
+                  userProfile.businessCategories!.isNotEmpty) ...[
+                _buildBusinessServicesSection(userProfile),
+                const SizedBox(height: 16),
+              ],
+
               // התראה למשתמש אורח או עסקי מנוי שאין לו תחומי עיסוק (לא לאורח זמני)
               if (userProfile.isTemporaryGuest != true &&
                   (userProfile.userType == UserType.guest || userProfile.userType == UserType.business) && 
@@ -2719,6 +2776,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                         ],
                       ),
                       // Radio buttons לבחירה בין זמינות/תורים - רק לאורחים עם קטגוריות או עסקיים מנויים
+                      // תורים זמינים רק אם המשתמש סימן "שירותים דורשים קביעת תור"
                       if (_isAdmin != true && 
                           ((userProfile.userType == UserType.guest && 
                             userProfile.businessCategories != null && 
@@ -2742,18 +2800,41 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                             Radio<bool>(
                               value: true,
                               groupValue: _useAppointments,
-                              onChanged: (value) {
-                                if (value != null) {
-                                  _saveAppointmentPreference(true);
-                                }
-                              },
+                              onChanged: _requiresAppointment 
+                                  ? (value) {
+                                      if (value != null) {
+                                        _saveAppointmentPreference(true);
+                                      }
+                                    }
+                                  : null, // לא ניתן לבחור תורים אם לא סומן הצ'קבוקס
                             ),
-                            const Text('תורים'),
+                            Text(
+                              'תורים',
+                              style: TextStyle(
+                                color: _requiresAppointment 
+                                    ? null 
+                                    : Colors.grey, // טקסט אפור אם לא ניתן לבחור
+                              ),
+                            ),
                           ],
                         ),
+                        if (!_requiresAppointment) ...[
+                          const SizedBox(height: 4),
+                          Padding(
+                            padding: const EdgeInsets.only(right: 32),
+                            child: Text(
+                              'כדי להגדיר תורים, יש לסמן "השירותים דורשים קביעת תור" בחלק השירותים',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.orange[700],
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 8),
-                        // כפתור "הגדר תורים" אם בחרו תורים
-                        if (_useAppointments == true) ...[
+                        // כפתור "הגדר תורים" אם בחרו תורים והצ'קבוקס מסומן
+                        if (_useAppointments == true && _requiresAppointment) ...[
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton.icon(
@@ -7336,6 +7417,105 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     }
   }
 
+  // טעינת הגדרות שירותים (משלוח ותור)
+  Future<void> _loadServiceSettings() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      if (userDoc.exists && mounted) {
+        final userData = userDoc.data()!;
+        setState(() {
+          _requiresAppointment = userData['requiresAppointment'] as bool? ?? false;
+          _requiresDelivery = userData['requiresDelivery'] as bool? ?? false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading service settings: $e');
+    }
+  }
+
+  // עדכון הגדרות שירותים (משלוח ותור)
+  Future<void> _updateServiceSettings({bool? requiresAppointment, bool? requiresDelivery}) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      // אם מסירים את הסימון של "שירותים דורשים קביעת תור" והמשתמש כבר בחר תורים, החזר לזמינות
+      bool shouldResetToAvailability = false;
+      if (requiresAppointment == false && _useAppointments == true) {
+        shouldResetToAvailability = true;
+        await _saveAppointmentPreference(false);
+      }
+
+      // עדכון הערכים המקומיים
+      if (mounted) {
+        setState(() {
+          if (requiresAppointment != null) {
+            _requiresAppointment = requiresAppointment;
+          }
+          if (requiresDelivery != null) {
+            _requiresDelivery = requiresDelivery;
+          }
+        });
+      }
+
+      // עדכון ב-Firestore
+      final updateData = <String, dynamic>{
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+      
+      if (requiresAppointment != null) {
+        updateData['requiresAppointment'] = requiresAppointment;
+      }
+      if (requiresDelivery != null) {
+        updateData['requiresDelivery'] = requiresDelivery;
+      }
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .update(updateData);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(shouldResetToAvailability
+                ? 'ההגדרות עודכנו בהצלחה. הגדרת התורים הוחזרה לזמינות'
+                : 'ההגדרות עודכנו בהצלחה'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error updating service settings: $e');
+      if (mounted) {
+        // החזרת הערכים הקודמים במקרה של שגיאה
+        setState(() {
+          if (requiresAppointment != null) {
+            _requiresAppointment = !requiresAppointment;
+          }
+          if (requiresDelivery != null) {
+            _requiresDelivery = !requiresDelivery;
+          }
+        });
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה בעדכון ההגדרות: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   // שמירת העדפת תורים/זמינות
   Future<void> _saveAppointmentPreference(bool useAppointments) async {
     final user = FirebaseAuth.instance.currentUser;
@@ -7436,29 +7616,30 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                   ),
                   const SizedBox(height: 8),
                   // רשימת ימים
-                  ...weekAvailability.days.map((dayAvailability) {
+                  ...weekAvailability.days.asMap().entries.map((entry) {
+                    final index = entry.key;
+                    final dayAvailability = entry.value;
                     return Card(
                       margin: const EdgeInsets.symmetric(vertical: 4),
                       child: ExpansionTile(
                         title: Row(
                           children: [
                             Checkbox(
-                              value: dayAvailability.isAvailable && !availableAllWeek,
-                              onChanged: availableAllWeek
-                                  ? null
-                                  : (value) {
-                                      setState(() {
-                                        final index = weekAvailability.days
-                                            .indexWhere((d) => d.day == dayAvailability.day);
-                                        if (index != -1) {
-                                          weekAvailability.days[index] = dayAvailability.copyWith(
-                                            isAvailable: value ?? false,
-                                            startTime: value == false ? null : dayAvailability.startTime,
-                                            endTime: value == false ? null : dayAvailability.endTime,
-                                          );
-                                        }
-                                      });
-                                    },
+                              value: weekAvailability.days[index].isAvailable && !availableAllWeek,
+                              onChanged: (value) {
+                                setState(() {
+                                  // אם "זמין כל השבוע" מסומן ומנסים לסמן יום - בטל את "זמין כל השבוע"
+                                  if (availableAllWeek && value == true) {
+                                    availableAllWeek = false;
+                                  }
+                                  
+                                  weekAvailability.days[index] = weekAvailability.days[index].copyWith(
+                                    isAvailable: value ?? false,
+                                    startTime: value == false ? null : weekAvailability.days[index].startTime,
+                                    endTime: value == false ? null : weekAvailability.days[index].endTime,
+                                  );
+                                });
+                              },
                             ),
                             const SizedBox(width: 8),
                             Text(l10n.getDayName(dayAvailability.day)),
@@ -7476,30 +7657,26 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                                       onPressed: () async {
                                         final TimeOfDay? picked = await showTimePicker(
                                           context: context,
-                                          initialTime: dayAvailability.startTime != null
+                                          initialTime: weekAvailability.days[index].startTime != null
                                               ? TimeOfDay(
-                                                  hour: int.parse(dayAvailability.startTime!.split(':')[0]),
-                                                  minute: int.parse(dayAvailability.startTime!.split(':')[1]),
+                                                  hour: int.parse(weekAvailability.days[index].startTime!.split(':')[0]),
+                                                  minute: int.parse(weekAvailability.days[index].startTime!.split(':')[1]),
                                                 )
                                               : const TimeOfDay(hour: 9, minute: 0),
                                         );
                                         if (picked != null) {
                                           setState(() {
-                                            final index = weekAvailability.days
-                                                .indexWhere((d) => d.day == dayAvailability.day);
-                                            if (index != -1) {
-                                              final timeStr = '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
-                                              weekAvailability.days[index] = dayAvailability.copyWith(
-                                                startTime: timeStr,
-                                              );
-                                            }
+                                            final timeStr = '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
+                                            weekAvailability.days[index] = weekAvailability.days[index].copyWith(
+                                              startTime: timeStr,
+                                            );
                                           });
                                         }
                                       },
                                       child: Text(
-                                        dayAvailability.startTime ?? l10n.selectTime,
+                                        weekAvailability.days[index].startTime ?? l10n.selectTime,
                                         style: TextStyle(
-                                          color: dayAvailability.startTime != null
+                                          color: weekAvailability.days[index].startTime != null
                                               ? Theme.of(context).colorScheme.primary
                                               : Colors.grey,
                                         ),
@@ -7512,30 +7689,26 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                                       onPressed: () async {
                                         final TimeOfDay? picked = await showTimePicker(
                                           context: context,
-                                          initialTime: dayAvailability.endTime != null
+                                          initialTime: weekAvailability.days[index].endTime != null
                                               ? TimeOfDay(
-                                                  hour: int.parse(dayAvailability.endTime!.split(':')[0]),
-                                                  minute: int.parse(dayAvailability.endTime!.split(':')[1]),
+                                                  hour: int.parse(weekAvailability.days[index].endTime!.split(':')[0]),
+                                                  minute: int.parse(weekAvailability.days[index].endTime!.split(':')[1]),
                                                 )
                                               : const TimeOfDay(hour: 17, minute: 0),
                                         );
                                         if (picked != null) {
                                           setState(() {
-                                            final index = weekAvailability.days
-                                                .indexWhere((d) => d.day == dayAvailability.day);
-                                            if (index != -1) {
-                                              final timeStr = '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
-                                              weekAvailability.days[index] = dayAvailability.copyWith(
-                                                endTime: timeStr,
-                                              );
-                                            }
+                                            final timeStr = '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
+                                            weekAvailability.days[index] = weekAvailability.days[index].copyWith(
+                                              endTime: timeStr,
+                                            );
                                           });
                                         }
                                       },
                                       child: Text(
-                                        dayAvailability.endTime ?? l10n.selectTime,
+                                        weekAvailability.days[index].endTime ?? l10n.selectTime,
                                         style: TextStyle(
-                                          color: dayAvailability.endTime != null
+                                          color: weekAvailability.days[index].endTime != null
                                               ? Theme.of(context).colorScheme.primary
                                               : Colors.grey,
                                         ),
@@ -9395,6 +9568,326 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         },
       ),
     );
+  }
+
+  // בניית קטע שירותים עסקיים
+  Widget _buildBusinessServicesSection(UserProfile userProfile) {
+    final l10n = AppLocalizations.of(context);
+    
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _loadBusinessServices(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        
+        final services = snapshot.data ?? [];
+        
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Theme.of(context).brightness == Brightness.dark 
+                ? Theme.of(context).colorScheme.surfaceContainerHighest
+                : Theme.of(context).colorScheme.surfaceContainer,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: Theme.of(context).brightness == Brightness.dark 
+                  ? Theme.of(context).colorScheme.outlineVariant
+                  : Theme.of(context).colorScheme.outlineVariant,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.business_center, color: Theme.of(context).colorScheme.primary, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'שירותים',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () => _showEditServicesDialog(services),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primary,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.edit,
+                            color: Theme.of(context).colorScheme.onPrimary,
+                            size: 12,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            l10n.edit,
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.onPrimary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              if (services.isEmpty)
+                Text(
+                  'אין שירותים מוגדרים',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontStyle: FontStyle.italic,
+                  ),
+                )
+              else
+                ...services.asMap().entries.map((entry) {
+                  final index = entry.key;
+                  final service = entry.value;
+                  return _buildServiceCard(service, index);
+                }).toList(),
+              const SizedBox(height: 16),
+              // הגדרות שירותים - משלוח ותור
+              const Divider(),
+              const SizedBox(height: 12),
+              // השירותים דורשים קביעת תור
+              Row(
+                children: [
+                  Icon(Icons.calendar_today, size: 20, color: Theme.of(context).colorScheme.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'השירותים דורשים קביעת תור',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  Switch(
+                    value: _requiresAppointment,
+                    onChanged: (value) {
+                      _updateServiceSettings(requiresAppointment: value);
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              // אפשר לקבל שירות במשלוח
+              Row(
+                children: [
+                  Icon(Icons.local_shipping, size: 20, color: Theme.of(context).colorScheme.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'אפשר לקבל שירות במשלוח',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  Switch(
+                    value: _requiresDelivery,
+                    onChanged: (value) {
+                      _updateServiceSettings(requiresDelivery: value);
+                    },
+                  ),
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // טעינת שירותים עסקיים מ-Firestore
+  Future<List<Map<String, dynamic>>> _loadBusinessServices() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return [];
+      
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      
+      if (!userDoc.exists) return [];
+      
+      final userData = userDoc.data()!;
+      final services = userData['businessServices'] as List<dynamic>?;
+      
+      if (services == null) return [];
+      
+      return services.map((s) => s as Map<String, dynamic>).toList();
+    } catch (e) {
+      debugPrint('Error loading business services: $e');
+      return [];
+    }
+  }
+
+  // בניית כרטיס שירות
+  Widget _buildServiceCard(Map<String, dynamic> service, int index) {
+    final name = service['name'] as String? ?? '';
+    final price = service['price'] as double?;
+    final isCustomPrice = service['isCustomPrice'] as bool? ?? false;
+    final imageUrl = service['imageUrl'] as String?;
+    final isAvailable = service['isAvailable'] as bool? ?? true; // ברירת מחדל זמין
+    
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: imageUrl != null
+            ? ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(
+                  imageUrl,
+                  width: 50,
+                  height: 50,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) {
+                    return const Icon(Icons.image);
+                  },
+                ),
+              )
+            : const Icon(Icons.business),
+        title: Text(name),
+        subtitle: isCustomPrice
+            ? const Text('מחיר בהתאמה אישית')
+            : price != null
+                ? Text('₪${price.toStringAsFixed(0)}')
+                : const Text('ללא מחיר'),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Checkbox(
+              value: isAvailable,
+              onChanged: (value) async {
+                await _updateServiceAvailability(name, value ?? true);
+              },
+            ),
+            IconButton(
+          icon: const Icon(Icons.delete, color: Colors.red),
+          onPressed: () => _deleteService(index),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // עדכון זמינות שירות - משתמש בשם השירות במקום index
+  Future<void> _updateServiceAvailability(String serviceName, bool isAvailable) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      
+      final services = await _loadBusinessServices();
+      
+      // מציאת השירות לפי שם
+      final serviceIndex = services.indexWhere((s) => (s['name'] as String?) == serviceName);
+      if (serviceIndex == -1) {
+        debugPrint('Service not found: $serviceName');
+        return;
+      }
+      
+      services[serviceIndex]['isAvailable'] = isAvailable;
+      
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .update({
+        'businessServices': services,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      debugPrint('Error updating service availability: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה בעדכון זמינות השירות: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // מחיקת שירות
+  Future<void> _deleteService(int index) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      
+      final services = await _loadBusinessServices();
+      if (index >= services.length) return;
+      
+      services.removeAt(index);
+      
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .update({
+        'businessServices': services,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('השירות נמחק בהצלחה'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error deleting service: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה במחיקת השירות: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // דיאלוג עריכת שירותים
+  Future<void> _showEditServicesDialog(List<Map<String, dynamic>> currentServices) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => BusinessServicesEditScreen(initialServices: currentServices),
+      ),
+    );
+    
+    if (mounted) {
+      setState(() {});
+      // טעינת הגדרות שירותים מחדש לאחר עריכה
+      _loadServiceSettings();
+    }
   }
 
   Future<void> _saveTrialExtensionStartTime(DateTime startTime) async {

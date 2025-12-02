@@ -70,18 +70,26 @@ class _AppointmentBookingScreenState extends State<AppointmentBookingScreen> {
     }
   }
 
+  // המרת DateTime.weekday ל-DayOfWeek enum index
+  // DateTime.weekday: 1=שני, 2=שלישי, ..., 7=ראשון
+  // DayOfWeek index: 0=ראשון, 1=שני, ..., 6=שבת
+  int _convertWeekdayToDayOfWeekIndex(int weekday) {
+    // אם זה ראשון (7), מחזיר 0
+    // אחרת מחזיר weekday כמו שהוא (1=שני->1, 2=שלישי->2, וכו')
+    return weekday == 7 ? 0 : weekday;
+  }
+
   // יצירת רשימת תורים אפשריים משבוע
   List<TimeSlot> _generateTimeSlotsForWeek() {
     final slots = <TimeSlot>[];
     
-    // התחלה משבוע הנוכחי
-    final weekStart = _selectedWeekStart.subtract(
-      Duration(days: _selectedWeekStart.weekday % 7),
-    );
+    // התחלה משבוע הנוכחי - חישוב ימים לחזרה לראשון
+    final daysToSubtract = _selectedWeekStart.weekday == 7 ? 0 : _selectedWeekStart.weekday;
+    final weekStart = _selectedWeekStart.subtract(Duration(days: daysToSubtract));
 
     for (int dayOffset = 0; dayOffset < 7; dayOffset++) {
       final day = weekStart.add(Duration(days: dayOffset));
-      final dayOfWeek = day.weekday % 7; // 0 = ראשון, 6 = שבת
+      final dayOfWeek = _convertWeekdayToDayOfWeekIndex(day.weekday); // 0 = ראשון, 6 = שבת
 
       // מציאת slots זמינים ליום זה
       final daySlots = _availableSlots.where((slot) => slot.dayOfWeek == dayOfWeek).toList();

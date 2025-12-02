@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import '../models/request.dart';
@@ -24,22 +25,43 @@ class BusinessManagementScreen extends StatefulWidget {
   State<BusinessManagementScreen> createState() => _BusinessManagementScreenState();
 }
 
+// מודל מרכיב
+class _Ingredient {
+  final TextEditingController nameController;
+  final TextEditingController costController;
+
+  _Ingredient({
+    required this.nameController,
+    required this.costController,
+  });
+
+  void dispose() {
+    nameController.dispose();
+    costController.dispose();
+  }
+}
+
 // מודל שירות
 class _Service {
   final TextEditingController nameController;
   final TextEditingController priceController;
   File? imageFile;
   bool isCustomPrice;
+  final List<_Ingredient> ingredients;
 
   _Service({
     required this.nameController,
     required this.priceController,
   }) : imageFile = null,
-       isCustomPrice = false;
+       isCustomPrice = false,
+       ingredients = [];
 
   void dispose() {
     nameController.dispose();
     priceController.dispose();
+    for (final ingredient in ingredients) {
+      ingredient.dispose();
+    }
   }
 }
 
@@ -1074,6 +1096,24 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
     }
   }
 
+  // העלאת תמונת שירות ל-Firebase Storage
+  Future<String?> _uploadServiceImage(File imageFile, String userId, int serviceIndex) async {
+    try {
+      final storageRef = FirebaseStorage.instance
+          .ref()
+          .child('business_services')
+          .child(userId)
+          .child('service_$serviceIndex.jpg');
+      
+      await storageRef.putFile(imageFile);
+      final downloadUrl = await storageRef.getDownloadURL();
+      return downloadUrl;
+    } catch (e) {
+      debugPrint('Error uploading service image: $e');
+      return null;
+    }
+  }
+
   // בניית כרטיס שירות
   Widget _buildServiceCard(int index, _Service service) {
     return Card(
@@ -1200,6 +1240,90 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
             ),
             const SizedBox(height: 16),
             
+            // מרכיבים
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'מרכיבים',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    TextButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          service.ingredients.add(_Ingredient(
+                            nameController: TextEditingController(),
+                            costController: TextEditingController(text: '0'),
+                          ));
+                        });
+                      },
+                      icon: const Icon(Icons.add),
+                      label: const Text('הוסף מרכיב'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ...service.ingredients.asMap().entries.map((entry) {
+                  final ingredientIndex = entry.key;
+                  final ingredient = entry.value;
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    color: Colors.grey[50],
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: TextFormField(
+                              controller: ingredient.nameController,
+                              decoration: const InputDecoration(
+                                labelText: 'שם מרכיב',
+                                border: OutlineInputBorder(),
+                                isDense: true,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: TextFormField(
+                              controller: ingredient.costController,
+                              decoration: const InputDecoration(
+                                labelText: 'עלות',
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.attach_money, size: 18),
+                                suffixText: '₪',
+                                isDense: true,
+                              ),
+                              keyboardType: TextInputType.numberWithOptions(decimal: true),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () {
+                              setState(() {
+                                ingredient.dispose();
+                                service.ingredients.removeAt(ingredientIndex);
+                              });
+                            },
+                            tooltip: 'מחק מרכיב',
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }),
+              ],
+            ),
+            const SizedBox(height: 16),
+            
             // מחיר וצ'קבוקס בהתאמה אישית
             Row(
               children: [
@@ -1295,7 +1419,7 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
         child: Scaffold(
         appBar: AppBar(
           title: const Text(
-            'ניהול עסק',
+            'צור את העסק שלך',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
@@ -2081,6 +2205,43 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
                       }
                     }
                     
+                    // שמירת השירותים
+                    final List<Map<String, dynamic>> servicesData = [];
+                    for (var service in _services) {
+                      final serviceData = <String, dynamic>{
+                        'name': service.nameController.text.trim(),
+                        'isCustomPrice': service.isCustomPrice,
+                        'isAvailable': true, // ברירת מחדל זמין
+                      };
+                      if (!service.isCustomPrice && service.priceController.text.trim().isNotEmpty) {
+                        serviceData['price'] = double.tryParse(service.priceController.text.trim()) ?? 0.0;
+                      }
+                      // שמירת תמונה אם קיימת
+                      if (service.imageFile != null) {
+                        try {
+                          final imageUrl = await _uploadServiceImage(service.imageFile!, user.uid, servicesData.length);
+                          if (imageUrl != null) {
+                            serviceData['imageUrl'] = imageUrl;
+                          }
+                        } catch (e) {
+                          debugPrint('Error uploading service image: $e');
+                        }
+                      }
+                      // שמירת מרכיבים
+                      if (service.ingredients.isNotEmpty) {
+                        serviceData['ingredients'] = service.ingredients.map((ingredient) {
+                          return {
+                            'name': ingredient.nameController.text.trim(),
+                            'cost': double.tryParse(ingredient.costController.text.trim()) ?? 0.0,
+                          };
+                        }).toList();
+                      }
+                      servicesData.add(serviceData);
+                    }
+                    updateData['businessServices'] = servicesData;
+                    updateData['requiresAppointment'] = _requiresAppointment;
+                    updateData['requiresDelivery'] = _requiresDelivery;
+                    
                     if (updateData.length > 1) { // יותר מ-updatedAt בלבד
                       await FirebaseFirestore.instance
                           .collection('users')
@@ -2543,6 +2704,43 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
                         updateData['exposureRadius'] = _exposureRadius;
                       }
                     }
+                    
+                    // שמירת השירותים
+                    final List<Map<String, dynamic>> servicesData = [];
+                    for (var service in _services) {
+                      final serviceData = <String, dynamic>{
+                        'name': service.nameController.text.trim(),
+                        'isCustomPrice': service.isCustomPrice,
+                        'isAvailable': true, // ברירת מחדל זמין
+                      };
+                      if (!service.isCustomPrice && service.priceController.text.trim().isNotEmpty) {
+                        serviceData['price'] = double.tryParse(service.priceController.text.trim()) ?? 0.0;
+                      }
+                      // שמירת תמונה אם קיימת
+                      if (service.imageFile != null) {
+                        try {
+                          final imageUrl = await _uploadServiceImage(service.imageFile!, user.uid, servicesData.length);
+                          if (imageUrl != null) {
+                            serviceData['imageUrl'] = imageUrl;
+                          }
+                        } catch (e) {
+                          debugPrint('Error uploading service image: $e');
+                        }
+                      }
+                      // שמירת מרכיבים
+                      if (service.ingredients.isNotEmpty) {
+                        serviceData['ingredients'] = service.ingredients.map((ingredient) {
+                          return {
+                            'name': ingredient.nameController.text.trim(),
+                            'cost': double.tryParse(ingredient.costController.text.trim()) ?? 0.0,
+                          };
+                        }).toList();
+                      }
+                      servicesData.add(serviceData);
+                    }
+                    updateData['businessServices'] = servicesData;
+                    updateData['requiresAppointment'] = _requiresAppointment;
+                    updateData['requiresDelivery'] = _requiresDelivery;
                     
                     if (updateData.length > 1) { // יותר מ-updatedAt בלבד
                       await FirebaseFirestore.instance

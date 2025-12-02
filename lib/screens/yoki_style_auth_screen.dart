@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/audio_service.dart';
 import '../services/google_auth_service.dart';
@@ -1019,6 +1020,15 @@ class _YokiStyleAuthScreenState extends State<YokiStyleAuthScreen>
       }
       
       // יצירת משתמש חדש ב-Firebase Auth
+      debugPrint('🌐 Creating user with email/password on Web');
+      debugPrint('   Email: $email');
+      debugPrint('   Platform: ${kIsWeb ? "Web" : "Mobile"}');
+      if (kIsWeb) {
+        final currentApp = Firebase.app();
+        debugPrint('   Firebase App Name: ${currentApp.name}');
+        debugPrint('   Firebase App Options: ${currentApp.options.appId}');
+      }
+      
       final cred = await FirebaseAuth.instance.createUserWithEmailAndPassword(
         email: email,
         password: password,
@@ -1067,11 +1077,30 @@ class _YokiStyleAuthScreenState extends State<YokiStyleAuthScreen>
       }
     } catch (e) {
       debugPrint('❌ Error in login without verification: $e');
+      String errorMessage = 'שגיאה בהרשמה';
+      
+      // טיפול בשגיאות ספציפיות של Firebase Auth
+      final errorString = e.toString();
+      if (errorString.contains('android-client-application') || 
+          errorString.contains('requests-from-this-android-client')) {
+        errorMessage = 'שגיאת הגדרה: יש לבדוק את הגדרות Firebase Console עבור Web app. אנא פנה למנהל המערכת.';
+        debugPrint('⚠️ Firebase Web configuration issue detected - Android client application ID is being used on Web');
+      } else if (errorString.contains('email-already-in-use')) {
+        errorMessage = 'האימייל כבר רשום במערכת. נסה להתחבר במקום להרשם.';
+      } else if (errorString.contains('weak-password')) {
+        errorMessage = 'הסיסמה חלשה מדי. אנא בחר סיסמה חזקה יותר.';
+      } else if (errorString.contains('invalid-email')) {
+        errorMessage = 'כתובת האימייל לא תקינה. אנא בדוק את כתובת האימייל.';
+      } else if (errorString.contains('network-request-failed')) {
+        errorMessage = 'בעיית חיבור לאינטרנט. אנא בדוק את החיבור ונסה שוב.';
+      }
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('שגיאה: $e'),
+            content: Text(errorMessage),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
           ),
         );
       }

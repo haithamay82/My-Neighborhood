@@ -115,7 +115,7 @@ class AppLocalizations {
       'profile': 'פרופיל',
       'myRequests': 'בקשות בטיפול שלי',
       'myRequestsMenu': 'בקשות שלי', // לתפריט התחתון
-      'serviceProviders': 'נותני שירות',
+      'serviceProviders': 'עסקים ועצמאיים',
       'openRequestsForTreatment': 'בקשות פתוחות לטיפול',
       'newRequest': 'בקשה חדשה',
       'logout': 'התנתק',
@@ -2945,7 +2945,8 @@ class AppLocalizations {
       'disconnected': 'Disconnected',
       'welcomeBack': 'Welcome back',
       'welcome': 'Welcome to your smart neighborhood',
-      'welcomeSubtitle': 'register as a guest for 3 months free and get full access to all services',      'joinCommunity': 'Join our community',
+      'welcomeSubtitle': 'register as a guest for 3 months free and get full access to all services',
+      'joinCommunity': 'Join our community',
       'fullName': 'Full Name',
       'email': 'Email',
       'password': 'Password',

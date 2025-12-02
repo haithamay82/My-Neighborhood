@@ -40,8 +40,8 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyBhAEQ7wNaBH1nmtRs51WqZPGHfPoRtFQs',
-    appId: '1:725875446445:web:1399519fbff5bf9b0aec24',
+    apiKey: 'AIzaSyBzZH8y4mlSIXX_IsXe3I5ghLziRJp84TA',
+    appId: '1:725875446445:web:a883dc3c1ebbdd960aec24',
     messagingSenderId: '725875446445',
     projectId: 'nearme-970f3',
     authDomain: 'nearme-970f3.firebaseapp.com',
@@ -75,8 +75,8 @@ class DefaultFirebaseOptions {
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'AIzaSyBhAEQ7wNaBH1nmtRs51WqZPGHfPoRtFQs',
-    appId: '1:725875446445:web:1399519fbff5bf9b0aec24',
+    apiKey: 'AIzaSyBzZH8y4mlSIXX_IsXe3I5ghLziRJp84TA',
+    appId: '1:725875446445:web:a883dc3c1ebbdd960aec24',
     messagingSenderId: '725875446445',
     projectId: 'nearme-970f3',
     authDomain: 'nearme-970f3.firebaseapp.com',
