@@ -97,6 +97,9 @@ dependencies:
   # Maps
   google_maps_flutter: ^2.9.0
   
+  # Text-to-Speech
+  flutter_tts: ^4.0.2
+  
   # Local storage
   shared_preferences: ^2.2.2
   twilio_flutter: ^0.9.0

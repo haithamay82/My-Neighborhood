@@ -12000,6 +12000,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
       
       final orderId = orderDocRef.id;
 
+      // שליחת התראה למשתמש העסקי שהוזמן מאצלו שירות
+      await NotificationService.sendNotification(
+        toUserId: provider.userId,
+        title: 'הזמנה חדשה',
+        message: 'התקבלה הזמנה חדשה מ-${customerName} (${orderNumber})',
+        type: 'order_new',
+        data: {
+          'orderId': orderId,
+          'orderNumber': orderNumber.toString(),
+          'customerId': currentUser.uid,
+          'customerName': customerName,
+          'customerPhone': customerPhone,
+          'totalPrice': totalPrice.toString(),
+        },
+      );
+
       // אם ההזמנה היא עם משלוח, שלח התראות לשליחים
       if (deliveryType == 'delivery' && deliveryLocation != null && deliveryCategory != null) {
         await _notifyCouriersForOrder(

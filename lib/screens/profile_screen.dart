@@ -5964,6 +5964,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         'likes', // קולקציה נוספת
         'notification_queue', // קולקציה נוספת
         'appointments', // קולקציית תורים
+        'orders', // קולקציית הזמנות
+        'order_counters', // קולקציית מונים להזמנות
+        'ads', // קולקציית מודעות
       ];
 
       int totalDeleted = 0;

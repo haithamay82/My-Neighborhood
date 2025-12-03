@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../screens/chat_screen.dart';
 import '../screens/notifications_screen.dart';
 import '../screens/profile_screen.dart';
+import '../screens/order_management_screen.dart';
 import 'app_state_service.dart';
 
 /// שירות לניווט לפי התראות
@@ -16,6 +17,7 @@ class NotificationNavigationService {
     String? requestId,
     String? chatId,
     String? userId,
+    String? orderId,
   }) async {
     debugPrint('🔔 Navigating from notification: $payload');
     
@@ -68,6 +70,11 @@ class NotificationNavigationService {
           } else {
             await _navigateToHome(context);
           }
+          break;
+          
+        case 'order_new':
+        case 'order_delivery':
+          await _navigateToOrderManagement(context, orderId);
           break;
           
         default:
@@ -186,6 +193,30 @@ class NotificationNavigationService {
     }
   }
 
+  /// ניווט למסך ניהול הזמנות
+  static Future<void> _navigateToOrderManagement(BuildContext context, String? orderId) async {
+    if (context.mounted) {
+      // ניווט למסך הראשי
+      Navigator.of(context).pushNamedAndRemoveUntil(
+        '/main',
+        (route) => false,
+      );
+      
+      // המתן קצת ואז פתח את מסך ניהול הזמנות
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      if (context.mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (context) => const OrderManagementScreen(),
+          ),
+        );
+      }
+      
+      debugPrint('🔔 Navigating to order management${orderId != null ? ' with orderId: $orderId' : ''}');
+    }
+  }
+
   /// קבלת פרטי התראה לניווט
   static Future<Map<String, String?>> getNotificationData(String notificationId) async {
     try {
@@ -196,10 +227,12 @@ class NotificationNavigationService {
       
       if (doc.exists) {
         final data = doc.data()!;
+        final notificationData = data['data'] as Map<String, dynamic>?;
         return {
           'requestId': data['requestId'] as String?,
           'chatId': data['chatId'] as String?,
           'userId': data['userId'] as String?,
+          'orderId': notificationData?['orderId'] as String?,
         };
       }
     } catch (e) {

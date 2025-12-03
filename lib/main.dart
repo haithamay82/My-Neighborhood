@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform, debugPrint;
-import 'dart:html' as html show window;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,6 +9,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'firebase_messaging_background.dart';
 import 'services/push_notification_service.dart';
+import 'services/tts_service.dart';
 import 'services/hive_cache_service.dart';
 import 'screens/splash_screen.dart';
 import 'screens/home_screen.dart';
@@ -72,13 +72,13 @@ void main() async {
         // קריאה ל-JavaScript כדי לקבל את ה-URL המלא לפני ש-Flutter router משנה אותו
         if (kIsWeb) {
           try {
-            // קריאה ל-window.location כדי לקבל את ה-URL המלא
-            final currentUrl = html.window.location.href;
-            final currentPath = html.window.location.pathname;
-            final currentQuery = html.window.location.search;
-            final currentHash = html.window.location.hash;
+            // ב-web, נשתמש ב-Uri.base במקום html.window
+            final currentUrl = Uri.base;
+            final currentPath = currentUrl.path;
+            final currentQuery = currentUrl.query;
+            final currentHash = currentUrl.fragment;
             
-            debugPrint('   Current URL (from window.location): $currentUrl');
+            debugPrint('   Current URL (from Uri.base): $currentUrl');
             debugPrint('   Current path: $currentPath');
             debugPrint('   Current query: $currentQuery');
             debugPrint('   Current hash: $currentHash');
@@ -88,7 +88,7 @@ void main() async {
             debugPrint('   Is /__/auth/handler: $isAuthHandler');
             
             // ניסיון לפרסר את ה-URL המלא
-            final fullUrl = Uri.parse(currentUrl);
+            final fullUrl = currentUrl; // Uri.base כבר Uri
             debugPrint('   Parsed URL query: ${fullUrl.query}');
             debugPrint('   Parsed URL query params: ${fullUrl.queryParameters}');
             
@@ -97,8 +97,8 @@ void main() async {
                 fullUrl.queryParameters.containsKey('apiKey') ||
                 fullUrl.queryParameters.containsKey('mode') ||
                 fullUrl.queryParameters.containsKey('oobCode') ||
-                (currentQuery?.contains('__firebase_request_key__') ?? false) ||
-                (currentQuery?.contains('apiKey') ?? false) ||
+                (currentQuery.isNotEmpty && currentQuery.contains('__firebase_request_key__')) ||
+                (currentQuery.isNotEmpty && currentQuery.contains('apiKey')) ||
                 isAuthHandler; // גם אם זה /__/auth/handler, ננסה לעבד את ה-redirect
             
             debugPrint('   Has redirect params: $hasRedirectParams');
@@ -1203,6 +1203,9 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver, AudioMix
   Future<void> _initializePushNotifications() async {
     try {
       await PushNotificationService.initialize();
+      
+      // אתחול שירות TTS
+      await TtsService.initialize();
       debugPrint('✅ Push notification service initialized in MainApp');
     } catch (e) {
       debugPrint('❌ Error initializing push notification service: $e');

@@ -265,6 +265,12 @@ exports.sendPushNotification = functions.firestore
         if (extraData.requestId) {
           payloadData.requestId = extraData.requestId;
         }
+      } else if (payload && typeof payload === 'string') {
+        // If payload is a string (like 'order_new'), use it as type
+        payloadData = {
+          type: payload,
+          screen: 'home',
+        };
       } else {
         payloadData = {
           type: 'general',
@@ -273,6 +279,8 @@ exports.sendPushNotification = functions.firestore
       }
       
       console.log('Sending push notification to user:', userId);
+      console.log('Notification payload:', payload);
+      console.log('Notification extraData:', JSON.stringify(extraData, null, 2));
       
       // Get user's FCM token
       const userDoc = await admin.firestore().collection('users').doc(userId).get();
@@ -297,12 +305,26 @@ exports.sendPushNotification = functions.firestore
         sound: 'default',
       };
       
-      // Add chatId if it exists in extraData
+      // Add all data from extraData.data to fcmNotificationData
+      if (extraData.data && typeof extraData.data === 'object') {
+        // Convert all values to strings (FCM requires string values)
+        Object.keys(extraData.data).forEach(key => {
+          const value = extraData.data[key];
+          if (value !== null && value !== undefined) {
+            fcmNotificationData[key] = String(value);
+          }
+        });
+        console.log('Added data to FCM notification:', Object.keys(extraData.data));
+      }
+      
+      // Add chatId if it exists in extraData (backward compatibility)
       if (extraData.data && extraData.data.chatId) {
         fcmNotificationData.chatId = extraData.data.chatId;
         fcmNotificationData.senderName = extraData.data.senderName || '';
         fcmNotificationData.requestTitle = extraData.data.requestTitle || '';
       }
+      
+      console.log('Final FCM notification data:', JSON.stringify(fcmNotificationData, null, 2));
       
       // Send FCM message
       const message = {

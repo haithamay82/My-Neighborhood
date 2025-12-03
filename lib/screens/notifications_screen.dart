@@ -329,6 +329,28 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
                   label: Text(l10n.openRequest),
                 ),
               ),
+            // כפתור "פתח הזמנה" עבור התראות הזמנות
+            // נבדוק אם זה התראה של הזמנה לפי originalType או לפי orderId ב-data
+            if ((notification.originalType == 'order_new' || notification.originalType == 'order_delivery') ||
+                (notification.data != null && notification.data!.containsKey('orderId')))
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () {
+                    final String? orderId = notification.data?['orderId'] as String?;
+                    // נשתמש ב-originalType אם יש, אחרת 'order_new' כברירת מחדל
+                    final notificationType = notification.originalType ?? 'order_new';
+                    // נווט דרך שירות הניווט הייעודי
+                    NotificationNavigationService.navigateFromNotification(
+                      context,
+                      notificationType,
+                      orderId: orderId,
+                    );
+                  },
+                  icon: const Icon(Icons.shopping_bag),
+                  label: const Text('פתח הזמנה'),
+                ),
+              ),
             // כפתור "הירשם" עבור משתמשים אורחים זמניים
             if (notification.data != null && notification.data!['action'] == 'register')
               Align(
@@ -354,7 +376,21 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
                   shape: BoxShape.circle,
                 ),
               ),
-        onTap: () => _markAsRead(notification.notificationId),
+        onTap: () {
+          _markAsRead(notification.notificationId);
+          // אם זה התראה של הזמנה, נווט למסך ניהול הזמנות
+          if ((notification.originalType == 'order_new' || notification.originalType == 'order_delivery') ||
+              (notification.data != null && notification.data!.containsKey('orderId'))) {
+            final String? orderId = notification.data?['orderId'] as String?;
+            // נשתמש ב-originalType אם יש, אחרת 'order_new' כברירת מחדל
+            final notificationType = notification.originalType ?? 'order_new';
+            NotificationNavigationService.navigateFromNotification(
+              context,
+              notificationType,
+              orderId: orderId,
+            );
+          }
+        },
         onLongPress: () => _showDeleteNotificationDialog(notification),
         ),
       ),

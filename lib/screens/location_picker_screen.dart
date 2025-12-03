@@ -7,7 +7,6 @@ import 'package:permission_handler/permission_handler.dart';
 import '../services/location_service.dart';
 import '../l10n/app_localizations.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'dart:js' as js;
 
 class LocationPickerScreen extends StatefulWidget {
   final double? initialLatitude;
@@ -412,54 +411,17 @@ class _LocationPickerScreenState extends State<LocationPickerScreen> {
     if (!kIsWeb) return;
     
     // בדיקה ראשונית - האם Google Maps API נטען
-    Future.delayed(const Duration(seconds: 2), () async {
-      if (!mounted) return;
-      
-      try {
-        // בדיקה אם window.googleMapsReady קיים
-        final googleMapsReady = js.context['googleMapsReady'];
-        final googleMapsError = js.context['googleMapsError'];
-        
-        debugPrint('🔍 Checking Google Maps API availability...');
-        debugPrint('   googleMapsReady: $googleMapsReady');
-        debugPrint('   googleMapsError: $googleMapsError');
-        
-        if (googleMapsError != null && googleMapsError.toString().isNotEmpty) {
-          debugPrint('❌ Google Maps API error detected: $googleMapsError');
-          if (mounted) {
-            setState(() {
-              _mapError = 'Google Maps API לא זמין. אנא בדוק את המפתח או החיבור לאינטרנט';
-            });
-          }
-          return;
+    // ב-web, נבדוק רק אם המפה נוצרה אחרי 8 שניות
+    Future.delayed(const Duration(seconds: 8), () {
+      if (mounted && _mapController == null) {
+        debugPrint('⚠️ Google Maps API not available after 8 seconds');
+        if (mounted) {
+          setState(() {
+            _mapError = 'Google Maps API לא זמין. אנא בדוק את המפתח או החיבור לאינטרנט';
+          });
         }
-        
-        // בדיקה נוספת אחרי 6 שניות אם המפה לא נוצרה
-        Future.delayed(const Duration(seconds: 6), () {
-          if (mounted && _mapController == null) {
-            debugPrint('⚠️ Google Maps API not available after 8 seconds total');
-            debugPrint('   googleMapsReady: $googleMapsReady');
-            if (mounted) {
-              setState(() {
-                _mapError = 'Google Maps API לא זמין. אנא בדוק את המפתח או החיבור לאינטרנט';
-              });
-            }
-          } else if (_mapController != null) {
-            debugPrint('✅ Google Maps API is working');
-          }
-        });
-      } catch (e) {
-        debugPrint('❌ Error checking Google Maps API: $e');
-        // אם יש שגיאה בבדיקה, נבדוק רק אם המפה נוצרה
-        Future.delayed(const Duration(seconds: 6), () {
-          if (mounted && _mapController == null) {
-            if (mounted) {
-              setState(() {
-                _mapError = 'Google Maps API לא זמין. אנא בדוק את המפתח או החיבור לאינטרנט';
-              });
-            }
-          }
-        });
+      } else if (_mapController != null) {
+        debugPrint('✅ Google Maps API is working');
       }
     });
   }

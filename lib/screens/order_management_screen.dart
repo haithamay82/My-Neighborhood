@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -98,12 +97,12 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
               ),
               child: Row(
                 children: [
-                  _buildTab('ממתינות', 'pending', Icons.pending),
+                  _buildTabWithCount('ממתינות', 'pending', Icons.pending, user.uid),
                   if (_isCourier == true) 
-                    _buildTab('בתהליך', 'preparing', Icons.local_shipping)
+                    _buildTabWithCount('בתהליך', 'preparing', Icons.local_shipping, user.uid)
                   else
-                    _buildTab('בתהליך', 'in_progress', Icons.local_shipping),
-                  _buildTab('הושלמו', 'completed', Icons.done_all),
+                    _buildTabWithCount('בתהליך', 'in_progress', Icons.local_shipping, user.uid),
+                  _buildTabWithCount('הושלמו', 'completed', Icons.done_all, user.uid),
                 ],
               ),
             ),
@@ -118,11 +117,17 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
                               .where('providerId', isEqualTo: user.uid)
                               .where('status', whereIn: ['confirmed', 'preparing']) // גם confirmed (הזמנות ישנות) וגם preparing
                               .snapshots()
-                          : _firestore
-                              .collection('orders')
-                              .where('providerId', isEqualTo: user.uid)
-                              .where('status', isEqualTo: _selectedTab)
-                              .snapshots(),
+                          : _isCourier == true && _selectedTab == 'completed'
+                              ? _firestore
+                                  .collection('orders')
+                                  .where('courierId', isEqualTo: user.uid)
+                                  .where('status', isEqualTo: 'completed')
+                                  .snapshots()
+                              : _firestore
+                                  .collection('orders')
+                                  .where('providerId', isEqualTo: user.uid)
+                                  .where('status', isEqualTo: _selectedTab)
+                                  .snapshots(),
                 builder: (context, snapshot) {
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return const Center(child: CircularProgressIndicator());
@@ -186,7 +191,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
                     itemBuilder: (context, index) {
                       try {
                         final order = order_model.Order.fromFirestore(sortedOrders[index]);
-                        return _buildOrderCard(order);
+                        return _buildOrderCard(order, index);
                       } catch (e) {
                         debugPrint('Error parsing order: $e');
                         return const SizedBox.shrink();
@@ -356,7 +361,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
               itemBuilder: (context, index) {
                 try {
                   final order = order_model.Order.fromFirestore(sortedOrders[index]);
-                  return _buildCourierOrderCard(order);
+                  return _buildCourierOrderCard(order, index);
                 } catch (e) {
                   debugPrint('Error parsing order: $e');
                   return const SizedBox.shrink();
@@ -369,7 +374,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
     );
   }
 
-  Widget _buildCourierOrderCard(order_model.Order order) {
+  Widget _buildCourierOrderCard(order_model.Order order, int index) {
     final isPending = order.status == 'pending';
     final isConfirmed = order.status == 'confirmed';
     final isPreparing = order.status == 'preparing';
@@ -378,10 +383,26 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
     final canTakeOrder = (isPending || isConfirmed || isPreparing) && order.courierId == null;
     final isMyOrder = order.courierId == currentUserId;
     
+    // צבע רקע לסירוגין
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isEven = index % 2 == 0;
+    Color? backgroundColor;
+    if (isDark) {
+      // בערכה כהה: הפרדה ברקעים
+      backgroundColor = isEven 
+          ? Theme.of(context).colorScheme.surface
+          : Theme.of(context).colorScheme.surfaceContainerHighest;
+    } else {
+      // בערכה בהירה: לבן או beige בהיר
+      backgroundColor = isEven 
+          ? Colors.white
+          : Colors.brown[50]; // beige בהיר
+    }
+    
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 2,
-      color: isPreparing ? Colors.orange[50] : Colors.blue[50],
+      color: backgroundColor,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -425,20 +446,66 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
                     ],
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: (isPreparing || isConfirmed) ? Colors.orange : Colors.blue,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    (isPreparing || isConfirmed) ? 'מאושרת בתהליך הכנה' : 'ממתין לאישור',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
+                // Column עם הלחצן "נמסרה" והסטטוס
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // לחצן "נמסרה" לשליח (מעל הסטטוס) - רק אם הוא לקח את ההזמנה והיא בתהליך או הושלמה
+                    if ((isPreparing || order.status == 'completed') && isMyOrder && !order.isDelivered) ...[
+                      TextButton.icon(
+                        onPressed: () => _markAsDelivered(order),
+                        icon: const Icon(Icons.check_circle, size: 18),
+                        label: const Text('נמסרה'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.green[700],
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    // הצגת "נמסרה" אם ההזמנה נמסרה
+                    if (order.isDelivered) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.green,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.check_circle, size: 16, color: Colors.white),
+                            const SizedBox(width: 4),
+                            const Text(
+                              'נמסרה',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: (isPreparing || isConfirmed) ? Colors.orange : Colors.blue,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        (isPreparing || isConfirmed) ? 'מאושרת בתהליך הכנה' : 'ממתין לאישור',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ],
             ),
@@ -451,7 +518,24 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
             ),
             const SizedBox(height: 8),
             Text('שם: ${order.customerName}'),
-            Text('טלפון: ${order.customerPhone}'),
+            GestureDetector(
+              onTap: () => _makePhoneCall(order.customerPhone),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.phone, size: 16, color: Colors.blue[600]),
+                  const SizedBox(width: 4),
+                  Text(
+                    'טלפון: ${order.customerPhone}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.blue[600],
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ],
+              ),
+            ),
             const SizedBox(height: 16),
             
             // שירותים
@@ -1017,8 +1101,10 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
     }
   }
 
-  Widget _buildTab(String label, String value, IconData icon) {
+  Widget _buildTabWithCount(String label, String value, IconData icon, String userId) {
     final isSelected = _selectedTab == value;
+    final isCourier = _isCourier == true;
+    
     return Expanded(
       child: GestureDetector(
         onTap: () {
@@ -1039,38 +1125,217 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
               ),
             ),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 18,
-                color: isSelected
-                    ? Theme.of(context).colorScheme.primary
-                    : Colors.grey[600],
-              ),
-              const SizedBox(width: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                  color: isSelected
-                      ? Theme.of(context).colorScheme.primary
-                      : Colors.grey[600],
-                ),
-              ),
-            ],
-          ),
+          child: isCourier
+              ? _buildCourierTabCount(label, value, icon, isSelected, userId)
+              : _buildBusinessTabCount(label, value, icon, isSelected, userId),
         ),
       ),
     );
   }
 
-  Widget _buildOrderCard(order_model.Order order) {
+  Widget _buildCourierTabCount(String label, String value, IconData icon, bool isSelected, String userId) {
+    // לטאב "הושלמו" - נספור ישירות מההזמנות (בדיוק כמו שמוצג בפועל)
+    if (value == 'completed') {
+      return StreamBuilder<QuerySnapshot>(
+        stream: _firestore
+            .collection('orders')
+            .where('courierId', isEqualTo: userId)
+            .where('status', isEqualTo: 'completed')
+            .snapshots(),
+        builder: (context, snapshot) {
+          int count = 0;
+          if (snapshot.hasData) {
+            count = snapshot.data?.docs.length ?? 0;
+          }
+          return _buildTabContent(label, icon, isSelected, count);
+        },
+      );
+    }
+    
+    // לטאבים "ממתינות" ו"בתהליך" - נספור בדיוק כמו שמוצג בפועל ב-_buildCourierOrdersList
+    return StreamBuilder<QuerySnapshot>(
+      stream: _firestore
+          .collection('notifications')
+          .where('toUserId', isEqualTo: userId)
+          .where('type', isEqualTo: 'order_delivery')
+          .snapshots(),
+      builder: (context, notificationsSnapshot) {
+        if (notificationsSnapshot.connectionState == ConnectionState.waiting) {
+          return _buildTabContent(label, icon, isSelected, 0);
+        }
+        
+        final notifications = notificationsSnapshot.data?.docs ?? [];
+        final orderIds = notifications
+            .map((n) {
+              final data = n.data() as Map<String, dynamic>;
+              final notificationData = data['data'] as Map<String, dynamic>?;
+              return notificationData?['orderId'] as String?;
+            })
+            .where((id) => id != null)
+            .toSet()
+            .toList();
+
+        if (orderIds.isEmpty) {
+          return _buildTabContent(label, icon, isSelected, 0);
+        }
+
+        // טעינת הזמנות - בדיוק כמו ב-_buildCourierOrdersList
+        return StreamBuilder<QuerySnapshot>(
+          stream: _firestore
+              .collection('orders')
+              .where('deliveryType', isEqualTo: 'delivery')
+              .snapshots(),
+          builder: (context, ordersSnapshot) {
+            int count = 0;
+            
+            if (ordersSnapshot.hasData) {
+              final allOrders = ordersSnapshot.data?.docs ?? [];
+              final currentUserId = _auth.currentUser?.uid;
+              
+              debugPrint('📊 Tab count - userId: $userId, currentUserId: $currentUserId, value: $value, orderIds: ${orderIds.length}');
+              
+              // סינון בדיוק כמו ב-_buildCourierOrdersList
+              final filteredOrders = allOrders.where((doc) {
+                final orderData = doc.data() as Map<String, dynamic>;
+                final orderId = doc.id;
+                final status = orderData['status'] as String?;
+                final isInList = orderIds.contains(orderId);
+                
+                bool isValidStatus;
+                if (value == 'pending') {
+                  final courierId = orderData['courierId'];
+                  // בדיוק כמו ב-_buildCourierOrdersList - שורה 299
+                  isValidStatus = ((status == 'pending') || (status == 'confirmed') || (status == 'preparing')) && courierId == null;
+                } else if (value == 'preparing') {
+                  final courierId = orderData['courierId'];
+                  // בדיוק כמו ב-_buildCourierOrdersList - שורה 303 (משתמש ב-currentUserId)
+                  isValidStatus = status == 'preparing' && courierId != null && courierId == currentUserId;
+                } else {
+                  isValidStatus = false;
+                }
+                
+                if (isInList && isValidStatus) {
+                  final courierIdForLog = orderData['courierId'];
+                  debugPrint('   ✅ Order $orderId matches: status=$status, courierId=$courierIdForLog, isInList=$isInList, isValidStatus=$isValidStatus');
+                }
+                
+                return isInList && isValidStatus;
+              }).toList();
+              
+              count = filteredOrders.length;
+              debugPrint('📊 Tab count - final count: $count for tab: $value, userId: $userId');
+            }
+            
+            return _buildTabContent(label, icon, isSelected, count);
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildBusinessTabCount(String label, String value, IconData icon, bool isSelected, String userId) {
+    Stream<QuerySnapshot> stream;
+    
+    if (value == 'in_progress') {
+      stream = _firestore
+          .collection('orders')
+          .where('providerId', isEqualTo: userId)
+          .where('status', whereIn: ['confirmed', 'preparing'])
+          .snapshots();
+    } else if (value == 'completed') {
+      stream = _firestore
+          .collection('orders')
+          .where('providerId', isEqualTo: userId)
+          .where('status', isEqualTo: 'completed')
+          .snapshots();
+    } else {
+      stream = _firestore
+          .collection('orders')
+          .where('providerId', isEqualTo: userId)
+          .where('status', isEqualTo: value)
+          .snapshots();
+    }
+    
+    return StreamBuilder<QuerySnapshot>(
+      stream: stream,
+      builder: (context, snapshot) {
+        int count = 0;
+        if (snapshot.hasData) {
+          count = snapshot.data?.docs.length ?? 0;
+        }
+        
+        return _buildTabContent(label, icon, isSelected, count);
+      },
+    );
+  }
+
+  Widget _buildTabContent(String label, IconData icon, bool isSelected, int count) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(
+          icon,
+          size: 18,
+          color: isSelected
+              ? Theme.of(context).colorScheme.primary
+              : Colors.grey[600],
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            color: isSelected
+                ? Theme.of(context).colorScheme.primary
+                : Colors.grey[600],
+          ),
+        ),
+        if (count > 0) ...[
+          const SizedBox(width: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? Theme.of(context).colorScheme.primary
+                  : Colors.grey[600],
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              count.toString(),
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildOrderCard(order_model.Order order, int index) {
+    // צבע רקע לסירוגין
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isEven = index % 2 == 0;
+    Color? backgroundColor;
+    if (isDark) {
+      // בערכה כהה: הפרדה ברקעים
+      backgroundColor = isEven 
+          ? Theme.of(context).colorScheme.surface
+          : Theme.of(context).colorScheme.surfaceContainerHighest;
+    } else {
+      // בערכה בהירה: לבן או beige בהיר
+      backgroundColor = isEven 
+          ? Colors.white
+          : Colors.brown[50]; // beige בהיר
+    }
+    
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 2,
+      color: backgroundColor,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -1084,28 +1349,23 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        children: [
-                          Text(
-                            'הזמנה #${order.orderNumber}',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'מ: ${order.customerName}',
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
+                      Text(
+                        'הזמנה #${order.orderNumber}',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'מ: ${order.customerName}',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
                       ),
                       const SizedBox(height: 4),
                       if (order.customerPhone.isNotEmpty)
@@ -1128,20 +1388,66 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
                     ],
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: _getStatusColor(order.status),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Text(
-                    _getStatusText(order.status),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
+                // Column עם הלחצן "נמסרה" והסטטוס
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // לחצן "נמסרה" לשליח בטאב "הושלמו" (רק אם הוא לקח את ההזמנה והיא לא נמסרה)
+                    if (_isCourier == true && order.status == 'completed' && order.courierId == _auth.currentUser?.uid && !order.isDelivered) ...[
+                      TextButton.icon(
+                        onPressed: () => _markAsDelivered(order),
+                        icon: const Icon(Icons.check_circle, size: 18),
+                        label: const Text('נמסרה'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.green[700],
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    // הצגת "נמסרה" אם ההזמנה נמסרה (לכל המשתמשים)
+                    if (order.isDelivered) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.green,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.check_circle, size: 16, color: Colors.white),
+                            const SizedBox(width: 4),
+                            const Text(
+                              'נמסרה',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: _getStatusColor(order.status),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        _getStatusText(order.status),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ],
             ),
@@ -1279,11 +1585,22 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
                     ),
                     if (order.courierPhone != null && order.courierPhone!.isNotEmpty) ...[
                       const SizedBox(height: 4),
-                      Text(
-                        'טלפון: ${order.courierPhone}',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.blue[600],
+                      GestureDetector(
+                        onTap: () => _makePhoneCall(order.courierPhone!),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.phone, size: 16, color: Colors.blue[600]),
+                            const SizedBox(width: 4),
+                            Text(
+                              'טלפון: ${order.courierPhone}',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.blue[600],
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
@@ -1455,10 +1772,25 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
     }
 
     try {
-      await _firestore.collection('orders').doc(order.orderId).update({
+      // עדכון הסטטוס ל-completed - ההזמנה תופיע בטאב "הושלמו" אצל העסק, המזמין והשליח (אם יש)
+      // חשוב: שומרים את courierId, courierName, courierPhone אם הם קיימים כדי שהשליח יוכל לראות את ההזמנה בטאב "הושלמו"
+      final updateData = <String, dynamic>{
         'status': 'completed',
         'updatedAt': FieldValue.serverTimestamp(),
-      });
+      };
+      
+      // אם יש שליח משובץ, נשמור את פרטיו כדי שההזמנה תופיע אצלו בטאב "הושלמו"
+      if (order.courierId != null) {
+        updateData['courierId'] = order.courierId;
+        if (order.courierName != null) {
+          updateData['courierName'] = order.courierName;
+        }
+        if (order.courierPhone != null) {
+          updateData['courierPhone'] = order.courierPhone;
+        }
+      }
+      
+      await _firestore.collection('orders').doc(order.orderId).update(updateData);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1477,6 +1809,75 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
             backgroundColor: Colors.red,
           ),
         );
+      }
+    }
+  }
+
+  /// סימון הזמנה כ"נמסרה" על ידי השליח
+  Future<void> _markAsDelivered(order_model.Order order) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('סימון כנמסרה'),
+        content: const Text(
+          'האם אתה בטוח שההזמנה נמסרה ללקוח?\n\n'
+          'ההזמנה תעבור לטאב "הושלמו" אצלך, אצל העסק ואצל המזמין.'
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('ביטול'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.green),
+            child: const Text('סמן כנמסרה'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        // עדכון הסטטוס ל-completed ו-isDelivered ל-true - ההזמנה תופיע בטאב "הושלמו" אצל השליח, העסק והמזמין
+        // וגם יוצג "נמסרה" אצל כל המשתמשים
+        final updateData = <String, dynamic>{
+          'status': 'completed',
+          'isDelivered': true,
+          'updatedAt': FieldValue.serverTimestamp(),
+        };
+        
+        // אם יש שליח משובץ, נשמור את פרטיו כדי שההזמנה תופיע אצלו בטאב "הושלמו"
+        if (order.courierId != null) {
+          updateData['courierId'] = order.courierId;
+          if (order.courierName != null) {
+            updateData['courierName'] = order.courierName;
+          }
+          if (order.courierPhone != null) {
+            updateData['courierPhone'] = order.courierPhone;
+          }
+        }
+        
+        await _firestore.collection('orders').doc(order.orderId).update(updateData);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('ההזמנה סומנה כנמסרה'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+      } catch (e) {
+        debugPrint('Error marking order as delivered: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('שגיאה בסימון ההזמנה כנמסרה: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
       }
     }
   }
@@ -1567,7 +1968,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
   }
 
   /// הצגת דיאלוג עם מפה שמציגה את מיקום העסק וכתובת המשלוח
-  void _showMapDialog(
+  Future<void> _showMapDialog(
     double businessLat,
     double businessLng,
     String businessName,
@@ -1575,7 +1976,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
     double deliveryLat,
     double deliveryLng,
     String deliveryAddress,
-  ) {
+  ) async {
     // חישוב מרחק
     final distance = LocationService.calculateDistance(
       businessLat,
@@ -1584,10 +1985,69 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
       deliveryLng,
     );
 
-    // חישוב מרכז המפה
-    final centerLat = (businessLat + deliveryLat) / 2;
-    final centerLng = (businessLng + deliveryLng) / 2;
+    // קבלת המיקום הנוכחי של השליח (אם הוא שליח)
+    double? courierLat;
+    double? courierLng;
+    String? courierName;
+    
+    if (_isCourier == true) {
+      final currentUser = _auth.currentUser;
+      if (currentUser != null) {
+        try {
+          // ניסיון לקבל את המיקום הנוכחי מהמכשיר
+          final position = await LocationService.getCurrentPosition();
+          if (position != null) {
+            courierLat = position.latitude;
+            courierLng = position.longitude;
+            courierName = _userProfile?.displayName ?? 'מיקום נוכחי';
+          } else {
+            // אם לא הצלחנו לקבל מיקום מהמכשיר, ננסה לקבל מ-Firestore
+            final userDoc = await _firestore.collection('users').doc(currentUser.uid).get();
+            final userData = userDoc.data();
+            courierLat = (userData?['mobileLatitude'] as num?)?.toDouble() ?? 
+                        (userData?['latitude'] as num?)?.toDouble();
+            courierLng = (userData?['mobileLongitude'] as num?)?.toDouble() ?? 
+                        (userData?['longitude'] as num?)?.toDouble();
+            courierName = _userProfile?.displayName ?? 'מיקום נוכחי';
+          }
+        } catch (e) {
+          debugPrint('Error getting courier location: $e');
+        }
+      }
+    }
 
+    // חישוב מרכז המפה - כולל את המיקום הנוכחי של השליח אם קיים
+    double centerLat;
+    double centerLng;
+    if (courierLat != null && courierLng != null) {
+      // ממוצע של שלושת הנקודות
+      centerLat = (businessLat + deliveryLat + courierLat) / 3;
+      centerLng = (businessLng + deliveryLng + courierLng) / 3;
+    } else {
+      // ממוצע של שתי הנקודות
+      centerLat = (businessLat + deliveryLat) / 2;
+      centerLng = (businessLng + deliveryLng) / 2;
+    }
+
+    // חישוב המרחק המקסימלי לזום
+    double maxDistance = distance;
+    if (courierLat != null && courierLng != null) {
+      final distanceToBusiness = LocationService.calculateDistance(
+        courierLat,
+        courierLng,
+        businessLat,
+        businessLng,
+      );
+      final distanceToDelivery = LocationService.calculateDistance(
+        courierLat,
+        courierLng,
+        deliveryLat,
+        deliveryLng,
+      );
+      maxDistance = [distance, distanceToBusiness, distanceToDelivery].reduce((a, b) => a > b ? a : b);
+    }
+
+    if (!mounted) return;
     showDialog(
       context: context,
       builder: (context) => Dialog(
@@ -1647,7 +2107,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
                   child: GoogleMap(
                     initialCameraPosition: CameraPosition(
                       target: LatLng(centerLat, centerLng),
-                      zoom: _calculateZoom(distance),
+                      zoom: _calculateZoom(maxDistance),
                     ),
                     markers: {
                       Marker(
@@ -1668,6 +2128,17 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
                         ),
                         icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
                       ),
+                      // מיקום נוכחי של השליח (אם קיים)
+                      if (courierLat != null && courierLng != null)
+                        Marker(
+                          markerId: const MarkerId('courier'),
+                          position: LatLng(courierLat, courierLng),
+                          infoWindow: InfoWindow(
+                            title: 'מיקום נוכחי',
+                            snippet: courierName ?? 'שלי',
+                          ),
+                          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+                        ),
                     },
                     mapType: MapType.normal,
                     myLocationButtonEnabled: false,
@@ -1708,6 +2179,40 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
     if (distanceKm < 10) return 12.0;
     if (distanceKm < 20) return 11.0;
     return 10.0;
+  }
+
+  // התקשרות למספר טלפון
+  Future<void> _makePhoneCall(String phoneNumber) async {
+    try {
+      // ניקוי מספר הטלפון (הסרת תווים לא רלוונטיים)
+      final cleanNumber = phoneNumber.replaceAll(RegExp(r'[^\d+]'), '');
+      
+      // יצירת URI להתקשרות
+      final Uri phoneUri = Uri(scheme: 'tel', path: cleanNumber);
+      
+      if (await canLaunchUrl(phoneUri)) {
+        await launchUrl(phoneUri);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('לא ניתן להתקשר למספר זה'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Error making phone call: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה בהתקשרות: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   /// פותח את אפליקציית Waze לניווט למיקום המבוקש

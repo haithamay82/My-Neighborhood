@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'dart:async';
 import '../models/order.dart' as order_model;
 import '../l10n/app_localizations.dart';
+import '../services/location_service.dart';
 
 class MyOrdersScreen extends StatefulWidget {
   const MyOrdersScreen({super.key});
@@ -57,10 +61,10 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
               ),
               child: Row(
                 children: [
-                  _buildTab('ממתינות', 'pending', Icons.pending),
-                  _buildTab('בתהליך', 'in_progress', Icons.local_shipping),
-                  _buildTab('הושלמו', 'completed', Icons.done_all),
-                  _buildTab('בוטלו', 'cancelled', Icons.cancel),
+                  _buildTabWithCount('ממתינות', 'pending', Icons.pending, user.uid),
+                  _buildTabWithCount('בתהליך', 'in_progress', Icons.local_shipping, user.uid),
+                  _buildTabWithCount('הושלמו', 'completed', Icons.done_all, user.uid),
+                  _buildTabWithCount('בוטלו', 'cancelled', Icons.cancel, user.uid),
                 ],
               ),
             ),
@@ -226,7 +230,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
               itemCount: parsedOrders.length,
               itemBuilder: (context, index) {
                 final order = parsedOrders[index];
-                return _buildOrderCard(order);
+                return _buildOrderCard(order, index);
               },
             );
                 },
@@ -238,7 +242,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
     );
   }
 
-  Widget _buildTab(String label, String value, IconData icon) {
+  Widget _buildTabWithCount(String label, String value, IconData icon, String userId) {
     final isSelected = _selectedTab == value;
     return Expanded(
       child: GestureDetector(
@@ -260,38 +264,123 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
               ),
             ),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 18,
-                color: isSelected
-                    ? Theme.of(context).colorScheme.primary
-                    : Colors.grey[600],
-              ),
-              const SizedBox(width: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                  color: isSelected
-                      ? Theme.of(context).colorScheme.primary
-                      : Colors.grey[600],
-                ),
-              ),
-            ],
+          child: StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('orders')
+                .where('customerId', isEqualTo: userId)
+                .snapshots(),
+            builder: (context, snapshot) {
+              int count = 0;
+              if (snapshot.hasData) {
+                final orders = snapshot.data?.docs ?? [];
+                for (var doc in orders) {
+                  try {
+                    final orderData = doc.data() as Map<String, dynamic>;
+                    final deletedForCustomers = orderData['deletedForCustomers'] as List<dynamic>?;
+                    
+                    // אם ההזמנה נמחקה עבור המזמין הנוכחי (soft delete) - נדלג עליה
+                    if (deletedForCustomers != null && deletedForCustomers.contains(userId)) {
+                      continue;
+                    }
+                    
+                    final order = order_model.Order.fromFirestore(doc);
+                    
+                    // סינון לפי הטאב
+                    bool matchesTab = false;
+                    if (value == 'pending') {
+                      matchesTab = order.status == 'pending';
+                    } else if (value == 'in_progress') {
+                      matchesTab = order.status == 'confirmed' || order.status == 'preparing';
+                    } else if (value == 'completed') {
+                      matchesTab = order.status == 'completed';
+                    } else if (value == 'cancelled') {
+                      matchesTab = order.status == 'cancelled';
+                    }
+                    
+                    if (matchesTab) {
+                      count++;
+                    }
+                  } catch (e) {
+                    // Skip invalid orders
+                  }
+                }
+              }
+              
+              return _buildTabContent(label, icon, isSelected, count);
+            },
           ),
         ),
       ),
     );
   }
 
-  Widget _buildOrderCard(order_model.Order order) {
+  Widget _buildTabContent(String label, IconData icon, bool isSelected, int count) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(
+          icon,
+          size: 18,
+          color: isSelected
+              ? Theme.of(context).colorScheme.primary
+              : Colors.grey[600],
+        ),
+        const SizedBox(width: 4),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            color: isSelected
+                ? Theme.of(context).colorScheme.primary
+                : Colors.grey[600],
+          ),
+        ),
+        if (count > 0) ...[
+          const SizedBox(width: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? Theme.of(context).colorScheme.primary
+                  : Colors.grey[600],
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text(
+              count.toString(),
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildOrderCard(order_model.Order order, int index) {
+    // צבע רקע לסירוגין
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final isEven = index % 2 == 0;
+    Color? backgroundColor;
+    if (isDark) {
+      // בערכה כהה: הפרדה ברקעים
+      backgroundColor = isEven 
+          ? Theme.of(context).colorScheme.surface
+          : Theme.of(context).colorScheme.surfaceContainerHighest;
+    } else {
+      // בערכה בהירה: לבן או beige בהיר
+      backgroundColor = isEven 
+          ? Colors.white
+          : Colors.brown[50]; // beige בהיר
+    }
+    
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
       elevation: 2,
+      color: backgroundColor,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -305,28 +394,23 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Row(
-                        children: [
-                          Text(
-                            'הזמנה #${order.orderNumber}',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'מ: ${order.providerName}',
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
+                      Text(
+                        'הזמנה #${order.orderNumber}',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'מ: ${order.providerName}',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
                       ),
                       const SizedBox(height: 4),
                       Text(
@@ -339,6 +423,32 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
                     ],
                   ),
                 ),
+                // הצגת "נמסרה" אם ההזמנה נמסרה
+                if (order.isDelivered) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.green,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.check_circle, size: 16, color: Colors.white),
+                        const SizedBox(width: 4),
+                        const Text(
+                          'נמסרה',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                ],
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
@@ -488,11 +598,22 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
                       ),
                       if (order.courierPhone != null && order.courierPhone!.isNotEmpty) ...[
                         const SizedBox(height: 4),
-                        Text(
-                          'טלפון: ${order.courierPhone}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.blue[600],
+                        GestureDetector(
+                          onTap: () => _makePhoneCall(order.courierPhone!),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.phone, size: 16, color: Colors.blue[600]),
+                              const SizedBox(width: 4),
+                              Text(
+                                'טלפון: ${order.courierPhone}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.blue[600],
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
@@ -551,6 +672,45 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
                   ),
                 ),
               ],
+            ),
+            
+            // מפה עם מיקום ההזמנה, העסק והשליח - רק אם יש שליח וההזמנה היא delivery
+            Builder(
+              builder: (context) {
+                // לוגים לדיבוג
+                debugPrint('🗺️ Order ${order.orderNumber} - Map conditions:');
+                debugPrint('   courierId: ${order.courierId}');
+                debugPrint('   deliveryType: ${order.deliveryType}');
+                debugPrint('   deliveryLocation: ${order.deliveryLocation}');
+                debugPrint('   courierName: ${order.courierName}');
+                debugPrint('   status: ${order.status}');
+                
+                if (order.courierId != null && order.deliveryType == 'delivery' && order.deliveryLocation != null) {
+                  debugPrint('   ✅ All conditions met - showing map');
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Divider(height: 24),
+                      const Text(
+                        'מיקום המשלוח',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      _buildOrderTrackingMap(order),
+                      const SizedBox(height: 16),
+                    ],
+                  );
+                } else {
+                  debugPrint('   ❌ Conditions not met:');
+                  if (order.courierId == null) debugPrint('      - courierId is null');
+                  if (order.deliveryType != 'delivery') debugPrint('      - deliveryType is ${order.deliveryType}, not "delivery"');
+                  if (order.deliveryLocation == null) debugPrint('      - deliveryLocation is null');
+                  return const SizedBox.shrink();
+                }
+              },
             ),
             
             // לחצן מחק הזמנה - רק אם הסטטוס הוא pending, completed, או cancelled
@@ -691,6 +851,237 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
             ),
           );
         }
+      }
+    }
+  }
+
+  Widget _buildOrderTrackingMap(order_model.Order order) {
+    if (order.deliveryLocation == null || order.courierId == null) {
+      return const SizedBox.shrink();
+    }
+
+    final deliveryLat = (order.deliveryLocation!['latitude'] as num?)?.toDouble();
+    final deliveryLng = (order.deliveryLocation!['longitude'] as num?)?.toDouble();
+    
+    if (deliveryLat == null || deliveryLng == null) {
+      return const SizedBox.shrink();
+    }
+
+    return Container(
+      height: 300,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey[300]!),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: StreamBuilder<DocumentSnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('users')
+              .doc(order.providerId)
+              .snapshots(),
+          builder: (context, providerSnapshot) {
+            // טעינת מיקום העסק
+            double? businessLat;
+            double? businessLng;
+            if (providerSnapshot.hasData) {
+              final providerData = providerSnapshot.data!.data() as Map<String, dynamic>?;
+              businessLat = (providerData?['latitude'] as num?)?.toDouble();
+              businessLng = (providerData?['longitude'] as num?)?.toDouble();
+            }
+
+            // טעינת מיקום השליח - מתעדכן כל 10 שניות
+            // נשתמש ב-Stream.periodic כדי לעדכן כל 10 שניות
+            return FutureBuilder<DocumentSnapshot>(
+              future: FirebaseFirestore.instance
+                  .collection('users')
+                  .doc(order.courierId)
+                  .get(),
+              builder: (context, initialSnapshot) {
+                // לאחר הטעינה הראשונית, נשתמש ב-Stream.periodic לעדכון כל 10 שניות
+                return StreamBuilder<DocumentSnapshot>(
+                  stream: Stream.periodic(const Duration(seconds: 10))
+                      .asyncMap((_) async {
+                        final doc = await FirebaseFirestore.instance
+                            .collection('users')
+                            .doc(order.courierId)
+                            .get();
+                        return doc;
+                      }),
+                  builder: (context, periodicSnapshot) {
+                    // נשתמש בנתונים מהעדכון התקופתי, או מהטעינה הראשונית אם אין עדכון
+                    final courierSnapshot = periodicSnapshot.hasData 
+                        ? periodicSnapshot 
+                        : initialSnapshot;
+                double? courierLat;
+                double? courierLng;
+                String? courierName;
+                
+                if (courierSnapshot.hasData) {
+                  final courierData = courierSnapshot.data!.data() as Map<String, dynamic>?;
+                  courierLat = (courierData?['mobileLatitude'] as num?)?.toDouble() ?? 
+                              (courierData?['latitude'] as num?)?.toDouble();
+                  courierLng = (courierData?['mobileLongitude'] as num?)?.toDouble() ?? 
+                              (courierData?['longitude'] as num?)?.toDouble();
+                  courierName = courierData?['displayName'] as String? ?? 'שליח';
+                }
+
+                // חישוב מרכז המפה
+                double centerLat = deliveryLat;
+                double centerLng = deliveryLng;
+                if (businessLat != null && businessLng != null) {
+                  if (courierLat != null && courierLng != null) {
+                    centerLat = (businessLat + deliveryLat + courierLat) / 3;
+                    centerLng = (businessLng + deliveryLng + courierLng) / 3;
+                  } else {
+                    centerLat = (businessLat + deliveryLat) / 2;
+                    centerLng = (businessLng + deliveryLng) / 2;
+                  }
+                }
+
+                // חישוב זום
+                double zoom = 13.0;
+                if (businessLat != null && businessLng != null) {
+                  final distance = LocationService.calculateDistance(
+                    businessLat,
+                    businessLng,
+                    deliveryLat,
+                    deliveryLng,
+                  );
+                  if (courierLat != null && courierLng != null) {
+                    final distanceToBusiness = LocationService.calculateDistance(
+                      courierLat,
+                      courierLng,
+                      businessLat,
+                      businessLng,
+                    );
+                    final distanceToDelivery = LocationService.calculateDistance(
+                      courierLat,
+                      courierLng,
+                      deliveryLat,
+                      deliveryLng,
+                    );
+                    final maxDistance = [distance, distanceToBusiness, distanceToDelivery].reduce((a, b) => a > b ? a : b);
+                    zoom = _calculateZoom(maxDistance);
+                  } else {
+                    zoom = _calculateZoom(distance);
+                  }
+                }
+
+                // יצירת markers
+                Set<Marker> markers = {};
+                
+                // Marker למיקום ההזמנה (אדום)
+                markers.add(
+                  Marker(
+                    markerId: const MarkerId('delivery'),
+                    position: LatLng(deliveryLat, deliveryLng),
+                    infoWindow: InfoWindow(
+                      title: 'כתובת למשלוח',
+                      snippet: order.deliveryLocation!['address'] as String? ?? 'מיקום המשלוח',
+                    ),
+                    icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+                  ),
+                );
+
+                // Marker למיקום העסק (כחול)
+                if (businessLat != null && businessLng != null) {
+                  markers.add(
+                    Marker(
+                      markerId: const MarkerId('business'),
+                      position: LatLng(businessLat, businessLng),
+                      infoWindow: InfoWindow(
+                        title: 'מיקום העסק',
+                        snippet: order.providerName,
+                      ),
+                      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
+                    ),
+                  );
+                }
+
+                // Marker למיקום השליח (ירוק)
+                if (courierLat != null && courierLng != null) {
+                  markers.add(
+                    Marker(
+                      markerId: const MarkerId('courier'),
+                      position: LatLng(courierLat, courierLng),
+                      infoWindow: InfoWindow(
+                        title: 'מיקום השליח',
+                        snippet: courierName ?? 'שליח',
+                      ),
+                      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+                    ),
+                  );
+                }
+
+                return GoogleMap(
+                  initialCameraPosition: CameraPosition(
+                    target: LatLng(centerLat, centerLng),
+                    zoom: zoom,
+                  ),
+                  markers: markers,
+                  mapType: MapType.normal,
+                  myLocationButtonEnabled: false,
+                  zoomControlsEnabled: true,
+                  onMapCreated: (GoogleMapController controller) {
+                    // המפה נוצרה בהצלחה
+                  },
+                );
+                  },
+                );
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  double _calculateZoom(double distanceInMeters) {
+    // חישוב זום לפי מרחק
+    if (distanceInMeters < 500) {
+      return 15.0;
+    } else if (distanceInMeters < 1000) {
+      return 14.0;
+    } else if (distanceInMeters < 5000) {
+      return 13.0;
+    } else if (distanceInMeters < 10000) {
+      return 12.0;
+    } else {
+      return 11.0;
+    }
+  }
+
+  // התקשרות למספר טלפון
+  Future<void> _makePhoneCall(String phoneNumber) async {
+    try {
+      // ניקוי מספר הטלפון (הסרת תווים לא רלוונטיים)
+      final cleanNumber = phoneNumber.replaceAll(RegExp(r'[^\d+]'), '');
+      
+      // יצירת URI להתקשרות
+      final Uri phoneUri = Uri(scheme: 'tel', path: cleanNumber);
+      
+      if (await canLaunchUrl(phoneUri)) {
+        await launchUrl(phoneUri);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('לא ניתן להתקשר למספר זה'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Error making phone call: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה בהתקשרות: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     }
   }

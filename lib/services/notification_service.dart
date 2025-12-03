@@ -579,6 +579,32 @@ class NotificationService {
       
       debugPrint('✅ Notification saved to Firestore');
       
+      // שליחת push notification
+      try {
+        // המרת data ל-Map<String, String>
+        Map<String, String> notificationData;
+        if (data != null) {
+          notificationData = data.map((key, value) => MapEntry(key, value.toString()));
+        } else {
+          notificationData = {};
+        }
+        
+        // הוספת type ל-data כדי שנוכל לבדוק אותו ב-_handleForegroundMessage
+        notificationData['type'] = type;
+        
+        await PushNotificationService.sendPushNotification(
+          userId: toUserId,
+          title: title,
+          body: message,
+          payload: type,
+          data: notificationData,
+        );
+        debugPrint('✅ Push notification sent to user: $toUserId');
+      } catch (pushError) {
+        debugPrint('⚠️ Error sending push notification (notification still saved): $pushError');
+        // המשך גם אם push notification נכשל - ההתראה נשמרה ב-Firestore
+      }
+      
     } catch (e) {
       debugPrint('❌ Error sending notification: $e');
     }

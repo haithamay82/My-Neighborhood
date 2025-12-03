@@ -19,6 +19,7 @@ class Order {
   final String? courierName; // שם השליח (אם יש)
   final String? courierPhone; // טלפון השליח (אם יש)
   final int orderNumber; // מספר הזמנה (החל מ-100, רץ לכל עסק בנפרד)
+  final bool isDelivered; // האם ההזמנה נמסרה על ידי השליח
   final DateTime createdAt;
   final DateTime? updatedAt;
 
@@ -40,6 +41,7 @@ class Order {
     this.courierName,
     this.courierPhone,
     required this.orderNumber,
+    this.isDelivered = false,
     required this.createdAt,
     this.updatedAt,
   });
@@ -106,6 +108,7 @@ class Order {
         courierName: data['courierName']?.toString(),
         courierPhone: data['courierPhone']?.toString(),
         orderNumber: data['orderNumber'] as int? ?? 0,
+        isDelivered: data['isDelivered'] == true,
         createdAt: createdAt,
         updatedAt: updatedAt,
       );
@@ -135,6 +138,7 @@ class Order {
       'courierName': courierName,
       'courierPhone': courierPhone,
       'orderNumber': orderNumber,
+      'isDelivered': isDelivered,
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': updatedAt != null ? Timestamp.fromDate(updatedAt!) : null,
     };
