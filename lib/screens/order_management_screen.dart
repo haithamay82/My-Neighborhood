@@ -277,6 +277,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
             final allOrders = ordersSnapshot.data?.docs ?? [];
             debugPrint('📋 Found ${allOrders.length} delivery orders (all statuses)');
             
+            final currentUserId = _auth.currentUser?.uid;
             final orders = allOrders
                 .where((doc) {
                   final orderData = doc.data() as Map<String, dynamic>;
@@ -285,7 +286,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
                   final isInList = orderIds.contains(orderId);
                   
                   // אם זה טאב "pending" - נציג pending, confirmed או preparing (אבל רק אם אין שליח)
-                  // אם זה טאב "preparing" - נציג רק preparing עם שליח
+                  // אם זה טאב "preparing" - נציג רק preparing עם שליח שזה השליח הנוכחי (הזמנה שהוא לקח)
                   bool isValidStatus;
                   if (_selectedTab == 'pending') {
                     final courierId = orderData['courierId'];
@@ -293,8 +294,8 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
                     isValidStatus = ((status == 'pending') || (status == 'confirmed') || (status == 'preparing')) && courierId == null;
                   } else if (_selectedTab == 'preparing') {
                     final courierId = orderData['courierId'];
-                    // נציג preparing רק אם יש שליח (הזמנה שנלקחה על ידי שליח)
-                    isValidStatus = status == 'preparing' && courierId != null;
+                    // נציג preparing רק אם יש שליח והשליח הוא המשתמש הנוכחי (הזמנה שהוא לקח)
+                    isValidStatus = status == 'preparing' && courierId != null && courierId == currentUserId;
                   } else {
                     isValidStatus = status == _selectedTab;
                   }
@@ -302,6 +303,8 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
                   debugPrint('   Order $orderId:');
                   debugPrint('     - in list: $isInList');
                   debugPrint('     - status: $status');
+                  debugPrint('     - courierId: ${orderData['courierId']}');
+                  debugPrint('     - currentUserId: $currentUserId');
                   debugPrint('     - selected tab: $_selectedTab');
                   debugPrint('     - valid status: $isValidStatus');
                   
@@ -1418,6 +1421,39 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
   }
 
   Future<void> _completeOrder(order_model.Order order) async {
+    // בדיקה אם יש משלוח ללא שליח
+    if (order.deliveryType == 'delivery' && 
+        order.courierId == null && 
+        order.status == 'preparing') {
+      // הצגת דיאלוג התראה
+      final shouldContinue = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('אין שליח משובץ'),
+          content: const Text(
+            'ההזמנה כוללת משלוח ועדיין אין שליח משובץ להזמנה זו.\n\n'
+            'האם אתה בטוח שברצונך לסמן את ההזמנה כהושלמה?'
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('ביטול'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: TextButton.styleFrom(foregroundColor: Colors.orange),
+              child: const Text('סמן כהושלמה'),
+            ),
+          ],
+        ),
+      );
+
+      // אם המשתמש ביטל, לא נמשיך
+      if (shouldContinue != true) {
+        return;
+      }
+    }
+
     try {
       await _firestore.collection('orders').doc(order.orderId).update({
         'status': 'completed',

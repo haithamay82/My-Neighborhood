@@ -37,52 +37,13 @@
   <meta name="google-signin-redirect_uri" content="https://nearme-970f3.web.app">
   
   <!-- Google Maps JavaScript API -->
-  <!-- Load synchronously in head to ensure it's available before Flutter -->
-  <!-- Using Browser key (auto created by Firebase) -->
-  <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAGALOMmVVNl1f_xYDRXoFrgX_Z0B5HjQQ&libraries=places&callback=initGoogleMaps"></script>
+  <!-- Load dynamically to ensure callback function is defined first -->
   <script>
     // Global flag to track Google Maps API loading
     window.googleMapsReady = false;
     window.googleMapsError = null;
     
-    // Alternative loading method (if script tag above doesn't work)
-    (function() {
-      console.log('🗺️ Setting up Google Maps API...');
-      
-      // Check if already loaded
-      if (typeof google !== 'undefined' && google.maps) {
-        console.log('✅ Google Maps API already loaded');
-        window.googleMapsReady = true;
-        return;
-      }
-      
-      // Fallback: Load dynamically if not already loaded
-      setTimeout(function() {
-        if (typeof google === 'undefined' || !google.maps) {
-          console.log('🔄 Google Maps API not loaded yet, trying dynamic load...');
-          const script = document.createElement('script');
-          script.src = 'https://maps.googleapis.com/maps/api/js?key=AIzaSyAGALOMmVVNl1f_xYDRXoFrgX_Z0B5HjQQ&libraries=places&callback=initGoogleMaps';
-          script.async = true;
-          script.defer = true;
-          script.onerror = function(e) {
-            console.error('❌ Failed to load Google Maps API script:', e);
-            window.googleMapsError = 'Failed to load Google Maps API script. Please check: 1) API key is valid, 2) API key is enabled for Web applications, 3) Maps JavaScript API is enabled in Google Cloud Console';
-            // Still try to load Flutter after delay
-            setTimeout(function() {
-              if (!window.googleMapsReady) {
-                console.warn('⚠️ Google Maps API failed to load, but continuing with Flutter');
-              }
-            }, 3000);
-          };
-          script.onload = function() {
-            console.log('📦 Google Maps API script loaded (but callback may not have fired yet)');
-          };
-          document.head.appendChild(script);
-        }
-      }, 500);
-    })();
-    
-    // Initialize Google Maps when API is loaded
+    // Initialize Google Maps when API is loaded - MUST be defined BEFORE loading the script
     window.initGoogleMaps = function() {
       console.log('✅ Google Maps API callback called');
       try {
@@ -146,7 +107,7 @@
               console.error('   typeof google:', typeof google);
               console.error('   google.maps:', typeof google !== 'undefined' ? google.maps : 'N/A');
               console.error('   Current URL:', window.location.href);
-              console.error('   API Key used: AIzaSyAGALOMmVVNl1f_xYDRXoFrgX_Z0B5HjQQ');
+              console.error('   API Key used: AIzaSyBzZH8y4mlSIXX_IsXe3I5ghLziRJp84TA');
               window.googleMapsError = 'google.maps object not available. This usually means: 1) API key is invalid, 2) API key restrictions are too strict, 3) Maps JavaScript API is not enabled';
             }
           } catch (e) {
@@ -165,8 +126,42 @@
     // Fallback initialization
     window.initMap = function() {
       console.log('📍 initMap callback called (fallback)');
-      window.initGoogleMaps();
+      if (typeof window.initGoogleMaps === 'function') {
+        window.initGoogleMaps();
+      }
     };
+    
+    // Load Google Maps API dynamically after callback is defined
+    (function() {
+      console.log('🗺️ Setting up Google Maps API...');
+      
+      // Check if already loaded
+      if (typeof google !== 'undefined' && google.maps) {
+        console.log('✅ Google Maps API already loaded');
+        window.googleMapsReady = true;
+        return;
+      }
+      
+      // Load Google Maps API with async loading and callback
+      const script = document.createElement('script');
+      script.src = 'https://maps.googleapis.com/maps/api/js?key=AIzaSyBzZH8y4mlSIXX_IsXe3I5ghLziRJp84TA&libraries=places&loading=async&callback=initGoogleMaps';
+      script.async = true;
+      script.defer = true;
+      script.onerror = function(e) {
+        console.error('❌ Failed to load Google Maps API script:', e);
+        window.googleMapsError = 'Failed to load Google Maps API script. Please check: 1) API key is valid, 2) API key is enabled for Web applications, 3) Maps JavaScript API is enabled in Google Cloud Console';
+        // Still try to load Flutter after delay
+        setTimeout(function() {
+          if (!window.googleMapsReady) {
+            console.warn('⚠️ Google Maps API failed to load, but continuing with Flutter');
+          }
+        }, 3000);
+      };
+      script.onload = function() {
+        console.log('📦 Google Maps API script loaded (but callback may not have fired yet)');
+      };
+      document.head.appendChild(script);
+    })();
     
     // Polyfill for Intl.Segmenter to fix deprecation warning
     if (!window.Intl.Segmenter) {
@@ -242,7 +237,7 @@
       console.error('❌ Google Maps Authentication Error!');
       console.error('   This means the API key is invalid or not authorized for this domain.');
       console.error('   Please check:');
-      console.error('   1. API key is correct: AIzaSyAGALOMmVVNl1f_xYDRXoFrgX_Z0B5HjQQ');
+      console.error('   1. API key is correct: AIzaSyBzZH8y4mlSIXX_IsXe3I5ghLziRJp84TA');
       console.error('   2. Maps JavaScript API is enabled in Google Cloud Console');
       console.error('   3. API key restrictions allow this domain: ' + window.location.hostname);
       console.error('   4. For localhost, add "localhost" or "localhost:*" to allowed referrers');
@@ -250,9 +245,31 @@
       window.googleMapsError = 'Google Maps Authentication Error - API key is invalid or not authorized';
     });
     
+    // Store the original URL before Flutter router changes it
+    // This is critical for Google Sign-In redirect handling
+    window.originalUrl = window.location.href;
+    window.originalUrlQuery = window.location.search;
+    window.originalUrlHash = window.location.hash;
+    window.originalPath = window.location.pathname;
+    console.log('🔍 Storing original URL before Flutter router:');
+    console.log('   Full URL:', window.originalUrl);
+    console.log('   Path:', window.originalPath);
+    console.log('   Query:', window.originalUrlQuery);
+    console.log('   Hash:', window.originalUrlHash);
+    
+    // Check if this is a Firebase Auth redirect handler
+    if (window.location.pathname === '/__/auth/handler' || window.originalPath === '/__/auth/handler') {
+      console.log('✅ Firebase Auth redirect handler detected!');
+      console.log('   This is the redirect URL from Google Sign-In');
+      // Don't let Flutter router change this URL - Firebase Auth needs to process it first
+      // We'll handle the redirect in main.dart before Flutter router starts
+    }
+    
     // Initialize app with error handling
     window.addEventListener('DOMContentLoaded', function() {
       console.log('DOM loaded, initializing app...');
+      console.log('   Original URL stored:', window.originalUrl);
+      console.log('   Original query stored:', window.originalUrlQuery);
       
       // Handle payment success callback - CHECK FIRST
       if (window.location.pathname === '/payment/success' || window.location.pathname.includes('payment/success')) {
@@ -376,9 +393,17 @@
       }, 5000);
       
       // Handle Google Sign-In redirect
-      if (window.location.hash.includes('access_token') || window.location.search.includes('code')) {
-        console.log('Google Sign-In redirect detected');
+      // Firebase Auth uses query parameters, not hash, for redirect
+      if (window.location.search.includes('__firebase_request_key__') || 
+          window.location.search.includes('apiKey') ||
+          window.location.search.includes('mode') ||
+          window.location.hash.includes('access_token') || 
+          window.location.search.includes('code')) {
+        console.log('🔍 Google Sign-In redirect detected');
+        console.log('   Search params:', window.location.search);
+        console.log('   Hash:', window.location.hash);
         // The Flutter app will handle the redirect
+        // Don't navigate away - let Firebase Auth process it
       }
       
       

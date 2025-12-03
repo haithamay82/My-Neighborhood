@@ -50,12 +50,222 @@ class _YokiStyleAuthScreenState extends State<YokiStyleAuthScreen>
     ));
     _animationController.repeat();
     
-    // בדיקת התחברות אוטומטית
-    _checkAutoLogin();
+    // טיפול ב-Google Sign-In redirect ב-web (לפני בדיקת auto login)
+    // זה חשוב כי אם המשתמש חזר מ-Google, צריך לטפל בזה לפני ש-auto login מנתק אותו
+    if (kIsWeb) {
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await _handleGoogleRedirect();
+        // רק אחרי טיפול ב-redirect, נבדוק auto login
+        if (mounted) {
+          await _checkAutoLogin();
+        }
+      });
+    } else {
+      // בדיקת התחברות אוטומטית (רק במובייל)
+      _checkAutoLogin();
+    }
     
     // בקשות הרשאות - רק במסך התחברות
     _requestNotificationPermission();
     _requestLocationPermission();
+  }
+  
+  /// טיפול ב-Google Sign-In redirect ב-web
+  Future<void> _handleGoogleRedirect() async {
+    if (!kIsWeb) return;
+    
+    try {
+      debugPrint('🔍 Checking for Google Sign-In redirect result...');
+      final fullUrl = Uri.base;
+      debugPrint('   Full URL: $fullUrl');
+      debugPrint('   URL path: ${fullUrl.path}');
+      debugPrint('   URL query: ${fullUrl.query}');
+      debugPrint('   URL query parameters: ${fullUrl.queryParameters}');
+      debugPrint('   URL hash: ${fullUrl.fragment}');
+      
+      // בדיקה אם יש query parameters של redirect (לפני שהדפדפן משנה את ה-URL)
+      final hasRedirectParams = fullUrl.queryParameters.containsKey('__firebase_request_key__') ||
+          fullUrl.queryParameters.containsKey('apiKey') ||
+          fullUrl.queryParameters.containsKey('mode') ||
+          fullUrl.queryParameters.containsKey('oobCode');
+      
+      debugPrint('   Has redirect params: $hasRedirectParams');
+      
+      // המתנה קצרה כדי לאפשר ל-redirect result להתעדכן
+      // חשוב: Firebase Auth צריך זמן לעבד את ה-redirect
+      await Future.delayed(const Duration(milliseconds: 2000));
+      
+      // בדיקה נוספת של currentUser לפני getRedirectResult
+      final currentUserBeforeCheck = FirebaseAuth.instance.currentUser;
+      if (currentUserBeforeCheck != null) {
+        debugPrint('✅ Found current user before getRedirectResult: ${currentUserBeforeCheck.email}');
+        debugPrint('   User ID: ${currentUserBeforeCheck.uid}');
+        // אם יש user כבר, נטפל בו ישירות
+        await _handleAuthenticatedUser(currentUserBeforeCheck);
+        return;
+      }
+      
+      debugPrint('🔍 Calling getRedirectResult...');
+      try {
+        final redirectResult = await FirebaseAuth.instance.getRedirectResult();
+        debugPrint('   Redirect result received');
+        debugPrint('   Has user: ${redirectResult.user != null}');
+        debugPrint('   Has credential: ${redirectResult.credential != null}');
+        debugPrint('   Has additionalUserInfo: ${redirectResult.additionalUserInfo != null}');
+        
+        // אם יש credential אבל אין user, ננסה להתחבר עם ה-credential
+        if (redirectResult.user == null && redirectResult.credential != null) {
+          debugPrint('⚠️ Redirect result has credential but no user - trying to sign in with credential');
+          try {
+            final userCredential = await FirebaseAuth.instance.signInWithCredential(redirectResult.credential!);
+            if (userCredential.user != null) {
+              debugPrint('✅ Signed in with credential successfully: ${userCredential.user!.email}');
+              await _handleAuthenticatedUser(userCredential.user!);
+              return;
+            }
+          } catch (credError) {
+            debugPrint('❌ Error signing in with credential: $credError');
+            debugPrint('   Error type: ${credError.runtimeType}');
+            debugPrint('   Error details: ${credError.toString()}');
+          }
+        }
+        
+        if (redirectResult.user != null) {
+          debugPrint('✅ Google Sign-In redirect detected: ${redirectResult.user!.email}');
+          debugPrint('   User ID: ${redirectResult.user!.uid}');
+          await _handleAuthenticatedUser(redirectResult.user!);
+          return;
+        }
+      } catch (redirectError) {
+        debugPrint('❌ Error getting redirect result: $redirectError');
+        debugPrint('   Error type: ${redirectError.runtimeType}');
+        debugPrint('   Error details: ${redirectError.toString()}');
+      }
+      
+      // בדיקה נוספת של currentUser אחרי getRedirectResult
+      final currentUserAfterCheck = FirebaseAuth.instance.currentUser;
+      if (currentUserAfterCheck != null) {
+        debugPrint('✅ Found current user after getRedirectResult: ${currentUserAfterCheck.email}');
+        debugPrint('   User ID: ${currentUserAfterCheck.uid}');
+        // אם יש user אחרי getRedirectResult, נטפל בו
+        await _handleAuthenticatedUser(currentUserAfterCheck);
+        return;
+      }
+      
+      debugPrint('⚠️ No redirect result found and no current user');
+    } catch (e) {
+      debugPrint('⚠️ Error handling Google redirect: $e');
+      debugPrint('   Error type: ${e.runtimeType}');
+      debugPrint('   Error details: ${e.toString()}');
+      // התעלם משגיאות - זה לא קריטי
+    }
+  }
+  
+  /// טיפול במשתמש מאומת (אחרי התחברות מוצלחת)
+  Future<void> _handleAuthenticatedUser(User user) async {
+    if (!mounted) return;
+    
+    try {
+      debugPrint('🔐 Handling authenticated user: ${user.email}');
+      
+      // בדיקה אם המשתמש כבר קיים במערכת
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      
+      if (!userDoc.exists) {
+        // משתמש חדש - יצירת פרופיל פרטי מנוי
+        debugPrint('📝 Creating new user profile...');
+        final now = DateTime.now();
+        final displayNameValue = user.displayName ?? user.email?.split('@')[0] ?? 'משתמש';
+        
+        final userData = {
+          'uid': user.uid,
+          'displayName': displayNameValue,
+          'name': displayNameValue,
+          'email': user.email ?? '',
+          'userType': 'personal',
+          'createdAt': Timestamp.fromDate(now),
+          'isSubscriptionActive': true,
+          'subscriptionStatus': 'active',
+          'subscriptionExpiry': Timestamp.fromDate(
+            DateTime.now().add(const Duration(days: 365))
+          ),
+          'emailVerified': user.emailVerified,
+          'accountStatus': 'active',
+          'maxRequestsPerMonth': 5,
+          'maxRadius': 10.0,
+          'canCreatePaidRequests': false,
+          'businessCategories': [],
+          'hasAcceptedTerms': true,
+        };
+        
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .set(userData);
+        debugPrint('✅ New user profile created');
+      } else {
+        debugPrint('✅ User profile already exists');
+      }
+      
+      // בדיקת תנאי שימוש
+      final hasAcceptedTerms = await TermsService.hasUserAcceptedTerms();
+      
+      if (!hasAcceptedTerms) {
+        // הצגת מסך תנאי שימוש
+        if (mounted) {
+          final result = await Navigator.push<bool>(
+            context,
+            MaterialPageRoute(
+              builder: (context) => TermsAndPrivacyScreen(
+                onAccept: () async {
+                  await TermsService.acceptTerms();
+                  if (!context.mounted) return;
+                  Navigator.pop(context, true);
+                },
+                onDecline: () {
+                  FirebaseAuth.instance.signOut();
+                  Navigator.pop(context, false);
+                },
+              ),
+            ),
+          );
+          
+          if (result != true) {
+            debugPrint('❌ User declined terms');
+            return; // המשתמש לא הסכים לתנאים
+          }
+        }
+      }
+      
+      if (!mounted) return;
+      
+      // הצגת הודעה והתחברות
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('התחברת בהצלחה עם Google!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+      
+      // קריאה ל-callback אם קיים
+      if (widget.onLoginSuccess != null) {
+        debugPrint('✅ Calling onLoginSuccess callback');
+        widget.onLoginSuccess!();
+      }
+    } catch (e) {
+      debugPrint('❌ Error handling authenticated user: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה בהתחברות: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
   
   Future<void> _requestNotificationPermission() async {
@@ -83,6 +293,64 @@ class _YokiStyleAuthScreenState extends State<YokiStyleAuthScreen>
   /// בדיקת התחברות אוטומטית
   Future<void> _checkAutoLogin() async {
     try {
+      // ✅ בדיקה אם יש user מחובר (יכול להיות מ-redirect)
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser != null) {
+        // אם יש user מחובר, לא ננתק אותו (יכול להיות מ-Google redirect)
+        debugPrint('✅ User is already logged in: ${currentUser.email}');
+        debugPrint('   User ID: ${currentUser.uid}');
+        // אם המשתמש מחובר, נבדוק אם צריך להציג תנאי שימוש
+        final hasAcceptedTerms = await TermsService.hasUserAcceptedTerms();
+        if (!hasAcceptedTerms) {
+          // הצגת מסך תנאי שימוש
+          if (mounted) {
+            final result = await Navigator.push<bool>(
+              context,
+              MaterialPageRoute(
+                builder: (context) => TermsAndPrivacyScreen(
+                  onAccept: () async {
+                    await TermsService.acceptTerms();
+                    if (!context.mounted) return;
+                    Navigator.pop(context, true);
+                  },
+                  onDecline: () {
+                    FirebaseAuth.instance.signOut();
+                    Navigator.pop(context, false);
+                  },
+                ),
+              ),
+            );
+            
+            if (result == true && mounted) {
+              // המשתמש הסכים לתנאים - כניסה לאפליקציה
+              if (widget.onLoginSuccess != null) {
+                widget.onLoginSuccess!();
+              }
+            }
+          }
+        } else {
+          // המשתמש מחובר והסכים לתנאים - כניסה לאפליקציה
+          if (mounted && widget.onLoginSuccess != null) {
+            widget.onLoginSuccess!();
+          }
+        }
+        return;
+      }
+      
+      // ✅ בדיקה אם יש redirect result (אפילו אם user הוא null)
+      if (kIsWeb) {
+        try {
+          final redirectResult = await FirebaseAuth.instance.getRedirectResult();
+          if (redirectResult.user != null || redirectResult.credential != null) {
+            debugPrint('✅ Redirect result found in _checkAutoLogin - user should be handled by _handleGoogleRedirect');
+            // אם יש redirect result, _handleGoogleRedirect כבר טיפל בזה
+            return;
+          }
+        } catch (e) {
+          debugPrint('⚠️ Error checking redirect result in _checkAutoLogin: $e');
+        }
+      }
+      
       // ✅ בדיקה אם המשתמש התנתק מפורשות
       final userLoggedOut = await AutoLoginService.hasUserLoggedOut();
       if (userLoggedOut) {
@@ -101,10 +369,10 @@ class _YokiStyleAuthScreenState extends State<YokiStyleAuthScreen>
         return;
       }
 
-      // ✅ אם המשתמש בחר "זכור אותי", נבדוק אם הוא כבר מחובר
-      final currentUser = FirebaseAuth.instance.currentUser;
-      if (currentUser != null) {
-        debugPrint('✅ User already logged in (${currentUser.uid}) and chose to remember - keeping logged in');
+      // ✅ אם המשתמש בחר "זכור אותי", נבדוק אם הוא כבר מחובר (שוב, למקרה שהתחבר בינתיים)
+      final userAfterCheck = FirebaseAuth.instance.currentUser;
+      if (userAfterCheck != null) {
+        debugPrint('✅ User already logged in (${userAfterCheck.uid}) and chose to remember - keeping logged in');
         // המשתמש כבר מחובר ובחר "זכור אותי" - ה-StreamBuilder ב-main.dart כבר יציג את MainApp
         return;
       }

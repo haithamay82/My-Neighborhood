@@ -10700,158 +10700,182 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
               const SizedBox(height: 12),
             ],
             
-            // שירותים עסקיים
+            // שירותים עסקיים (רק אם זה לא שליח)
+            // שליחים לא צריכים שירותים - הם מוגדרים לפי תחומי העיסוק בלבד
             if (provider.userType == UserType.business && provider.isSubscriptionActive) ...[
-              FutureBuilder<List<Map<String, dynamic>>>(
-                future: _loadBusinessServicesForProvider(provider.userId),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
+              Builder(
+                builder: (context) {
+                  // בדיקה אם המשתמש הוא שליח (יש לו קטגוריות של שליחויות)
+                  final courierCategories = [
+                    RequestCategory.foodDelivery,
+                    RequestCategory.groceryDelivery,
+                    RequestCategory.smallMoving,
+                    RequestCategory.largeMoving,
+                  ];
+                  
+                  final isCourier = provider.businessCategories?.any((cat) =>
+                      courierCategories.any((c) => c.name == cat.name)) ?? false;
+                  
+                  // אם זה שליח, לא להציג שירותים
+                  if (isCourier) {
                     return const SizedBox.shrink();
                   }
                   
-                  final allServices = snapshot.data ?? [];
-                  // סינון רק שירותים זמינים
-                  final services = allServices.where((service) {
-                    return service['isAvailable'] as bool? ?? true; // ברירת מחדל זמין
-                  }).toList();
+                  // אם זה לא שליח, להציג שירותים כרגיל
+                  return FutureBuilder<List<Map<String, dynamic>>>(
+                    future: _loadBusinessServicesForProvider(provider.userId),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const SizedBox.shrink();
+                      }
+                      
+                      final allServices = snapshot.data ?? [];
+                      // סינון רק שירותים זמינים
+                      final services = allServices.where((service) {
+                        return service['isAvailable'] as bool? ?? true; // ברירת מחדל זמין
+                      }).toList();
+                      
+                      if (services.isEmpty) {
+                        return const SizedBox.shrink();
+                      }
+                      
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Divider(),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Icon(Icons.business_center, size: 16, color: Colors.green[600]),
+                              const SizedBox(width: 8),
+                              Text(
+                                'שירותים:',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.green[700],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: services.take(5).map((service) {
+                              final name = service['name'] as String? ?? '';
+                              final price = service['price'] as double?;
+                              final isCustomPrice = service['isCustomPrice'] as bool? ?? false;
+                              final priceText = isCustomPrice 
+                                  ? 'בהתאמה אישית'
+                                  : price != null 
+                                      ? '₪${price.toStringAsFixed(0)}'
+                                      : '';
+                              
+                              return Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: Colors.green[50],
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: Colors.green[200]!),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      name,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    if (priceText.isNotEmpty) ...[
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        priceText,
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: Colors.green[700],
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                          if (services.length > 5) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              '+${services.length - 5} שירותים נוספים',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                          ],
+                        ],
+                      );
+                    },
+                  );
+                },
+              ),
+            ],
+            
+            // הצגת משלוחים/תור (לכל המשתמשים העסקיים, כולל שליחים)
+            if (provider.userType == UserType.business && provider.isSubscriptionActive) ...[
+              FutureBuilder<Map<String, bool>>(
+                future: _loadProviderServiceSettings(provider.userId),
+                builder: (context, settingsSnapshot) {
+                  if (settingsSnapshot.connectionState == ConnectionState.waiting) {
+                    return const SizedBox.shrink();
+                  }
                   
-                  if (services.isEmpty) {
+                  final requiresDelivery = settingsSnapshot.data?['requiresDelivery'] ?? false;
+                  final requiresAppointment = settingsSnapshot.data?['requiresAppointment'] ?? false;
+                  
+                  if (!requiresDelivery && !requiresAppointment) {
                     return const SizedBox.shrink();
                   }
                   
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Divider(),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Icon(Icons.business_center, size: 16, color: Colors.green[600]),
-                          const SizedBox(width: 8),
-                          Text(
-                            'שירותים:',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.green[700],
+                      if (requiresDelivery) ...[
+                        Row(
+                          children: [
+                            Icon(Icons.local_shipping, size: 16, color: Colors.blue[600]),
+                            const SizedBox(width: 8),
+                            Text(
+                              'זמין במשלוחים',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.blue[700],
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: services.take(5).map((service) {
-                          final name = service['name'] as String? ?? '';
-                          final price = service['price'] as double?;
-                          final isCustomPrice = service['isCustomPrice'] as bool? ?? false;
-                          final priceText = isCustomPrice 
-                              ? 'בהתאמה אישית'
-                              : price != null 
-                                  ? '₪${price.toStringAsFixed(0)}'
-                                  : '';
-                          
-                          return Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: Colors.green[50],
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: Colors.green[200]!),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                      ],
+                      if (requiresAppointment) ...[
+                        Row(
+                          children: [
+                            Icon(Icons.calendar_today, size: 16, color: Colors.orange[600]),
+                            const SizedBox(width: 8),
+                            Text(
+                              'יש לקבוע תור',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.orange[700],
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  name,
-                                  style: const TextStyle(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                                if (priceText.isNotEmpty) ...[
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    priceText,
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.green[700],
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ],
-                            ),
-                          );
-                        }).toList(),
-                      ),
-                      if (services.length > 5) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          '+${services.length - 5} שירותים נוספים',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Colors.grey[600],
-                            fontStyle: FontStyle.italic,
-                          ),
+                          ],
                         ),
                       ],
-                      const SizedBox(height: 12),
-                      // הצגת משלוחים/תור מתחת לשירותים
-                      FutureBuilder<Map<String, bool>>(
-                        future: _loadProviderServiceSettings(provider.userId),
-                        builder: (context, settingsSnapshot) {
-                          if (settingsSnapshot.connectionState == ConnectionState.waiting) {
-                            return const SizedBox.shrink();
-                          }
-                          
-                          final requiresDelivery = settingsSnapshot.data?['requiresDelivery'] ?? false;
-                          final requiresAppointment = settingsSnapshot.data?['requiresAppointment'] ?? false;
-                          
-                          if (!requiresDelivery && !requiresAppointment) {
-                            return const SizedBox.shrink();
-                          }
-                          
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              if (requiresDelivery) ...[
-                                Row(
-                                  children: [
-                                    Icon(Icons.local_shipping, size: 16, color: Colors.blue[600]),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      'זמין במשלוחים',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: Colors.blue[700],
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                              ],
-                              if (requiresAppointment) ...[
-                                Row(
-                                  children: [
-                                    Icon(Icons.calendar_today, size: 16, color: Colors.orange[600]),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      'יש לקבוע תור',
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: Colors.orange[700],
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ],
-                          );
-                        },
-                      ),
                     ],
                   );
                 },

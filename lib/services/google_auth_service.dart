@@ -22,23 +22,81 @@ class GoogleAuthService {
         
         // בדיקה אם יש redirect result קיים (אחרי חזרה מ-Google)
         try {
+          debugPrint('🔍 Checking for redirect result...');
+          debugPrint('   Current URL: ${Uri.base}');
+          debugPrint('   URL hash: ${Uri.base.fragment}');
+          debugPrint('   URL query: ${Uri.base.query}');
+          
           final redirectResult = await _auth.getRedirectResult();
+          debugPrint('   Redirect result received');
+          debugPrint('   Has user: ${redirectResult.user != null}');
+          debugPrint('   Has credential: ${redirectResult.credential != null}');
+          debugPrint('   Has additionalUserInfo: ${redirectResult.additionalUserInfo != null}');
+          
           if (redirectResult.user != null) {
             debugPrint('✅ Google Sign-In redirect successful: ${redirectResult.user!.email}');
+            debugPrint('   User ID: ${redirectResult.user!.uid}');
             return redirectResult.user;
+          } else {
+            debugPrint('⚠️ Redirect result exists but user is null');
+            if (redirectResult.credential != null) {
+              debugPrint('   But credential exists - trying to sign in with credential');
+              try {
+                final userCredential = await _auth.signInWithCredential(redirectResult.credential!);
+                if (userCredential.user != null) {
+                  debugPrint('✅ Signed in with credential successfully');
+                  return userCredential.user;
+                }
+              } catch (credError) {
+                debugPrint('❌ Error signing in with credential: $credError');
+              }
+            }
           }
         } catch (e) {
           debugPrint('⚠️ No redirect result or error: $e');
+          debugPrint('   Error type: ${e.runtimeType}');
+          debugPrint('   Error details: ${e.toString()}');
         }
         
         // אם אין redirect result ואין user מחובר, נתחיל תהליך התחברות חדש
         final googleProvider = GoogleAuthProvider();
         googleProvider.setCustomParameters({'prompt': 'select_account'});
 
-        debugPrint('🔄 Initiating Google Sign-In redirect...');
-        await _auth.signInWithRedirect(googleProvider);
-        debugPrint('✅ Redirect initiated, user will be redirected to Google');
-        // נחזור null כי המשתמש יעבור לדף Google
+        debugPrint('🔄 Initiating Google Sign-In...');
+        debugPrint('   Auth domain: ${_auth.app.options.authDomain}');
+        debugPrint('   API key: ${_auth.app.options.apiKey}');
+        debugPrint('   Project ID: ${_auth.app.options.projectId}');
+        
+        // ננסה להשתמש ב-popup במקום redirect כדי להימנע מבעיות עם Flutter router
+        // אם popup נכשל, נחזור ל-redirect
+        try {
+          debugPrint('   Attempting signInWithPopup (preferred method)...');
+          final userCredential = await _auth.signInWithPopup(googleProvider);
+          if (userCredential.user != null) {
+            debugPrint('✅ Google Sign-In popup successful: ${userCredential.user!.email}');
+            debugPrint('   User ID: ${userCredential.user!.uid}');
+            return userCredential.user;
+          }
+        } catch (popupError) {
+          debugPrint('⚠️ Popup failed, trying redirect: $popupError');
+          debugPrint('   Error type: ${popupError.runtimeType}');
+          debugPrint('   Error details: ${popupError.toString()}');
+          
+          // אם popup נכשל (למשל בגלל Cross-Origin-Opener-Policy), נשתמש ב-redirect
+          try {
+            debugPrint('🔄 Initiating Google Sign-In redirect (fallback)...');
+            await _auth.signInWithRedirect(googleProvider);
+            debugPrint('✅ Redirect initiated, user will be redirected to Google');
+            // נחזור null כי המשתמש יעבור לדף Google
+            return null;
+          } catch (redirectError) {
+            debugPrint('❌ Error initiating redirect: $redirectError');
+            debugPrint('   Error type: ${redirectError.runtimeType}');
+            debugPrint('   Error details: ${redirectError.toString()}');
+            rethrow;
+          }
+        }
+        // אם הגענו לכאן, משהו לא עבד - נחזור null
         return null;
       } else {
         // 📱 גרסת מובייל - Google Sign-In

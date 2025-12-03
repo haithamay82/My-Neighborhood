@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform, debugPrint;
+import 'dart:html' as html show window;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -35,6 +36,7 @@ import 'package:geolocator/geolocator.dart';
 // Guest trial expiry check moved to Cloud Functions
 import 'package:flutter/services.dart';
 import 'package:app_links/app_links.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import 'firebase_options.dart';
 import 'widgets/background_icons_widget.dart';
 
@@ -61,6 +63,90 @@ void main() async {
         options: webOptions,
       );
       debugPrint('✅ Firebase initialized for Web successfully');
+      
+      // 🔥 טיפול ב-Google Sign-In redirect לפני ש-Flutter router מתחיל
+      // זה חשוב כי Firebase Auth צריך לעבד את ה-redirect לפני ש-Flutter router משנה את ה-URL
+      try {
+        debugPrint('🔍 Checking for Google Sign-In redirect BEFORE Flutter router...');
+        
+        // קריאה ל-JavaScript כדי לקבל את ה-URL המלא לפני ש-Flutter router משנה אותו
+        if (kIsWeb) {
+          try {
+            // קריאה ל-window.location כדי לקבל את ה-URL המלא
+            final currentUrl = html.window.location.href;
+            final currentPath = html.window.location.pathname;
+            final currentQuery = html.window.location.search;
+            final currentHash = html.window.location.hash;
+            
+            debugPrint('   Current URL (from window.location): $currentUrl');
+            debugPrint('   Current path: $currentPath');
+            debugPrint('   Current query: $currentQuery');
+            debugPrint('   Current hash: $currentHash');
+            
+            // בדיקה אם זה Firebase Auth redirect handler
+            final isAuthHandler = currentPath == '/__/auth/handler';
+            debugPrint('   Is /__/auth/handler: $isAuthHandler');
+            
+            // ניסיון לפרסר את ה-URL המלא
+            final fullUrl = Uri.parse(currentUrl);
+            debugPrint('   Parsed URL query: ${fullUrl.query}');
+            debugPrint('   Parsed URL query params: ${fullUrl.queryParameters}');
+            
+            // בדיקה אם יש query parameters של redirect
+            final hasRedirectParams = fullUrl.queryParameters.containsKey('__firebase_request_key__') ||
+                fullUrl.queryParameters.containsKey('apiKey') ||
+                fullUrl.queryParameters.containsKey('mode') ||
+                fullUrl.queryParameters.containsKey('oobCode') ||
+                (currentQuery?.contains('__firebase_request_key__') ?? false) ||
+                (currentQuery?.contains('apiKey') ?? false) ||
+                isAuthHandler; // גם אם זה /__/auth/handler, ננסה לעבד את ה-redirect
+            
+            debugPrint('   Has redirect params: $hasRedirectParams');
+            
+            // גם אם אין query parameters גלויים, ננסה לקרוא את getRedirectResult
+            // כי Firebase Auth יכול לעבד את ה-redirect גם בלי query parameters גלויים
+            // זה חשוב במיוחד אם זה /__/auth/handler
+            debugPrint('   Attempting getRedirectResult...');
+            await Future.delayed(const Duration(milliseconds: 2000)); // המתנה ארוכה יותר
+            
+            final redirectResult = await FirebaseAuth.instance.getRedirectResult();
+            debugPrint('   Redirect result: hasUser=${redirectResult.user != null}, hasCredential=${redirectResult.credential != null}');
+            debugPrint('   Redirect result additionalUserInfo: ${redirectResult.additionalUserInfo != null}');
+            
+            if (redirectResult.user != null) {
+              debugPrint('✅ Google Sign-In redirect processed successfully: ${redirectResult.user!.email}');
+              debugPrint('   User ID: ${redirectResult.user!.uid}');
+              debugPrint('   Email verified: ${redirectResult.user!.emailVerified}');
+            } else if (redirectResult.credential != null) {
+              debugPrint('⚠️ Redirect has credential but no user - signing in with credential...');
+              try {
+                final userCredential = await FirebaseAuth.instance.signInWithCredential(redirectResult.credential!);
+                if (userCredential.user != null) {
+                  debugPrint('✅ Signed in with credential successfully: ${userCredential.user!.email}');
+                  debugPrint('   User ID: ${userCredential.user!.uid}');
+                }
+              } catch (credError) {
+                debugPrint('❌ Error signing in with credential: $credError');
+                debugPrint('   Error type: ${credError.runtimeType}');
+                debugPrint('   Error details: ${credError.toString()}');
+              }
+            } else {
+              debugPrint('ℹ️ No redirect result found');
+              // בדיקה נוספת של currentUser - אולי Firebase Auth כבר עיבד את ה-redirect
+              final currentUser = FirebaseAuth.instance.currentUser;
+              if (currentUser != null) {
+                debugPrint('✅ Found current user (Firebase Auth may have processed redirect): ${currentUser.email}');
+                debugPrint('   User ID: ${currentUser.uid}');
+              }
+            }
+          } catch (e) {
+            debugPrint('⚠️ Error checking redirect in main: $e');
+            debugPrint('   Error type: ${e.runtimeType}');
+          }
+        }
+      } catch (e) {
+        debugPrint('⚠️ Error in redirect check: $e');
+      }
     }
     // על iOS, Firebase כבר מאותחל - רק נבדוק שהוא זמין
     try {
@@ -94,13 +180,8 @@ void main() async {
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   }
   
-  // הגדרת כיוון אנכי בלבד לכל המסכים (לא רלוונטי ב-web)
-  if (!kIsWeb) {
-    await SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-    ]);
-  }
+  // הערה: הגדרת כיוון מסך תתבצע ב-CommunityApp לפי סוג המכשיר (טאבלט או סמארטפון)
+  // לא נגדיר כאן כדי שההגדרה תתבצע רק אחרי שיש context
   
   // הצגת מסך Splash מיד - האתחולים יקרו במסך ה-Splash
   runApp(
@@ -140,6 +221,8 @@ class _CommunityAppState extends State<CommunityApp> {
     // טעינת השפה והערכת הנושא לפני שב-build רץ
     await _loadLocale();
     await _loadThemeMode();
+    // הגדרת כיוון מסך לפי סוג המכשיר (טאבלט או סמארטפון)
+    await _setOrientationForDevice();
     // השפה נטענה, אפשר להמשיך
     if (mounted) {
       setState(() {
@@ -149,6 +232,65 @@ class _CommunityAppState extends State<CommunityApp> {
     // שאר האתחולים (לא חוסמים)
     // הערה: בקשות הרשאות התראות ומיקום מועברות למסך התחברות
     _setupDeepLinkHandling();
+  }
+
+  /// בדיקה אם המכשיר הוא טאבלט (לפי גודל המסך או device_info)
+  Future<bool> _isTablet() async {
+    if (kIsWeb) return false;
+    
+    try {
+      final deviceInfo = DeviceInfoPlugin();
+      
+      if (defaultTargetPlatform == TargetPlatform.iOS) {
+        final iosInfo = await deviceInfo.iosInfo;
+        // iPad או iPad Pro
+        return iosInfo.model.toLowerCase().contains('ipad');
+      } else if (defaultTargetPlatform == TargetPlatform.android) {
+        final androidInfo = await deviceInfo.androidInfo;
+        // בדיקה לפי גודל המסך - אם shortestSide >= 600dp זה טאבלט
+        // או לפי device type
+        final size = MediaQueryData.fromView(WidgetsBinding.instance.platformDispatcher.views.first).size;
+        final shortestSide = size.shortestSide;
+        return shortestSide >= 600 || androidInfo.device.toString().toLowerCase().contains('tablet');
+      }
+    } catch (e) {
+      debugPrint('⚠️ Error detecting tablet: $e');
+      // fallback - בדיקה לפי גודל המסך
+      try {
+        final size = MediaQueryData.fromView(WidgetsBinding.instance.platformDispatcher.views.first).size;
+        final shortestSide = size.shortestSide;
+        return shortestSide >= 600;
+      } catch (e2) {
+        debugPrint('⚠️ Error in fallback tablet detection: $e2');
+      }
+    }
+    
+    return false;
+  }
+
+  /// הגדרת כיוון מסך לפי סוג המכשיר
+  Future<void> _setOrientationForDevice() async {
+    if (kIsWeb) return;
+    
+    final isTablet = await _isTablet();
+    
+    if (isTablet) {
+      // טאבלט - מאפשר כל הכיוונים
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+      debugPrint('📱 Tablet detected - All orientations enabled');
+    } else {
+      // סמארטפון - אנכי בלבד
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+      ]);
+      debugPrint('📱 Phone detected - Portrait only');
+    }
   }
   
   Future<void> _loadLocale() async {
@@ -484,6 +626,10 @@ class _CommunityAppState extends State<CommunityApp> {
       child: Builder(
         builder: (context) {
               final l10n = AppLocalizations.of(context);
+              // הגדרת כיוון מסך לפי סוג המכשיר (טאבלט או סמארטפון)
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _setOrientationForDevice();
+              });
           return MaterialApp(
                 title: l10n.appTitle,
         debugShowCheckedModeBanner: false,

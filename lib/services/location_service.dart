@@ -7,6 +7,10 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io' show Platform;
+import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import '../l10n/app_localizations.dart';
 import 'notification_service.dart';
 import 'notification_preferences_service.dart';
@@ -92,6 +96,12 @@ class LocationService {
   /// המרת קואורדינטות לכתובת
   static Future<String?> getAddressFromCoordinates(double latitude, double longitude) async {
     try {
+      // ב-web, נשתמש ב-Google Maps Geocoding API ישירות
+      if (kIsWeb) {
+        return await _getAddressFromCoordinatesWeb(latitude, longitude);
+      }
+      
+      // במובייל, נשתמש ב-geocoding package
       List<Placemark> placemarks = await placemarkFromCoordinates(latitude, longitude);
       
       if (placemarks.isNotEmpty) {
@@ -117,6 +127,155 @@ class LocationService {
       return null;
     } catch (e) {
       debugPrint('Error getting address from coordinates: $e');
+      return null;
+    }
+  }
+
+  /// המרת קואורדינטות לכתובת ב-web באמצעות Google Maps Geocoding API
+  static Future<String?> _getAddressFromCoordinatesWeb(double latitude, double longitude) async {
+    debugPrint('🌐 _getAddressFromCoordinatesWeb called for: $latitude, $longitude');
+    try {
+      // נשתמש ב-HTTP API ישירות (יותר אמין ב-web)
+      final address = await _getAddressFromCoordinatesHttp(latitude, longitude);
+      
+      if (address != null && address.isNotEmpty) {
+        debugPrint('✅ Address obtained from HTTP API: $address');
+        return address;
+      } else {
+        debugPrint('⚠️ HTTP API returned null or empty address');
+        // ננסה fallback ל-geocoding package (אם זה עובד ב-web)
+        return await _getAddressFromCoordinatesFallback(latitude, longitude);
+      }
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error getting address from coordinates (web): $e');
+      debugPrint('   Stack trace: $stackTrace');
+      // ננסה fallback
+      try {
+        return await _getAddressFromCoordinatesFallback(latitude, longitude);
+      } catch (e2) {
+        debugPrint('❌ Fallback also failed: $e2');
+        return null;
+      }
+    }
+  }
+
+  /// Fallback: נסיון להשתמש ב-geocoding package גם ב-web
+  static Future<String?> _getAddressFromCoordinatesFallback(double latitude, double longitude) async {
+    try {
+      debugPrint('🔄 Trying fallback geocoding package...');
+      
+      // ב-web, geocoding package לא תמיד עובד, אז נחזיר null
+      if (kIsWeb) {
+        debugPrint('⚠️ Geocoding package not supported on web, returning null');
+        return null;
+      }
+      
+      List<Placemark> placemarks = await placemarkFromCoordinates(latitude, longitude);
+      
+      if (placemarks.isNotEmpty) {
+        Placemark place = placemarks[0];
+        String street = place.street ?? '';
+        String locality = place.locality ?? '';
+        String administrativeArea = place.administrativeArea ?? '';
+        
+        List<String> addressParts = [];
+        if (street.isNotEmpty) addressParts.add(street);
+        if (locality.isNotEmpty) addressParts.add(locality);
+        if (administrativeArea.isNotEmpty) addressParts.add(administrativeArea);
+        
+        if (addressParts.isNotEmpty) {
+          final address = addressParts.join(', ');
+          debugPrint('✅ Fallback geocoding succeeded: $address');
+          return address;
+        }
+      }
+      
+      debugPrint('⚠️ Fallback geocoding returned empty results');
+      return null;
+    } catch (e, stackTrace) {
+      debugPrint('❌ Fallback geocoding error: $e');
+      debugPrint('   Stack trace: $stackTrace');
+      return null;
+    }
+  }
+
+  /// המרת קואורדינטות לכתובת ב-web באמצעות Google Maps Geocoding API (HTTP)
+  static Future<String?> _getAddressFromCoordinatesHttp(double latitude, double longitude) async {
+    try {
+      // API key מ-firebase_options
+      const apiKey = 'AIzaSyBzZH8y4mlSIXX_IsXe3I5ghLziRJp84TA';
+      
+      final url = Uri.parse(
+        'https://maps.googleapis.com/maps/api/geocode/json?latlng=$latitude,$longitude&key=$apiKey&language=he'
+      );
+      
+      debugPrint('🌐 Calling Google Geocoding API...');
+      debugPrint('   URL: $url');
+      debugPrint('   Coordinates: $latitude, $longitude');
+      
+      final response = await http.get(url).timeout(
+        const Duration(seconds: 15),
+        onTimeout: () {
+          debugPrint('⚠️ Geocoding API timeout after 15 seconds');
+          throw TimeoutException('Geocoding API timeout');
+        },
+      );
+      
+      debugPrint('📡 Geocoding API response received');
+      debugPrint('   Status code: ${response.statusCode}');
+      debugPrint('   Response length: ${response.body.length}');
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        debugPrint('   Response status: ${data['status']}');
+        
+        if (data['status'] == 'OK') {
+          if (data['results'] != null && (data['results'] as List).isNotEmpty) {
+            final result = (data['results'] as List)[0];
+            final formattedAddress = result['formatted_address'] as String?;
+            
+            debugPrint('   Results count: ${(data['results'] as List).length}');
+            debugPrint('   First result formatted_address: $formattedAddress');
+            
+            if (formattedAddress != null && formattedAddress.isNotEmpty) {
+              debugPrint('✅ Address obtained from Geocoding API: $formattedAddress');
+              return formattedAddress;
+            } else {
+              debugPrint('⚠️ formatted_address is null or empty');
+            }
+          } else {
+            debugPrint('⚠️ No results in response');
+          }
+        } else {
+          debugPrint('⚠️ Geocoding API returned status: ${data['status']}');
+          if (data['error_message'] != null) {
+            debugPrint('   Error message: ${data['error_message']}');
+          }
+          if (data['status'] == 'ZERO_RESULTS') {
+            debugPrint('   No results found for coordinates: $latitude, $longitude');
+          } else if (data['status'] == 'REQUEST_DENIED') {
+            debugPrint('   Request denied - check API key and restrictions');
+          } else if (data['status'] == 'OVER_QUERY_LIMIT') {
+            debugPrint('   Over query limit - too many requests');
+          }
+        }
+      } else {
+        debugPrint('❌ Geocoding API HTTP error: ${response.statusCode}');
+        debugPrint('   Response body: ${response.body.substring(0, response.body.length > 500 ? 500 : response.body.length)}');
+      }
+      
+      return null;
+    } on TimeoutException catch (e) {
+      debugPrint('❌ Geocoding API timeout: $e');
+      return null;
+    } on http.ClientException catch (e) {
+      debugPrint('❌ Geocoding API client error: $e');
+      debugPrint('   This might be a CORS or network issue');
+      return null;
+    } catch (e, stackTrace) {
+      debugPrint('❌ Error calling Geocoding API: $e');
+      debugPrint('   Error type: ${e.runtimeType}');
+      debugPrint('   Stack trace: $stackTrace');
       return null;
     }
   }
