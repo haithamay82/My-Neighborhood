@@ -156,30 +156,18 @@ class PushNotificationService {
         }
         
         // אם אין שם, נשתמש בברירת מחדל
-        final finalName = nameToSpeak ?? 'מזמין';
+        final finalName = nameToSpeak ?? 'customer';
         debugPrint('🔊 Final name to speak: $finalName');
-        debugPrint('🔊 ✅ NEW CODE: Separating text into two parts');
         
-        // בדיקה אם עברית זמינה
-        final isHebrewAvailable = await TtsService.isHebrewAvailable();
-        debugPrint('🔊 Hebrew available: $isHebrewAvailable');
-        
-        // השמעת "הזמנה חדשה" בעברית או "NEW ORDER" באנגלית
-        if (isHebrewAvailable) {
-          debugPrint('🔊 ✅ NEW CODE: Speaking Hebrew text: "הזמנה חדשה"');
-          await TtsService.speak('הזמנה חדשה');
-        } else {
-          debugPrint('🔊 ✅ NEW CODE: Speaking English text: "NEW ORDER"');
-          // הגדרת שפה לאנגלית לפני speak
-          await TtsService.speakWithLanguage('NEW ORDER', 'eng-default');
+        // השמעת "new order from [name]" באנגלית
+        if (messageType == 'order_new') {
+          final textToSpeak = 'new order from $finalName';
+          debugPrint('🔊 ✅ Speaking: "$textToSpeak"');
+          await TtsService.speakWithLanguage(textToSpeak, 'eng-default');
+        } else if (messageType == 'order_delivery') {
+          // עבור order_delivery, נשמור את הלוגיקה הקיימת (אם יש)
+          debugPrint('🔊 Order delivery notification - skipping TTS');
         }
-        
-        // המתן קצת בין שני הטקסטים
-        await Future.delayed(const Duration(milliseconds: 300));
-        
-        // השמעת השם
-        debugPrint('🔊 ✅ NEW CODE: Speaking name separately: "$finalName"');
-        await TtsService.speak(finalName);
         debugPrint('🔊 ✅ NEW CODE: TtsService.speak() completed');
       } else {
         debugPrint('🔊 ❌ Not an order notification, skipping TTS');
