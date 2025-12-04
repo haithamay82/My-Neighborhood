@@ -11857,41 +11857,46 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                       
                       return DropdownButtonFormField<String>(
                         value: selectedServiceValue,
+                        isExpanded: true,
                         decoration: InputDecoration(
-                      labelText: 'הוסף שירות',
+                          labelText: 'הוסף שירות',
                           border: const OutlineInputBorder(),
                           prefixIcon: const Icon(Icons.add),
                           hintText: isPhoneValid ? null : 'הזן מספר טלפון תקין תחילה',
-                    ),
-                    items: services.map((service) {
-                      final serviceName = service['name'] as String;
-                      final price = (service['price'] as num?)?.toDouble();
-                      final isCustomPrice = service['isCustomPrice'] as bool? ?? false;
-                      final displayText = isCustomPrice 
-                          ? '$serviceName (בהתאמה אישית)'
-                          : price != null
-                              ? '$serviceName - ₪${price.toStringAsFixed(0)}'
-                              : serviceName;
-                      
-                      return DropdownMenuItem(
-                        value: serviceName,
-                        child: Text(displayText),
-                      );
-                    }).toList(),
+                        ),
+                        items: services.map((service) {
+                          final serviceName = service['name'] as String;
+                          final price = (service['price'] as num?)?.toDouble();
+                          final isCustomPrice = service['isCustomPrice'] as bool? ?? false;
+                          final displayText = isCustomPrice 
+                              ? '$serviceName (בהתאמה אישית)'
+                              : price != null
+                                  ? '$serviceName - ₪${price.toStringAsFixed(0)}'
+                                  : serviceName;
+                          
+                          return DropdownMenuItem(
+                            value: serviceName,
+                            child: Text(
+                              displayText,
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          );
+                        }).toList(),
                         onChanged: isPhoneValid ? (selectedServiceName) {
-                      if (selectedServiceName != null) {
-                        setDialogState(() {
-                          // תמיד מוסיף הזמנה חדשה, גם אם השירות כבר קיים
-                          // כך אפשר להזמין אותו שירות עם מרכיבים שונים
-                          selectedServices.add({
-                            'id': nextServiceId[0]++,
-                            'serviceName': selectedServiceName,
-                            'quantity': 1,
-                            'ingredients': <String>[],
-                          });
+                          if (selectedServiceName != null) {
+                            setDialogState(() {
+                              // תמיד מוסיף הזמנה חדשה, גם אם השירות כבר קיים
+                              // כך אפשר להזמין אותו שירות עם מרכיבים שונים
+                              selectedServices.add({
+                                'id': nextServiceId[0]++,
+                                'serviceName': selectedServiceName,
+                                'quantity': 1,
+                                'ingredients': <String>[],
+                              });
                               selectedServiceValue = null; // איפוס ה-dropdown לאחר הוספת השירות
-                        });
-                      }
+                            });
+                          }
                         } : null, // לא פעיל אם מספר הטלפון לא תקין
                       );
                     },
