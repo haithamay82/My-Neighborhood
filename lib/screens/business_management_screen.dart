@@ -82,6 +82,19 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
   // רשימת שירותים
   final List<_Service> _services = [];
   
+  // תמונת עסק
+  File? _businessImageFile;
+  String? _businessImageUrl;
+  bool _isUploadingBusinessImage = false;
+  
+  // קישורים חברתיים
+  final Map<String, TextEditingController> _socialLinksControllers = {
+    'instagram': TextEditingController(),
+    'facebook': TextEditingController(),
+    'tiktok': TextEditingController(),
+    'website': TextEditingController(),
+  };
+  
   
   @override
   void initState() {
@@ -1039,6 +1052,10 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
     for (var service in _services) {
       service.dispose();
     }
+    // dispose של controllers לקישורים חברתיים
+    for (var controller in _socialLinksControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
   
@@ -1608,6 +1625,112 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
                       ),
                       const SizedBox(height: 16),
                       
+                      // העלאת תמונת עסק
+                      Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.image,
+                                    color: Theme.of(context).colorScheme.primary,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  const Expanded(
+                                    child: Text(
+                                      'תמונת עסק',
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 8),
+                              const Text(
+                                'תמונה עוזרת מאוד לשווק את העסק שלך. התמונה תוצג במסך פרופיל ובמסך עסקים ועצמאיים.',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                              if (_businessImageFile != null || _businessImageUrl != null)
+                                Container(
+                                  height: 150,
+                                  width: double.infinity,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.grey),
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: _businessImageFile != null
+                                        ? Image.file(
+                                            _businessImageFile!,
+                                            fit: BoxFit.cover,
+                                          )
+                                        : _businessImageUrl != null
+                                            ? Image.network(
+                                                _businessImageUrl!,
+                                                fit: BoxFit.cover,
+                                                errorBuilder: (context, error, stackTrace) {
+                                                  return const Center(
+                                                    child: Icon(Icons.error, color: Colors.red),
+                                                  );
+                                                },
+                                              )
+                                            : null,
+                                  ),
+                                ),
+                              if (_businessImageFile != null || _businessImageUrl != null)
+                                const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: ElevatedButton.icon(
+                                      onPressed: _isUploadingBusinessImage ? null : _pickBusinessImage,
+                                      icon: _isUploadingBusinessImage
+                                          ? const SizedBox(
+                                              width: 16,
+                                              height: 16,
+                                              child: CircularProgressIndicator(strokeWidth: 2),
+                                            )
+                                          : const Icon(Icons.add_photo_alternate),
+                                      label: Text(_businessImageFile != null || _businessImageUrl != null
+                                          ? 'שנה תמונה'
+                                          : 'העלה תמונה'),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Theme.of(context).colorScheme.primary,
+                                        foregroundColor: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                  if (_businessImageFile != null || _businessImageUrl != null) ...[
+                                    const SizedBox(width: 8),
+                                    IconButton(
+                                      onPressed: () {
+                                        setState(() {
+                                          _businessImageFile = null;
+                                          _businessImageUrl = null;
+                                        });
+                                      },
+                                      icon: const Icon(Icons.delete, color: Colors.red),
+                                      tooltip: 'מחק תמונה',
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      
                       // בחירת קטגוריה - שני שלבים
                       Container(
                         decoration: BoxDecoration(
@@ -1757,6 +1880,79 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
                         ),
                       ),
                       const SizedBox(height: 16),
+                      
+                      // קישורים חברתיים
+                      if (_selectedLatitude != null && _selectedLongitude != null) ...[
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(
+                                      Icons.link,
+                                      color: Theme.of(context).colorScheme.primary,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    const Expanded(
+                                      child: Text(
+                                        'קישורים לאתר או חשבון חברתי',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                const Text(
+                                  'יש לך חשבון אינסטגרם/פייסבוק/טיקטוק? הקישורים יוצגו במסך פרופיל ובמסך עסקים ועצמאיים.',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                                const SizedBox(height: 16),
+                                // אינסטגרם
+                                _buildSocialLinkField(
+                                  'instagram',
+                                  'אינסטגרם',
+                                  Icons.camera_alt,
+                                  'https://instagram.com/',
+                                ),
+                                const SizedBox(height: 12),
+                                // פייסבוק
+                                _buildSocialLinkField(
+                                  'facebook',
+                                  'פייסבוק',
+                                  Icons.facebook,
+                                  'https://facebook.com/',
+                                ),
+                                const SizedBox(height: 12),
+                                // טיקטוק
+                                _buildSocialLinkField(
+                                  'tiktok',
+                                  'טיקטוק',
+                                  Icons.music_video,
+                                  'https://tiktok.com/@',
+                                ),
+                                const SizedBox(height: 12),
+                                // אתר
+                                _buildSocialLinkField(
+                                  'website',
+                                  'אתר',
+                                  Icons.language,
+                                  'https://',
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                      ],
                       
                       
                       
@@ -1934,6 +2130,130 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
         _exposureRadius = result['exposureRadius']; // קבלת רדיוס החשיפה
       });
     }
+  }
+
+  // בחירת תמונת עסק
+  Future<void> _pickBusinessImage() async {
+    try {
+      final ImageSource? source = await showDialog<ImageSource>(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: const Text('בחר מקור תמונה'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.photo_library),
+                  title: const Text('בחר מהגלריה'),
+                  onTap: () => Navigator.of(context).pop(ImageSource.gallery),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.camera_alt),
+                  title: const Text('צלם תמונה'),
+                  onTap: () => Navigator.of(context).pop(ImageSource.camera),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+
+      if (source == null) return;
+
+      final XFile? image = await _imagePicker.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+      );
+
+      if (image != null) {
+        setState(() {
+          _businessImageFile = File(image.path);
+          _businessImageUrl = null; // איפוס URL אם יש תמונה חדשה
+        });
+      }
+    } catch (e) {
+      debugPrint('Error picking business image: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה בבחירת תמונה: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // העלאת תמונת עסק ל-Firebase Storage
+  Future<String?> _uploadBusinessImage(String userId) async {
+    if (_businessImageFile == null) return _businessImageUrl;
+
+    try {
+      setState(() {
+        _isUploadingBusinessImage = true;
+      });
+
+      final storageRef = FirebaseStorage.instance
+          .ref()
+          .child('business_images')
+          .child(userId)
+          .child('business_image.jpg');
+
+      await storageRef.putFile(_businessImageFile!);
+      final downloadUrl = await storageRef.getDownloadURL();
+
+      setState(() {
+        _businessImageUrl = downloadUrl;
+        _isUploadingBusinessImage = false;
+      });
+
+      return downloadUrl;
+    } catch (e) {
+      debugPrint('Error uploading business image: $e');
+      setState(() {
+        _isUploadingBusinessImage = false;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה בהעלאת תמונה: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return null;
+    }
+  }
+
+  // בניית שדה קישור חברתי
+  Widget _buildSocialLinkField(String key, String label, IconData icon, String prefix) {
+    final controller = _socialLinksControllers[key]!;
+    return TextField(
+      controller: controller,
+      onChanged: (value) {
+        setState(() {}); // עדכון UI כשהטקסט משתנה
+      },
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon),
+        hintText: prefix,
+        border: const OutlineInputBorder(),
+        suffixIcon: controller.text.isNotEmpty
+            ? IconButton(
+                icon: const Icon(Icons.clear),
+                onPressed: () {
+                  setState(() {
+                    controller.clear();
+                  });
+                },
+              )
+            : null,
+      ),
+      keyboardType: TextInputType.url,
+    );
   }
 
   // הפונקציה הוסרה - משתמשים במיקום הראשי במקום מיקום משלוח נפרד
@@ -2241,6 +2561,39 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
                     updateData['businessServices'] = servicesData;
                     updateData['requiresAppointment'] = _requiresAppointment;
                     updateData['requiresDelivery'] = _requiresDelivery;
+                    
+                    // העלאת תמונת עסק אם יש
+                    if (_businessImageFile != null) {
+                      final imageUrl = await _uploadBusinessImage(user.uid);
+                      if (imageUrl != null) {
+                        updateData['businessImageUrl'] = imageUrl;
+                      }
+                    } else if (_businessImageUrl != null) {
+                      updateData['businessImageUrl'] = _businessImageUrl;
+                    }
+                    
+                    // שמירת קישורים חברתיים
+                    final socialLinks = <String, String>{};
+                    for (var entry in _socialLinksControllers.entries) {
+                      final link = entry.value.text.trim();
+                      if (link.isNotEmpty) {
+                        // הוספת prefix אם לא קיים
+                        String fullLink = link;
+                        if (entry.key == 'instagram' && !link.startsWith('http')) {
+                          fullLink = 'https://instagram.com/$link';
+                        } else if (entry.key == 'facebook' && !link.startsWith('http')) {
+                          fullLink = 'https://facebook.com/$link';
+                        } else if (entry.key == 'tiktok' && !link.startsWith('http')) {
+                          fullLink = 'https://tiktok.com/@$link';
+                        } else if (entry.key == 'website' && !link.startsWith('http')) {
+                          fullLink = 'https://$link';
+                        }
+                        socialLinks[entry.key] = fullLink;
+                      }
+                    }
+                    if (socialLinks.isNotEmpty) {
+                      updateData['socialLinks'] = socialLinks;
+                    }
                     
                     if (updateData.length > 1) { // יותר מ-updatedAt בלבד
                       await FirebaseFirestore.instance
@@ -2639,6 +2992,22 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
 
                 final finalPhone = hasPhone ? phoneFromScreen : phoneController.text.trim();
                 
+                // הצגת דיאלוג טעינה
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (loadingContext) => const AlertDialog(
+                    content: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(width: 16),
+                        Text('שולח בקשה...'),
+                      ],
+                    ),
+                  ),
+                );
+                
                 // שליחת בקשה לתשלום במזומן
                 try {
                   // שמירת שם העסק ומספר הטלפון ב-Firestore לפני שליחת הבקשה
@@ -2742,6 +3111,39 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
                     updateData['requiresAppointment'] = _requiresAppointment;
                     updateData['requiresDelivery'] = _requiresDelivery;
                     
+                    // העלאת תמונת עסק אם יש
+                    if (_businessImageFile != null) {
+                      final imageUrl = await _uploadBusinessImage(user.uid);
+                      if (imageUrl != null) {
+                        updateData['businessImageUrl'] = imageUrl;
+                      }
+                    } else if (_businessImageUrl != null) {
+                      updateData['businessImageUrl'] = _businessImageUrl;
+                    }
+                    
+                    // שמירת קישורים חברתיים
+                    final socialLinks = <String, String>{};
+                    for (var entry in _socialLinksControllers.entries) {
+                      final link = entry.value.text.trim();
+                      if (link.isNotEmpty) {
+                        // הוספת prefix אם לא קיים
+                        String fullLink = link;
+                        if (entry.key == 'instagram' && !link.startsWith('http')) {
+                          fullLink = 'https://instagram.com/$link';
+                        } else if (entry.key == 'facebook' && !link.startsWith('http')) {
+                          fullLink = 'https://facebook.com/$link';
+                        } else if (entry.key == 'tiktok' && !link.startsWith('http')) {
+                          fullLink = 'https://tiktok.com/@$link';
+                        } else if (entry.key == 'website' && !link.startsWith('http')) {
+                          fullLink = 'https://$link';
+                        }
+                        socialLinks[entry.key] = fullLink;
+                      }
+                    }
+                    if (socialLinks.isNotEmpty) {
+                      updateData['socialLinks'] = socialLinks;
+                    }
+                    
                     if (updateData.length > 1) { // יותר מ-updatedAt בלבד
                       await FirebaseFirestore.instance
                           .collection('users')
@@ -2759,6 +3161,11 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
                     amount: price.toDouble(),
                     businessCategories: categories != null ? categories.map((c) => c.categoryDisplayName).toList() : null,
                   );
+                  
+                  // סגירת דיאלוג טעינה
+                  if (Navigator.of(context).canPop()) {
+                    Navigator.of(context).pop();
+                  }
                   
                   // סגירת כל הדיאלוגים - סגירה בטוחה
                   // סגירת דיאלוג תשלום מזומן
@@ -2805,6 +3212,11 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
                   }
                 } catch (e) {
                   debugPrint('Error submitting cash payment request: $e');
+                  
+                  // סגירת דיאלוג טעינה אם עדיין פתוח
+                  if (Navigator.of(context).canPop()) {
+                    Navigator.of(context).pop();
+                  }
                   
                   // גם במקרה של שגיאה, נסגור את הדיאלוגים
                   Navigator.pop(dialogContext);

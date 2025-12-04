@@ -10898,21 +10898,100 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
             ),
             const SizedBox(height: 16),
             
-            // תחומי עיסוק
-            if (provider.businessCategories != null && provider.businessCategories!.isNotEmpty) ...[
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: provider.businessCategories!.map((category) {
-                  return Chip(
-                    label: Text(category.categoryDisplayName),
-                    backgroundColor: Colors.blue[50],
-                    labelStyle: const TextStyle(fontSize: 12),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(height: 12),
-            ],
+            // תמונת עסק ותחומי עיסוק באותה שורה
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // תחומי עיסוק - 70% מרוחב המסך
+                if (provider.businessCategories != null && provider.businessCategories!.isNotEmpty) ...[
+                  Expanded(
+                    flex: 7,
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: provider.businessCategories!.map((category) {
+                        return Chip(
+                          label: Text(category.categoryDisplayName),
+                          backgroundColor: Colors.blue[50],
+                          labelStyle: const TextStyle(fontSize: 12),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ] else ...[
+                  const Expanded(flex: 7, child: SizedBox.shrink()),
+                ],
+                
+                // תמונת עסק - 30% מרוחב המסך (רק למשתמש עסקי)
+                if (provider.userType == UserType.business && provider.businessImageUrl != null) ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 3,
+                    child: GestureDetector(
+                      onTap: () {
+                        // הצגת תמונה מוגדלת
+                        showDialog(
+                          context: context,
+                          builder: (context) => Dialog(
+                            child: Stack(
+                              children: [
+                                InteractiveViewer(
+                                  child: CachedNetworkImage(
+                                    imageUrl: provider.businessImageUrl!,
+                                    fit: BoxFit.contain,
+                                    errorWidget: (context, url, error) {
+                                      return const Center(
+                                        child: Icon(Icons.error, color: Colors.red),
+                                      );
+                                    },
+                                  ),
+                                ),
+                                Positioned(
+                                  top: 8,
+                                  right: 8,
+                                  child: IconButton(
+                                    icon: const Icon(Icons.close, color: Colors.white),
+                                    onPressed: () => Navigator.of(context).pop(),
+                                    style: IconButton.styleFrom(
+                                      backgroundColor: Colors.black54,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                      child: Container(
+                        height: 100,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.grey[300]!),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: CachedNetworkImage(
+                            imageUrl: provider.businessImageUrl!,
+                            fit: BoxFit.cover,
+                            errorWidget: (context, url, error) {
+                              return const Center(
+                                child: Icon(Icons.error, color: Colors.red),
+                              );
+                            },
+                            placeholder: (context, url) {
+                              return const Center(
+                                child: CircularProgressIndicator(),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            const SizedBox(height: 12),
             
             // שירותים עסקיים (רק אם זה לא שליח)
             // שליחים לא צריכים שירותים - הם מוגדרים לפי תחומי העיסוק בלבד
@@ -11277,6 +11356,52 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
               },
             ),
             
+            // קישורים חברתיים (רק למשתמש עסקי) - לפני הדירוג
+            if (provider.userType == UserType.business && 
+                provider.socialLinks != null && 
+                provider.socialLinks!.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (provider.socialLinks!.containsKey('instagram'))
+                    _buildSocialLinkButton(
+                      context,
+                      'instagram',
+                      provider.socialLinks!['instagram']!,
+                      Icons.camera_alt,
+                      Colors.purple,
+                    ),
+                  if (provider.socialLinks!.containsKey('facebook'))
+                    _buildSocialLinkButton(
+                      context,
+                      'facebook',
+                      provider.socialLinks!['facebook']!,
+                      Icons.facebook,
+                      Colors.blue,
+                    ),
+                  if (provider.socialLinks!.containsKey('tiktok'))
+                    _buildSocialLinkButton(
+                      context,
+                      'tiktok',
+                      provider.socialLinks!['tiktok']!,
+                      Icons.music_video,
+                      Colors.black,
+                    ),
+                  if (provider.socialLinks!.containsKey('website'))
+                    _buildSocialLinkButton(
+                      context,
+                      'website',
+                      provider.socialLinks!['website']!,
+                      Icons.language,
+                      Colors.blue[700]!,
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+            ],
+            
             // דירוגים
             if (provider.averageRating != null || provider.reliability != null) ...[
               const Divider(),
@@ -11369,6 +11494,65 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
     );
   }
 
+  // בניית כפתור קישור חברתי
+  Widget _buildSocialLinkButton(
+    BuildContext context,
+    String type,
+    String url,
+    IconData icon,
+    Color color,
+  ) {
+    String label;
+    switch (type) {
+      case 'instagram':
+        label = 'אינסטגרם';
+        break;
+      case 'facebook':
+        label = 'פייסבוק';
+        break;
+      case 'tiktok':
+        label = 'טיקטוק';
+        break;
+      case 'website':
+        label = 'אתר';
+        break;
+      default:
+        label = type;
+    }
+    
+    return InkWell(
+      onTap: () async {
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color, width: 1.5),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // דיאלוג הזמנה
   Future<void> _showOrderDialog(BuildContext context, UserProfile provider) async {
     final currentUser = FirebaseAuth.instance.currentUser;
@@ -11417,9 +11601,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
     String? selectedServiceValue; // ערך ה-dropdown של הוספת שירות
 
     try {
-      await showDialog(
-        context: context,
-        builder: (context) => StatefulBuilder(
+    await showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
           // חישוב מחיר לפי המבנה החדש
           double recalculatedTotalPrice = 0.0;
@@ -11510,7 +11694,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                         controller: phoneController,
                         keyboardType: TextInputType.phone,
                         decoration: InputDecoration(
-                          labelText: 'מספר טלפון',
+                      labelText: 'מספר טלפון',
                           border: const OutlineInputBorder(),
                           hintText: 'הזן מספר טלפון',
                           errorText: currentPhone.isNotEmpty && !isPhoneValid 
@@ -11596,29 +11780,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                               children: [
                                 // אם העסק דורש תור, לא להציג לחצנים + ו-
                                 if (!requiresAppointment) ...[
-                                  IconButton(
-                                    icon: const Icon(Icons.remove_circle_outline),
-                                    onPressed: () {
-                                      setDialogState(() {
-                                        if (quantity > 1) {
-                                          serviceData['quantity'] = quantity - 1;
-                                        } else {
-                                          selectedServices.removeAt(index);
-                                        }
-                                      });
-                                    },
-                                  ),
+                                IconButton(
+                                  icon: const Icon(Icons.remove_circle_outline),
+                                  onPressed: () {
+                                    setDialogState(() {
+                                      if (quantity > 1) {
+                                        serviceData['quantity'] = quantity - 1;
+                                      } else {
+                                        selectedServices.removeAt(index);
+                                      }
+                                    });
+                                  },
+                                ),
                                 ],
                                 Text('${quantity}'),
                                 if (!requiresAppointment) ...[
-                                  IconButton(
-                                    icon: const Icon(Icons.add_circle_outline),
-                                    onPressed: () {
-                                      setDialogState(() {
-                                        serviceData['quantity'] = (quantity + 1);
-                                      });
-                                    },
-                                  ),
+                                IconButton(
+                                  icon: const Icon(Icons.add_circle_outline),
+                                  onPressed: () {
+                                    setDialogState(() {
+                                      serviceData['quantity'] = (quantity + 1);
+                                    });
+                                  },
+                                ),
                                 ],
                               ],
                             ),
@@ -11674,40 +11858,40 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                       return DropdownButtonFormField<String>(
                         value: selectedServiceValue,
                         decoration: InputDecoration(
-                          labelText: 'הוסף שירות',
+                      labelText: 'הוסף שירות',
                           border: const OutlineInputBorder(),
                           prefixIcon: const Icon(Icons.add),
                           hintText: isPhoneValid ? null : 'הזן מספר טלפון תקין תחילה',
-                        ),
-                        items: services.map((service) {
-                          final serviceName = service['name'] as String;
-                          final price = (service['price'] as num?)?.toDouble();
-                          final isCustomPrice = service['isCustomPrice'] as bool? ?? false;
-                          final displayText = isCustomPrice 
-                              ? '$serviceName (בהתאמה אישית)'
-                              : price != null
-                                  ? '$serviceName - ₪${price.toStringAsFixed(0)}'
-                                  : serviceName;
-                          
-                          return DropdownMenuItem(
-                            value: serviceName,
-                            child: Text(displayText),
-                          );
-                        }).toList(),
+                    ),
+                    items: services.map((service) {
+                      final serviceName = service['name'] as String;
+                      final price = (service['price'] as num?)?.toDouble();
+                      final isCustomPrice = service['isCustomPrice'] as bool? ?? false;
+                      final displayText = isCustomPrice 
+                          ? '$serviceName (בהתאמה אישית)'
+                          : price != null
+                              ? '$serviceName - ₪${price.toStringAsFixed(0)}'
+                              : serviceName;
+                      
+                      return DropdownMenuItem(
+                        value: serviceName,
+                        child: Text(displayText),
+                      );
+                    }).toList(),
                         onChanged: isPhoneValid ? (selectedServiceName) {
-                          if (selectedServiceName != null) {
-                            setDialogState(() {
-                              // תמיד מוסיף הזמנה חדשה, גם אם השירות כבר קיים
-                              // כך אפשר להזמין אותו שירות עם מרכיבים שונים
-                              selectedServices.add({
-                                'id': nextServiceId[0]++,
-                                'serviceName': selectedServiceName,
-                                'quantity': 1,
-                                'ingredients': <String>[],
-                              });
+                      if (selectedServiceName != null) {
+                        setDialogState(() {
+                          // תמיד מוסיף הזמנה חדשה, גם אם השירות כבר קיים
+                          // כך אפשר להזמין אותו שירות עם מרכיבים שונים
+                          selectedServices.add({
+                            'id': nextServiceId[0]++,
+                            'serviceName': selectedServiceName,
+                            'quantity': 1,
+                            'ingredients': <String>[],
+                          });
                               selectedServiceValue = null; // איפוס ה-dropdown לאחר הוספת השירות
-                            });
-                          }
+                        });
+                      }
                         } : null, // לא פעיל אם מספר הטלפון לא תקין
                       );
                     },
@@ -12454,7 +12638,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
         orderData['appointmentEndTime'] = selectedAppointment['endTime'];
         orderData['appointmentId'] = selectedAppointment['appointmentId'];
       }
-      
+
       final orderDocRef = await FirebaseFirestore.instance
           .collection('orders')
           .add(orderData);

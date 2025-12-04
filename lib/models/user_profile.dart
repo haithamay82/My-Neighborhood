@@ -45,6 +45,8 @@ class UserProfile {
   final bool? availableAllWeek; // זמין כל השבוע
   final WeekAvailability? weekAvailability; // זמינות ימים ושעות בשבוע
   final bool? isTemporaryGuest; // האם המשתמש הוא אורח זמני (נכנס דרך "המשך ללא הרשמה")
+  final String? businessImageUrl; // תמונת עסק
+  final Map<String, String>? socialLinks; // קישורים חברתיים (instagram, facebook, tiktok, website)
 
   UserProfile({
     required this.userId,
@@ -85,6 +87,8 @@ class UserProfile {
     this.availableAllWeek,
     this.weekAvailability,
     this.isTemporaryGuest = false,
+    this.businessImageUrl,
+    this.socialLinks,
   });
 
   factory UserProfile.fromFirestore(DocumentSnapshot doc) {
@@ -181,6 +185,10 @@ class UserProfile {
           ? WeekAvailability.fromFirestore(data['weekAvailability'] as List)
           : null,
       isTemporaryGuest: data['isTemporaryGuest'] ?? false,
+      businessImageUrl: data['businessImageUrl'],
+      socialLinks: data['socialLinks'] != null
+          ? Map<String, String>.from(data['socialLinks'] as Map)
+          : null,
     );
   }
 
@@ -231,6 +239,8 @@ class UserProfile {
       'availableAllWeek': availableAllWeek,
       'weekAvailability': weekAvailability?.toFirestore(),
       'isTemporaryGuest': isTemporaryGuest,
+      'businessImageUrl': businessImageUrl,
+      'socialLinks': socialLinks,
     };
   }
 
@@ -270,6 +280,8 @@ class UserProfile {
     bool? availableAllWeek,
     WeekAvailability? weekAvailability,
     bool? isTemporaryGuest,
+    String? businessImageUrl,
+    Map<String, String>? socialLinks,
   }) {
     return UserProfile(
       userId: userId,
@@ -309,6 +321,8 @@ class UserProfile {
       availableAllWeek: availableAllWeek ?? this.availableAllWeek,
       weekAvailability: weekAvailability ?? this.weekAvailability,
       isTemporaryGuest: isTemporaryGuest ?? this.isTemporaryGuest,
+      businessImageUrl: businessImageUrl ?? this.businessImageUrl,
+      socialLinks: socialLinks ?? this.socialLinks,
     );
   }
 }

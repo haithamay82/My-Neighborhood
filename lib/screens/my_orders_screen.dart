@@ -95,22 +95,22 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
             ),
             // Tabs לפי סוג ההזמנות
             if (_selectedOrderType == 'courier' || _selectedOrderType == 'other')
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.grey[200],
-                  border: Border(
-                    bottom: BorderSide(color: Colors.grey[300]!),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    _buildTabWithCount('ממתינות', 'pending', Icons.pending, user.uid),
-                    _buildTabWithCount('בתהליך', 'in_progress', Icons.local_shipping, user.uid),
-                    _buildTabWithCount('הושלמו', 'completed', Icons.done_all, user.uid),
-                    _buildTabWithCount('בוטלו', 'cancelled', Icons.cancel, user.uid),
-                  ],
+            Container(
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                border: Border(
+                  bottom: BorderSide(color: Colors.grey[300]!),
                 ),
               ),
+              child: Row(
+                children: [
+                  _buildTabWithCount('ממתינות', 'pending', Icons.pending, user.uid),
+                  _buildTabWithCount('בתהליך', 'in_progress', Icons.local_shipping, user.uid),
+                  _buildTabWithCount('הושלמו', 'completed', Icons.done_all, user.uid),
+                  _buildTabWithCount('בוטלו', 'cancelled', Icons.cancel, user.uid),
+                ],
+              ),
+            ),
             if (_selectedOrderType == 'appointment')
               Container(
                 decoration: BoxDecoration(
@@ -245,20 +245,20 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
                 
                 // סינון לפי הטאב הנבחר (רק להזמנות עם שליח או אחרות)
                 if (_selectedOrderType == 'courier' || _selectedOrderType == 'other') {
-                  bool matchesTab = false;
-                  if (_selectedTab == 'pending') {
-                    matchesTab = order.status == 'pending';
-                  } else if (_selectedTab == 'in_progress') {
-                    matchesTab = order.status == 'confirmed' || order.status == 'preparing';
-                  } else if (_selectedTab == 'completed') {
-                    matchesTab = order.status == 'completed';
-                  } else if (_selectedTab == 'cancelled') {
-                    matchesTab = order.status == 'cancelled';
-                  }
-                  
+                bool matchesTab = false;
+                if (_selectedTab == 'pending') {
+                  matchesTab = order.status == 'pending';
+                } else if (_selectedTab == 'in_progress') {
+                  matchesTab = order.status == 'confirmed' || order.status == 'preparing';
+                } else if (_selectedTab == 'completed') {
+                  matchesTab = order.status == 'completed';
+                } else if (_selectedTab == 'cancelled') {
+                  matchesTab = order.status == 'cancelled';
+                }
+                
                   if (!matchesTab) {
                     continue;
-                  }
+                }
                 }
                 
                 parsedOrders.add(order);
@@ -310,14 +310,14 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
             if (_selectedOrderType == 'appointment' && _selectedAppointmentTab == 'weekly_schedule') {
               return _buildWeeklyScheduleView(parsedOrders);
             } else {
-              return ListView.builder(
-                padding: const EdgeInsets.all(16),
-                itemCount: parsedOrders.length,
-                itemBuilder: (context, index) {
-                  final order = parsedOrders[index];
-                  return _buildOrderCard(order, index);
-                },
-              );
+            return ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: parsedOrders.length,
+              itemBuilder: (context, index) {
+                final order = parsedOrders[index];
+                return _buildOrderCard(order, index);
+              },
+            );
             }
                 },
               ),
@@ -894,14 +894,14 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
                   Expanded(
                     flex: 1,
                     child: ElevatedButton(
-                      onPressed: () => _deleteOrder(order),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                        foregroundColor: Colors.white,
-                        minimumSize: const Size(double.infinity, 48),
-                      ),
-                      child: const Text('מחק הזמנה'),
-                    ),
+                onPressed: () => _deleteOrder(order),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(double.infinity, 48),
+                ),
+                child: const Text('מחק הזמנה'),
+              ),
                   ),
                 ],
               ),

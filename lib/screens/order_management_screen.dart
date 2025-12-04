@@ -1409,11 +1409,22 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
                       ),
                       const SizedBox(height: 4),
                       if (order.customerPhone.isNotEmpty)
-                        Text(
-                          'טלפון: ${order.customerPhone}',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey[700],
+                        GestureDetector(
+                          onTap: () => _makePhoneCall(order.customerPhone),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.phone, size: 16, color: Colors.blue[600]),
+                              const SizedBox(width: 4),
+                              Text(
+                                'טלפון: ${order.customerPhone}',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.blue[600],
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       if (order.customerPhone.isNotEmpty)
@@ -1590,14 +1601,50 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
                   if (order.deliveryType == 'delivery' && order.deliveryLocation != null) ...[
                     const SizedBox(width: 8),
                     Expanded(
-                      child: Text(
-                        order.deliveryLocation!['address'] ?? '',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.grey[600],
+                      child: GestureDetector(
+                        onTap: () async {
+                          // טעינת מיקום העסק
+                          final providerDoc = await _firestore.collection('users').doc(order.providerId).get();
+                          final providerData = providerDoc.data();
+                          final businessLat = (providerData?['latitude'] as num?)?.toDouble();
+                          final businessLng = (providerData?['longitude'] as num?)?.toDouble();
+                          final businessAddress = providerData?['businessAddress'] as String?;
+                          
+                          if (businessLat != null && businessLng != null && order.deliveryLocation != null) {
+                            _showMapDialog(
+                              businessLat,
+                              businessLng,
+                              order.providerName,
+                              businessAddress ?? order.providerName,
+                              (order.deliveryLocation!['latitude'] as num).toDouble(),
+                              (order.deliveryLocation!['longitude'] as num).toDouble(),
+                              order.deliveryLocation!['address'] as String,
+                            );
+                          }
+                        },
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.location_on,
+                              size: 16,
+                              color: Colors.blue[700],
+                            ),
+                            const SizedBox(width: 4),
+                            Expanded(
+                              child: Text(
+                                order.deliveryLocation!['address'] ?? '',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.blue[700],
+                                  fontWeight: FontWeight.w500,
+                                  decoration: TextDecoration.underline,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ],
@@ -1777,7 +1824,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
               Row(
                 children: [
                   Expanded(
-                    flex: 7,
+                    flex: 1,
                     child: ElevatedButton(
                       onPressed: () => _cancelOrder(order),
                       style: ElevatedButton.styleFrom(
@@ -1790,7 +1837,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    flex: 3,
+                    flex: 2,
                     child: ElevatedButton(
                       onPressed: () => _completeOrder(order),
                       style: ElevatedButton.styleFrom(
@@ -2881,57 +2928,6 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
     );
   }
 
-  // תצוגת לוח שנה שבועי
-  Widget _buildWeekCalendar(String userId) {
-    return FutureBuilder<Map<String, dynamic>>(
-      future: _loadWeekAppointments(userId),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        if (snapshot.hasError) {
-          return Center(
-            child: Text('שגיאה בטעינת התורים: ${snapshot.error}'),
-          );
-        }
-
-        final data = snapshot.data ?? {};
-        final appointmentSettings = data['settings'] as AppointmentSettings?;
-        final bookedAppointments = data['booked'] as List<Appointment>? ?? [];
-        final ordersWithAppointments = data['orders'] as List<order_model.Order>? ?? [];
-
-        if (appointmentSettings == null || appointmentSettings.slots.isEmpty) {
-          return const Center(
-            child: Text('לא הוגדרו תורים זמינים'),
-          );
-        }
-
-        // חישוב ימי השבוע
-        final daysToSubtract = _selectedWeekStart.weekday == 7 ? 0 : _selectedWeekStart.weekday;
-        final weekStart = _selectedWeekStart.subtract(Duration(days: daysToSubtract));
-
-        return ListView.builder(
-          padding: const EdgeInsets.all(8),
-          itemCount: 7,
-          itemBuilder: (context, dayIndex) {
-            final day = weekStart.add(Duration(days: dayIndex));
-            final dayOfWeek = _convertWeekdayToDayOfWeekIndex(day.weekday);
-            final daySlots = appointmentSettings.slots
-                .where((slot) => slot.dayOfWeek == dayOfWeek)
-                .toList();
-
-            if (daySlots.isEmpty) {
-              return const SizedBox.shrink();
-            }
-
-            return _buildDayColumn(day, dayOfWeek, daySlots, bookedAppointments, ordersWithAppointments);
-          },
-        );
-      },
-    );
-  }
-
   // עמודה ליום אחד
   Widget _buildDayColumn(
     DateTime day,
@@ -3064,9 +3060,10 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
     order_model.Order? order,
   ) {
     final isBooked = bookedAppointment != null;
+    final appointment = bookedAppointment; // Capture for type promotion
 
     return InkWell(
-      onTap: isBooked ? () => _showAppointmentDetailsDialog(bookedAppointment!, order) : null,
+      onTap: isBooked && appointment != null ? () => _showAppointmentDetailsDialog(appointment, order) : null,
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         padding: const EdgeInsets.all(10),
@@ -3663,37 +3660,6 @@ class _OrderAppointmentMoveScreenState extends State<OrderAppointmentMoveScreen>
               ],
             ),
     );
-  }
-}
-
-// Delegate עבור SliverPersistentHeader
-class _SliverAppBarDelegate extends SliverPersistentHeaderDelegate {
-  final double minHeight;
-  final double maxHeight;
-  final Widget child;
-
-  _SliverAppBarDelegate({
-    required this.minHeight,
-    required this.maxHeight,
-    required this.child,
-  });
-
-  @override
-  double get minExtent => minHeight;
-
-  @override
-  double get maxExtent => maxHeight;
-
-  @override
-  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
-    return child;
-  }
-
-  @override
-  bool shouldRebuild(_SliverAppBarDelegate oldDelegate) {
-    return maxHeight != oldDelegate.maxHeight ||
-        minHeight != oldDelegate.minHeight ||
-        child != oldDelegate.child;
   }
 }
 

@@ -12,6 +12,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/payme_payment_service.dart';
 import '../services/manual_payment_service.dart';
 import 'dart:io';
@@ -80,6 +81,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
   // שדות עבור שירותים עסקיים
   bool _requiresAppointment = false; // האם השירות דורש תור
   bool _requiresDelivery = false; // האם השירות ניתן במשלוח
+  bool _isUpdatingSettings = false; // דגל למניעת עדכונים כפולים
 
   @override
   void initState() {
@@ -2394,6 +2396,82 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               const SizedBox(height: 16),
               ],
 
+              // תמונת עסק (רק למשתמש עסקי) - אחרי הצ'יקבוקס ולפני תחומי עיסוק
+              if (userProfile.userType == UserType.business && userProfile.businessImageUrl != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).brightness == Brightness.dark 
+                        ? Theme.of(context).colorScheme.surfaceContainerHighest
+                        : Theme.of(context).colorScheme.surfaceContainer,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: Theme.of(context).brightness == Brightness.dark 
+                          ? Theme.of(context).colorScheme.outlineVariant
+                          : Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.image, color: Theme.of(context).colorScheme.primary, size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            'תמונת עסק',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.primary,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const Spacer(),
+                          TextButton.icon(
+                            onPressed: () => _editBusinessImage(userProfile),
+                            icon: const Icon(Icons.edit, size: 16),
+                            label: const Text('ערוך'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: Theme.of(context).colorScheme.primary,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      GestureDetector(
+                        onTap: () => _editBusinessImage(userProfile),
+                        child: Container(
+                          height: 200,
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.grey),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: CachedNetworkImage(
+                              imageUrl: userProfile.businessImageUrl!,
+                              fit: BoxFit.cover,
+                              errorWidget: (context, url, error) {
+                                return const Center(
+                                  child: Icon(Icons.error, color: Colors.red),
+                                );
+                              },
+                              placeholder: (context, url) {
+                                return const Center(
+                                  child: CircularProgressIndicator(),
+                                );
+                              },
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+
               // תחומי עיסוק - מנהל, עסקי מנוי או אורח (לא לאורח זמני)
               if (userProfile.isTemporaryGuest != true &&
                   (_isAdmin == true || 
@@ -2958,40 +3036,6 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 const SizedBox(height: 16),
               ],
 
-              // כרטיס מונה בקשות חודשיות - מוצג לכל המשתמשים (לא לאורח זמני)
-              if (userProfile.isTemporaryGuest != true) ...[
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.article_outlined,
-                            color: Theme.of(context).colorScheme.primary,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            l10n.monthlyRequests,
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: Theme.of(context).colorScheme.primary,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      _buildMonthlyRequestsCounter(userProfile),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              ],
-
               // כרטיס מיקום - מוצג רק למשתמשים נותני שירות (אורח, עסקי, מנהל) (לא לאורח זמני)
               if (userProfile.isTemporaryGuest != true &&
                   (userProfile.userType == UserType.guest || 
@@ -3271,6 +3315,90 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                 const SizedBox(height: 16),
               ],
 
+              // קישורים חברתיים (רק למשתמש עסקי) - אחרי מיקום העסק ולפני הדירוג
+              if (userProfile.userType == UserType.business && 
+                  userProfile.socialLinks != null && 
+                  userProfile.socialLinks!.isNotEmpty) ...[
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).brightness == Brightness.dark 
+                        ? Theme.of(context).colorScheme.surfaceContainerHighest
+                        : Theme.of(context).colorScheme.surfaceContainer,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: Theme.of(context).brightness == Brightness.dark 
+                          ? Theme.of(context).colorScheme.outlineVariant
+                          : Theme.of(context).colorScheme.outlineVariant,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.link, color: Theme.of(context).colorScheme.primary, size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            'קישורים חברתיים',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.primary,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const Spacer(),
+                          TextButton.icon(
+                            onPressed: () => _editSocialLinks(userProfile),
+                            icon: const Icon(Icons.edit, size: 16),
+                            label: const Text('ערוך'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: Theme.of(context).colorScheme.primary,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          if (userProfile.socialLinks!.containsKey('instagram'))
+                            _buildSocialLinkChip(
+                              'instagram',
+                              userProfile.socialLinks!['instagram']!,
+                              Icons.camera_alt,
+                              Colors.purple,
+                            ),
+                          if (userProfile.socialLinks!.containsKey('facebook'))
+                            _buildSocialLinkChip(
+                              'facebook',
+                              userProfile.socialLinks!['facebook']!,
+                              Icons.facebook,
+                              Colors.blue,
+                            ),
+                          if (userProfile.socialLinks!.containsKey('tiktok'))
+                            _buildSocialLinkChip(
+                              'tiktok',
+                              userProfile.socialLinks!['tiktok']!,
+                              Icons.music_video,
+                              Colors.black,
+                            ),
+                          if (userProfile.socialLinks!.containsKey('website'))
+                            _buildSocialLinkChip(
+                              'website',
+                              userProfile.socialLinks!['website']!,
+                              Icons.language,
+                              Colors.blue[700]!,
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+
               // דירוג המשתמש - מוצג רק למשתמשים נותני שירות (אורח, עסקי, מנהל) (לא לאורח זמני)
               if (userProfile.isTemporaryGuest != true &&
                   (userProfile.userType == UserType.guest || 
@@ -3496,6 +3624,40 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                             ),
                           ),
                       ],
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              ],
+
+              // כרטיס מונה בקשות חודשיות - מוצג לכל המשתמשים (לא לאורח זמני)
+              if (userProfile.isTemporaryGuest != true) ...[
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.article_outlined,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            l10n.monthlyRequests,
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      _buildMonthlyRequestsCounter(userProfile),
                     ],
                   ),
                 ),
@@ -7447,11 +7609,98 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
   Future<void> _updateServiceSettings({bool? requiresAppointment, bool? requiresDelivery}) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
+    
+    // מניעת עדכונים כפולים
+    if (_isUpdatingSettings) return;
+    _isUpdatingSettings = true;
+
+    // חישוב הערכים החדשים
+    bool newRequiresAppointment = requiresAppointment ?? _requiresAppointment;
+    bool newRequiresDelivery = requiresDelivery ?? _requiresDelivery;
+    
+    // אם מנסים להפעיל אחד כשהשני כבר פעיל, יש לבטל את השני אוטומטית
+    bool willCancelOther = false;
+    bool? finalRequiresAppointment = requiresAppointment;
+    bool? finalRequiresDelivery = requiresDelivery;
+    
+    if (requiresAppointment == true && _requiresDelivery) {
+      finalRequiresDelivery = false;
+      newRequiresDelivery = false;
+      willCancelOther = true;
+    }
+    if (requiresDelivery == true && _requiresAppointment) {
+      finalRequiresAppointment = false;
+      newRequiresAppointment = false;
+      willCancelOther = true;
+    }
+
+    // בדיקה סופית - לא ניתן ששניהם יהיו פעילים
+    if (newRequiresAppointment && newRequiresDelivery) {
+      _isUpdatingSettings = false;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('לא ניתן לבחור גם שירותים דורשים קביעת תור וגם שירות במשלוח. יש לבחור אחד מהם בלבד.'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+      return;
+    }
+
+    // הצגת דיאלוג אישור לפני כל שינוי
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Icon(
+              Icons.info_outline,
+              color: Theme.of(context).colorScheme.primary,
+              size: 28,
+            ),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text('אישור שינוי הגדרות'),
+            ),
+          ],
+        ),
+        content: Text(
+          _getConfirmationMessage(finalRequiresAppointment, finalRequiresDelivery, willCancelOther),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('ביטול'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.primary,
+              foregroundColor: Theme.of(context).colorScheme.onPrimary,
+            ),
+            child: const Text('אישור'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) {
+      // אם המשתמש ביטל, החזרת הערכים הקודמים
+      _isUpdatingSettings = false;
+      if (mounted) {
+        setState(() {
+          // לא משנים כלום - הערכים נשארים כמו שהיו
+        });
+      }
+      return;
+    }
 
     try {
       // אם מסירים את הסימון של "שירותים דורשים קביעת תור" והמשתמש כבר בחר תורים, החזר לזמינות
       bool shouldResetToAvailability = false;
-      if (requiresAppointment == false && _useAppointments == true) {
+      if (finalRequiresAppointment == false && _useAppointments == true) {
         shouldResetToAvailability = true;
         await _saveAppointmentPreference(false);
       }
@@ -7459,11 +7708,11 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       // עדכון הערכים המקומיים
       if (mounted) {
         setState(() {
-          if (requiresAppointment != null) {
-            _requiresAppointment = requiresAppointment;
+          if (finalRequiresAppointment != null) {
+            _requiresAppointment = finalRequiresAppointment;
           }
-          if (requiresDelivery != null) {
-            _requiresDelivery = requiresDelivery;
+          if (finalRequiresDelivery != null) {
+            _requiresDelivery = finalRequiresDelivery;
           }
         });
       }
@@ -7473,11 +7722,11 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         'updatedAt': FieldValue.serverTimestamp(),
       };
       
-      if (requiresAppointment != null) {
-        updateData['requiresAppointment'] = requiresAppointment;
+      if (finalRequiresAppointment != null) {
+        updateData['requiresAppointment'] = finalRequiresAppointment;
       }
-      if (requiresDelivery != null) {
-        updateData['requiresDelivery'] = requiresDelivery;
+      if (finalRequiresDelivery != null) {
+        updateData['requiresDelivery'] = finalRequiresDelivery;
       }
 
       await FirebaseFirestore.instance
@@ -7500,14 +7749,11 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       debugPrint('Error updating service settings: $e');
       if (mounted) {
         // החזרת הערכים הקודמים במקרה של שגיאה
-        setState(() {
-          if (requiresAppointment != null) {
-            _requiresAppointment = !requiresAppointment;
-          }
-          if (requiresDelivery != null) {
-            _requiresDelivery = !requiresDelivery;
-          }
-        });
+        if (mounted) {
+          setState(() {
+            // לא משנים כלום - הערכים נשארים כמו שהיו לפני הניסיון
+          });
+        }
         
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -7516,7 +7762,48 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
           ),
         );
       }
+    } finally {
+      _isUpdatingSettings = false;
     }
+  }
+
+  // יצירת הודעת אישור לשינוי הגדרות
+  String _getConfirmationMessage(bool? requiresAppointment, bool? requiresDelivery, bool willCancelOther) {
+    List<String> changes = [];
+    
+    if (requiresAppointment != null) {
+      if (requiresAppointment) {
+        changes.add('הפעלת שירותים דורשים קביעת תור');
+        if (_requiresDelivery) {
+          changes.add('ביטול שירות במשלוח (אוטומטי)');
+        }
+      } else {
+        changes.add('ביטול שירותים דורשים קביעת תור');
+      }
+    }
+    
+    if (requiresDelivery != null) {
+      if (requiresDelivery) {
+        changes.add('הפעלת שירות במשלוח');
+        if (_requiresAppointment) {
+          changes.add('ביטול שירותים דורשים קביעת תור (אוטומטי)');
+        }
+      } else {
+        changes.add('ביטול שירות במשלוח');
+      }
+    }
+    
+    if (changes.isEmpty) {
+      return 'האם אתה בטוח שברצונך לשנות את ההגדרות?';
+    }
+    
+    String message = 'האם אתה בטוח שברצונך לבצע את השינויים הבאים?\n\n${changes.join('\n')}';
+    
+    if (willCancelOther) {
+      message += '\n\nשימו לב: לא ניתן לבחור גם שירותים דורשים קביעת תור וגם שירות במשלוח יחד.';
+    }
+    
+    return message;
   }
 
   // שמירת העדפת תורים/זמינות
@@ -9246,6 +9533,291 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     }
   }
 
+  // בניית chip לקישור חברתי
+  Widget _buildSocialLinkChip(String type, String url, IconData icon, Color color) {
+    String label;
+    switch (type) {
+      case 'instagram':
+        label = 'אינסטגרם';
+        break;
+      case 'facebook':
+        label = 'פייסבוק';
+        break;
+      case 'tiktok':
+        label = 'טיקטוק';
+        break;
+      case 'website':
+        label = 'אתר';
+        break;
+      default:
+        label = type;
+    }
+    
+    return InkWell(
+      onTap: () async {
+        final uri = Uri.parse(url);
+        if (await canLaunchUrl(uri)) {
+          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        }
+      },
+      child: Chip(
+        avatar: Icon(icon, size: 18, color: color),
+        label: Text(label),
+        backgroundColor: color.withOpacity(0.1),
+        side: BorderSide(color: color),
+        labelStyle: TextStyle(color: color, fontWeight: FontWeight.w500),
+      ),
+    );
+  }
+
+  // עריכת תמונת עסק
+  Future<void> _editBusinessImage(UserProfile userProfile) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final ImageSource? source = await showDialog<ImageSource>(
+        context: context,
+        builder: (BuildContext context) {
+          return AlertDialog(
+            title: const Text('בחר מקור תמונה'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.photo_library),
+                  title: const Text('בחר מהגלריה'),
+                  onTap: () => Navigator.of(context).pop(ImageSource.gallery),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.camera_alt),
+                  title: const Text('צלם תמונה'),
+                  onTap: () => Navigator.of(context).pop(ImageSource.camera),
+                ),
+                if (userProfile.businessImageUrl != null)
+                  ListTile(
+                    leading: const Icon(Icons.delete, color: Colors.red),
+                    title: const Text('מחק תמונה', style: TextStyle(color: Colors.red)),
+                    onTap: () => Navigator.of(context).pop('delete'),
+                  ),
+              ],
+            ),
+          );
+        },
+      );
+
+      if (source == null) return;
+
+      if (source == 'delete') {
+        await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .update({'businessImageUrl': FieldValue.delete()});
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('תמונת העסק נמחקה בהצלחה'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+        return;
+      }
+
+      final XFile? image = await _imagePicker.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+      );
+
+      if (image == null) return;
+
+      setState(() {
+        _isUploadingImage = true;
+      });
+
+      final storageRef = FirebaseStorage.instance
+          .ref()
+          .child('business_images')
+          .child(user.uid)
+          .child('business_image.jpg');
+
+      await storageRef.putFile(File(image.path));
+      final downloadUrl = await storageRef.getDownloadURL();
+
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .update({'businessImageUrl': downloadUrl});
+
+      setState(() {
+        _isUploadingImage = false;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('תמונת העסק עודכנה בהצלחה'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() {
+        _isUploadingImage = false;
+      });
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה בעדכון תמונת העסק: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // עריכת קישורים חברתיים
+  Future<void> _editSocialLinks(UserProfile userProfile) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    final socialLinks = userProfile.socialLinks ?? <String, String>{};
+    final controllers = <String, TextEditingController>{
+      'instagram': TextEditingController(text: socialLinks['instagram'] ?? ''),
+      'facebook': TextEditingController(text: socialLinks['facebook'] ?? ''),
+      'tiktok': TextEditingController(text: socialLinks['tiktok'] ?? ''),
+      'website': TextEditingController(text: socialLinks['website'] ?? ''),
+    };
+
+    await showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return PopScope(
+          canPop: true,
+          onPopInvoked: (didPop) {
+            // ניקוי controllers רק כשהדיאלוג נסגר
+            if (didPop) {
+              for (var controller in controllers.values) {
+                controller.dispose();
+              }
+            }
+          },
+          child: StatefulBuilder(
+            builder: (context, setDialogState) {
+              return AlertDialog(
+                title: const Text('עריכת קישורים חברתיים'),
+                content: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        controller: controllers['instagram'],
+                        decoration: const InputDecoration(
+                          labelText: 'אינסטגרם',
+                          prefixIcon: Icon(Icons.camera_alt),
+                          hintText: 'https://instagram.com/...',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: controllers['facebook'],
+                        decoration: const InputDecoration(
+                          labelText: 'פייסבוק',
+                          prefixIcon: Icon(Icons.facebook),
+                          hintText: 'https://facebook.com/...',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: controllers['tiktok'],
+                        decoration: const InputDecoration(
+                          labelText: 'טיקטוק',
+                          prefixIcon: Icon(Icons.music_video),
+                          hintText: 'https://tiktok.com/@...',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: controllers['website'],
+                        decoration: const InputDecoration(
+                          labelText: 'אתר',
+                          prefixIcon: Icon(Icons.language),
+                          hintText: 'https://...',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pop(dialogContext);
+                    },
+                    child: const Text('ביטול'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () async {
+                      final newLinks = <String, String>{};
+                      for (var entry in controllers.entries) {
+                        final link = entry.value.text.trim();
+                        if (link.isNotEmpty) {
+                          String fullLink = link;
+                          if (entry.key == 'instagram' && !link.startsWith('http')) {
+                            fullLink = 'https://instagram.com/$link';
+                          } else if (entry.key == 'facebook' && !link.startsWith('http')) {
+                            fullLink = 'https://facebook.com/$link';
+                          } else if (entry.key == 'tiktok' && !link.startsWith('http')) {
+                            fullLink = 'https://tiktok.com/@$link';
+                          } else if (entry.key == 'website' && !link.startsWith('http')) {
+                            fullLink = 'https://$link';
+                          }
+                          newLinks[entry.key] = fullLink;
+                        }
+                      }
+
+                      await FirebaseFirestore.instance
+                          .collection('users')
+                          .doc(user.uid)
+                          .update({
+                        'socialLinks': newLinks.isEmpty ? FieldValue.delete() : newLinks,
+                      });
+
+                      if (mounted) {
+                        Navigator.pop(dialogContext);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('הקישורים עודכנו בהצלחה'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      }
+                    },
+                    child: const Text('שמור'),
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
+    
+    // ניקוי controllers אחרי שהדיאלוג נסגר (אם לא נמחקו כבר)
+    Future.microtask(() {
+      for (var controller in controllers.values) {
+        try {
+          controller.dispose();
+        } catch (e) {
+          // Controller כבר נמחק, זה בסדר
+        }
+      }
+    });
+  }
+
   // שמירת הגדרת הצגת הטלפון
   Future<void> _savePhoneDisplaySetting(bool allowDisplay) async {
     try {
@@ -9683,8 +10255,17 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                   ),
                   Switch(
                     value: _requiresAppointment,
-                    onChanged: (value) {
-                      _updateServiceSettings(requiresAppointment: value);
+                    onChanged: _isUpdatingSettings ? null : (newValue) async {
+                      // אם מנסים להפעיל כשהשני כבר פעיל, יש לבטל את השני
+                      if (newValue && _requiresDelivery) {
+                        await _updateServiceSettings(
+                          requiresAppointment: true,
+                          requiresDelivery: false,
+                        );
+                      } else {
+                        // עדכון רגיל
+                        await _updateServiceSettings(requiresAppointment: newValue);
+                      }
                     },
                   ),
                 ],
@@ -9707,11 +10288,32 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                   ),
                   Switch(
                     value: _requiresDelivery,
-                    onChanged: (value) {
-                      _updateServiceSettings(requiresDelivery: value);
+                    onChanged: _isUpdatingSettings ? null : (newValue) async {
+                      // אם מנסים להפעיל כשהשני כבר פעיל, יש לבטל את השני
+                      if (newValue && _requiresAppointment) {
+                        await _updateServiceSettings(
+                          requiresAppointment: false,
+                          requiresDelivery: true,
+                        );
+                      } else {
+                        // עדכון רגיל
+                        await _updateServiceSettings(requiresDelivery: newValue);
+                      }
                     },
                   ),
                 ],
+              ),
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.only(right: 28),
+                child: Text(
+                  'שימו לב: ניתן לבחור רק אחת מהאפשרויות - או שירותים דורשים קביעת תור או שירות במשלוח',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontStyle: FontStyle.italic,
+                  ),
+                ),
               ),
             ],
           ),
