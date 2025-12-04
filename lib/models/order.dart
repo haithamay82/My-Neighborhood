@@ -10,6 +10,7 @@ class Order {
   final String providerName; // שם נותן השירות
   final List<OrderItem> items; // רשימת השירותים בהזמנה
   final double totalPrice; // סך הכל מחיר
+  final double? deliveryFee; // עלות משלוח (אם יש)
   final String? deliveryType; // 'pickup' או 'delivery'
   final Map<String, dynamic>? deliveryLocation; // מיקום למשלוח
   final String? deliveryCategory; // קטגוריית משלוח (foodDelivery, groceryDelivery, smallMoving, largeMoving)
@@ -20,6 +21,11 @@ class Order {
   final String? courierPhone; // טלפון השליח (אם יש)
   final int orderNumber; // מספר הזמנה (החל מ-100, רץ לכל עסק בנפרד)
   final bool isDelivered; // האם ההזמנה נמסרה על ידי השליח
+  final bool isOnTheWay; // האם ההזמנה בדרך (השליח לחץ על "ההזמנה בדרך")
+  final DateTime? appointmentDate; // תאריך התור
+  final String? appointmentStartTime; // שעת התחלת התור
+  final String? appointmentEndTime; // שעת סיום התור
+  final String? appointmentId; // מזהה התור
   final DateTime createdAt;
   final DateTime? updatedAt;
 
@@ -32,6 +38,7 @@ class Order {
     required this.providerName,
     required this.items,
     required this.totalPrice,
+    this.deliveryFee,
     this.deliveryType,
     this.deliveryLocation,
     this.deliveryCategory,
@@ -42,6 +49,11 @@ class Order {
     this.courierPhone,
     required this.orderNumber,
     this.isDelivered = false,
+    this.isOnTheWay = false,
+    this.appointmentDate,
+    this.appointmentStartTime,
+    this.appointmentEndTime,
+    this.appointmentId,
     required this.createdAt,
     this.updatedAt,
   });
@@ -99,6 +111,7 @@ class Order {
         providerName: data['providerName']?.toString() ?? '',
         items: itemsList,
         totalPrice: (data['totalPrice'] as num?)?.toDouble() ?? 0.0,
+        deliveryFee: (data['deliveryFee'] as num?)?.toDouble(),
         deliveryType: data['deliveryType']?.toString(),
         deliveryLocation: data['deliveryLocation'] as Map<String, dynamic>?,
         deliveryCategory: data['deliveryCategory']?.toString(),
@@ -109,6 +122,13 @@ class Order {
         courierPhone: data['courierPhone']?.toString(),
         orderNumber: data['orderNumber'] as int? ?? 0,
         isDelivered: data['isDelivered'] == true,
+        isOnTheWay: data['isOnTheWay'] == true,
+        appointmentDate: data['appointmentDate'] != null && data['appointmentDate'] is Timestamp
+            ? (data['appointmentDate'] as Timestamp).toDate()
+            : null,
+        appointmentStartTime: data['appointmentStartTime']?.toString(),
+        appointmentEndTime: data['appointmentEndTime']?.toString(),
+        appointmentId: data['appointmentId']?.toString(),
         createdAt: createdAt,
         updatedAt: updatedAt,
       );
@@ -129,6 +149,7 @@ class Order {
       'providerName': providerName,
       'items': items.map((item) => item.toMap()).toList(),
       'totalPrice': totalPrice,
+      'deliveryFee': deliveryFee,
       'deliveryType': deliveryType,
       'deliveryLocation': deliveryLocation,
       'deliveryCategory': deliveryCategory,
@@ -139,6 +160,11 @@ class Order {
       'courierPhone': courierPhone,
       'orderNumber': orderNumber,
       'isDelivered': isDelivered,
+      'isOnTheWay': isOnTheWay,
+      'appointmentDate': appointmentDate != null ? Timestamp.fromDate(appointmentDate!) : null,
+      'appointmentStartTime': appointmentStartTime,
+      'appointmentEndTime': appointmentEndTime,
+      'appointmentId': appointmentId,
       'createdAt': Timestamp.fromDate(createdAt),
       'updatedAt': updatedAt != null ? Timestamp.fromDate(updatedAt!) : null,
     };

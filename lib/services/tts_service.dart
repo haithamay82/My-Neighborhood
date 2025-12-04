@@ -251,7 +251,11 @@ class TtsService {
       await _tts.stop();
       
       // בדיקה אם השפה זמינה
-      final languages = await _tts.getLanguages;
+      final languagesList = await _tts.getLanguages;
+      // המרה ל-List<String> כדי למנוע שגיאות טיפוס
+      final languages = (languagesList as List<dynamic>)
+          .map((l) => l.toString())
+          .toList();
       String? selectedLanguage;
       
       if (languages.contains(language)) {

@@ -7,6 +7,7 @@ import 'dart:async';
 import '../models/order.dart' as order_model;
 import '../l10n/app_localizations.dart';
 import '../services/location_service.dart';
+import 'home_screen.dart';
 
 class MyOrdersScreen extends StatefulWidget {
   const MyOrdersScreen({super.key});
@@ -16,7 +17,11 @@ class MyOrdersScreen extends StatefulWidget {
 }
 
 class _MyOrdersScreenState extends State<MyOrdersScreen> {
-  String _selectedTab = 'pending'; // 'pending', 'in_progress', 'completed', 'cancelled'
+  String _selectedOrderType = 'courier'; // 'courier', 'appointment', 'other'
+  String _selectedTab = 'pending'; // 'pending', 'in_progress', 'completed', 'cancelled' (להזמנות עם שליח)
+  String _selectedAppointmentTab = 'my_appointments'; // 'my_appointments', 'weekly_schedule' (להזמנות עם תור)
+  DateTime _selectedWeekStart = DateTime.now();
+  int _selectedWeekIndex = 0;
 
   @override
   Widget build(BuildContext context) {
@@ -51,23 +56,76 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
         ),
         body: Column(
           children: [
-            // Tabs
+            // בחירת סוג הזמנות
             Container(
+              padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.grey[200],
+                color: Colors.blue[50],
                 border: Border(
                   bottom: BorderSide(color: Colors.grey[300]!),
                 ),
               ),
               child: Row(
                 children: [
-                  _buildTabWithCount('ממתינות', 'pending', Icons.pending, user.uid),
-                  _buildTabWithCount('בתהליך', 'in_progress', Icons.local_shipping, user.uid),
-                  _buildTabWithCount('הושלמו', 'completed', Icons.done_all, user.uid),
-                  _buildTabWithCount('בוטלו', 'cancelled', Icons.cancel, user.uid),
+                  Expanded(
+                    child: _buildOrderTypeButton(
+                      'הזמנות עם שליח',
+                      'courier',
+                      Icons.local_shipping,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _buildOrderTypeButton(
+                      'הזמנות עם תור',
+                      'appointment',
+                      Icons.calendar_today,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _buildOrderTypeButton(
+                      'הזמנות אחרות',
+                      'other',
+                      Icons.shopping_cart,
+                    ),
+                  ),
                 ],
               ),
             ),
+            // Tabs לפי סוג ההזמנות
+            if (_selectedOrderType == 'courier' || _selectedOrderType == 'other')
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.grey[200],
+                  border: Border(
+                    bottom: BorderSide(color: Colors.grey[300]!),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    _buildTabWithCount('ממתינות', 'pending', Icons.pending, user.uid),
+                    _buildTabWithCount('בתהליך', 'in_progress', Icons.local_shipping, user.uid),
+                    _buildTabWithCount('הושלמו', 'completed', Icons.done_all, user.uid),
+                    _buildTabWithCount('בוטלו', 'cancelled', Icons.cancel, user.uid),
+                  ],
+                ),
+              ),
+            if (_selectedOrderType == 'appointment')
+              Container(
+                decoration: BoxDecoration(
+                  color: Colors.grey[200],
+                  border: Border(
+                    bottom: BorderSide(color: Colors.grey[300]!),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    _buildAppointmentTab('תורים שקבעתי', 'my_appointments', Icons.event),
+                    _buildAppointmentTab('לוז שבועי', 'weekly_schedule', Icons.calendar_view_week),
+                  ],
+                ),
+              ),
             // Orders List
             Expanded(
               child: StreamBuilder<QuerySnapshot>(
@@ -166,21 +224,44 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
                 
                 final order = order_model.Order.fromFirestore(doc);
                 
-                // סינון לפי הטאב הנבחר
-                bool matchesTab = false;
-                if (_selectedTab == 'pending') {
-                  matchesTab = order.status == 'pending';
-                } else if (_selectedTab == 'in_progress') {
-                  matchesTab = order.status == 'confirmed' || order.status == 'preparing';
-                } else if (_selectedTab == 'completed') {
-                  matchesTab = order.status == 'completed';
-                } else if (_selectedTab == 'cancelled') {
-                  matchesTab = order.status == 'cancelled';
+                // סינון לפי סוג ההזמנות
+                bool matchesOrderType = false;
+                if (_selectedOrderType == 'courier') {
+                  // הזמנות עם שליח - יש courierId או deliveryType == 'delivery'
+                  matchesOrderType = order.courierId != null || order.deliveryType == 'delivery';
+                } else if (_selectedOrderType == 'appointment') {
+                  // הזמנות עם תור - יש appointmentId
+                  matchesOrderType = order.appointmentId != null;
+                } else if (_selectedOrderType == 'other') {
+                  // הזמנות אחרות - אין שליח ואין תור
+                  matchesOrderType = order.courierId == null && 
+                                     order.deliveryType != 'delivery' && 
+                                     order.appointmentId == null;
                 }
                 
-                if (matchesTab) {
-                  parsedOrders.add(order);
+                if (!matchesOrderType) {
+                  continue;
                 }
+                
+                // סינון לפי הטאב הנבחר (רק להזמנות עם שליח או אחרות)
+                if (_selectedOrderType == 'courier' || _selectedOrderType == 'other') {
+                  bool matchesTab = false;
+                  if (_selectedTab == 'pending') {
+                    matchesTab = order.status == 'pending';
+                  } else if (_selectedTab == 'in_progress') {
+                    matchesTab = order.status == 'confirmed' || order.status == 'preparing';
+                  } else if (_selectedTab == 'completed') {
+                    matchesTab = order.status == 'completed';
+                  } else if (_selectedTab == 'cancelled') {
+                    matchesTab = order.status == 'cancelled';
+                  }
+                  
+                  if (!matchesTab) {
+                    continue;
+                  }
+                }
+                
+                parsedOrders.add(order);
               } catch (e) {
                 debugPrint('❌ Error parsing order ${doc.id}: $e');
                 debugPrint('   Document data: ${doc.data()}');
@@ -225,14 +306,19 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
               );
             }
 
-            return ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: parsedOrders.length,
-              itemBuilder: (context, index) {
-                final order = parsedOrders[index];
-                return _buildOrderCard(order, index);
-              },
-            );
+            // תצוגה לפי סוג ההזמנות
+            if (_selectedOrderType == 'appointment' && _selectedAppointmentTab == 'weekly_schedule') {
+              return _buildWeeklyScheduleView(parsedOrders);
+            } else {
+              return ListView.builder(
+                padding: const EdgeInsets.all(16),
+                itemCount: parsedOrders.length,
+                itemBuilder: (context, index) {
+                  final order = parsedOrders[index];
+                  return _buildOrderCard(order, index);
+                },
+              );
+            }
                 },
               ),
             ),
@@ -456,7 +542,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    _getStatusText(order.status),
+                    _getStatusText(order.status, hasAppointment: order.appointmentId != null && order.appointmentId!.isNotEmpty),
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 12,
@@ -651,6 +737,35 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
               ],
             ),
             
+            // Delivery Fee (if exists)
+            if (order.deliveryFee != null && order.deliveryFee! > 0) ...[
+              const SizedBox(height: 16),
+              const Text(
+                'עלות משלוח:',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'עלות משלוח',
+                    style: TextStyle(
+                      fontSize: 14,
+                    ),
+                  ),
+                  Text(
+                    '₪${order.deliveryFee!.toStringAsFixed(0)}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.orange[700],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            
             // סך הכל
             const Divider(height: 24),
             Row(
@@ -713,17 +828,114 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
               },
             ),
             
-            // לחצן מחק הזמנה - רק אם הסטטוס הוא pending, completed, או cancelled
-            if (order.status == 'pending' || order.status == 'completed' || order.status == 'cancelled') ...[
+            // פרטי תור (אם יש)
+            if (order.appointmentDate != null && order.appointmentStartTime != null) ...[
               const Divider(height: 24),
-              ElevatedButton(
-                onPressed: () => _deleteOrder(order),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size(double.infinity, 48),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue[200]!),
                 ),
-                child: const Text('מחק הזמנה'),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.calendar_today, size: 16, color: Colors.blue[700]),
+                        const SizedBox(width: 8),
+                        Text(
+                          'פרטי התור:',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue[700],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${_formatAppointmentDate(order.appointmentDate!)}',
+                      style: const TextStyle(fontSize: 14),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${order.appointmentStartTime}${order.appointmentEndTime != null ? ' - ${order.appointmentEndTime}' : ''}',
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            
+            // לחצנים מחק וערוך הזמנה
+            // להזמנות רגילות: pending, completed, cancelled
+            // להזמנות עם תור: תמיד להציג (כי הן במצב confirmed)
+            if (order.appointmentId != null && order.appointmentId!.isNotEmpty) ...[
+              // להזמנות עם תור - תמיד להציג את הלחצנים
+              const Divider(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    flex: 1,
+                    child: ElevatedButton(
+                      onPressed: () => _editOrder(order),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(double.infinity, 48),
+                      ),
+                      child: const Text('ערוך הזמנה'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 1,
+                    child: ElevatedButton(
+                      onPressed: () => _deleteOrder(order),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(double.infinity, 48),
+                      ),
+                      child: const Text('מחק הזמנה'),
+                    ),
+                  ),
+                ],
+              ),
+            ] else if (order.status == 'pending' || order.status == 'completed' || order.status == 'cancelled') ...[
+              // להזמנות רגילות - רק אם הסטטוס הוא pending, completed, או cancelled
+              const Divider(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    flex: 1,
+                    child: ElevatedButton(
+                      onPressed: () => _editOrder(order),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(double.infinity, 48),
+                      ),
+                      child: const Text('ערוך הזמנה'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 1,
+                    child: ElevatedButton(
+                      onPressed: () => _deleteOrder(order),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(double.infinity, 48),
+                      ),
+                      child: const Text('מחק הזמנה'),
+                    ),
+                  ),
+                ],
               ),
             ],
           ],
@@ -748,13 +960,14 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
     }
   }
 
-  String _getStatusText(String status) {
+  String _getStatusText(String status, {bool hasAppointment = false}) {
     switch (status) {
       case 'pending':
         return 'ממתין לאישור';
       case 'confirmed':
+        return hasAppointment ? 'מאושרת' : 'מאושרת בתהליך הכנה';
       case 'preparing':
-        return 'מאושרת בתהליך הכנה'; // גם confirmed וגם preparing - אותו טקסט
+        return 'מאושרת בתהליך הכנה';
       case 'completed':
         return 'הושלם';
       case 'cancelled':
@@ -790,6 +1003,25 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
 
     if (confirmed == true) {
       try {
+        // שחרור התור אם יש appointmentId
+        if (order.appointmentId != null && order.appointmentId!.isNotEmpty) {
+          try {
+            await FirebaseFirestore.instance
+                .collection('appointments')
+                .doc(order.appointmentId!)
+                .update({
+              'isAvailable': true,
+              'bookedBy': null,
+              'orderId': null,
+              'updatedAt': FieldValue.serverTimestamp(),
+            });
+            debugPrint('✅ Appointment ${order.appointmentId} released successfully');
+          } catch (e) {
+            debugPrint('⚠️ Error releasing appointment ${order.appointmentId}: $e');
+            // ממשיכים למחוק את ההזמנה גם אם שחרור התור נכשל
+          }
+        }
+
         if (order.status == 'pending') {
           // אם ההזמנה במצב "ממתין לאישור" - למחוק אותה לחלוטין מכל המקומות
           await FirebaseFirestore.instance
@@ -813,7 +1045,7 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('ההזמנה נמחקה בהצלחה מכל המקומות'),
+                content: Text('ההזמנה נמחקה בהצלחה מכל המקומות והתור שוחרר'),
                 backgroundColor: Colors.green,
               ),
             );
@@ -833,8 +1065,12 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
 
             if (mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('ההזמנה נמחקה מהרשימה שלך'),
+                SnackBar(
+                  content: Text(
+                    order.appointmentId != null && order.appointmentId!.isNotEmpty
+                        ? 'ההזמנה נמחקה מהרשימה שלך והתור שוחרר'
+                        : 'ההזמנה נמחקה מהרשימה שלך',
+                  ),
                   backgroundColor: Colors.green,
                 ),
               );
@@ -1088,6 +1324,625 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
 
   String _formatDate(DateTime date) {
     return '${date.day}/${date.month}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+  }
+
+  // פונקציה לבניית לחצן סוג הזמנות
+  Widget _buildOrderTypeButton(String label, String value, IconData icon) {
+    final isSelected = _selectedOrderType == value;
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _selectedOrderType = value;
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.blue : Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected ? Colors.blue : Colors.grey[300]!,
+            width: 1,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              color: isSelected ? Colors.white : Colors.grey[700],
+              size: 20,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                color: isSelected ? Colors.white : Colors.grey[700],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // פונקציה לבניית טאב תורים
+  Widget _buildAppointmentTab(String label, String value, IconData icon) {
+    final isSelected = _selectedAppointmentTab == value;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () {
+          setState(() {
+            _selectedAppointmentTab = value;
+          });
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color: isSelected ? Colors.white : Colors.transparent,
+            border: Border(
+              bottom: BorderSide(
+                color: isSelected
+                    ? Theme.of(context).colorScheme.primary
+                    : Colors.transparent,
+                width: 2,
+              ),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 18,
+                color: isSelected
+                    ? Theme.of(context).colorScheme.primary
+                    : Colors.grey[600],
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                  color: isSelected
+                      ? Theme.of(context).colorScheme.primary
+                      : Colors.grey[600],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // פונקציה לעריכת הזמנה
+  Future<void> _editOrder(order_model.Order order) async {
+    // אם זו הזמנה עם תור, נפתח מסך עריכה מיוחד
+    if (order.appointmentId != null && order.appointmentId!.isNotEmpty) {
+      final result = await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => EditAppointmentOrderScreen(order: order),
+        ),
+      );
+      
+      if (result == true && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('ההזמנה עודכנה בהצלחה'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } else {
+      // להזמנות רגילות - TODO: להוסיף מסך עריכה רגיל
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('עריכת הזמנות רגילות תגיע בקרוב'),
+          backgroundColor: Colors.blue,
+        ),
+      );
+    }
+  }
+
+  // פונקציה לפורמט תאריך תור
+  String _formatAppointmentDate(DateTime date) {
+    final days = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+    final dayName = days[date.weekday % 7];
+    return 'יום $dayName, ${date.day}/${date.month}/${date.year}';
+  }
+
+  // תצוגת לוז שבועי
+  Widget _buildWeeklyScheduleView(List<order_model.Order> orders) {
+    // חישוב ראשון השבוע
+    final daysToSubtract = _selectedWeekStart.weekday == 7 ? 0 : _selectedWeekStart.weekday;
+    final weekStart = _selectedWeekStart.subtract(Duration(days: daysToSubtract));
+
+    return Column(
+      children: [
+        // ניווט בין שבועות
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.blue[50],
+            border: Border(
+              bottom: BorderSide(color: Colors.grey[300]!),
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              IconButton(
+                icon: const Icon(Icons.chevron_right),
+                onPressed: _selectedWeekIndex > 0
+                    ? () {
+                        setState(() {
+                          _selectedWeekIndex--;
+                          _selectedWeekStart = _selectedWeekStart.subtract(const Duration(days: 7));
+                        });
+                      }
+                    : null,
+              ),
+              Expanded(
+                child: Text(
+                  '${weekStart.day}/${weekStart.month}/${weekStart.year} - ${weekStart.add(const Duration(days: 6)).day}/${weekStart.add(const Duration(days: 6)).month}/${weekStart.add(const Duration(days: 6)).year}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.chevron_left),
+                onPressed: _selectedWeekIndex < 3
+                    ? () {
+                        setState(() {
+                          _selectedWeekIndex++;
+                          _selectedWeekStart = _selectedWeekStart.add(const Duration(days: 7));
+                        });
+                      }
+                    : null,
+              ),
+            ],
+          ),
+        ),
+        // תצוגת השבוע
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.all(8),
+            itemCount: 7,
+            itemBuilder: (context, dayIndex) {
+              final day = weekStart.add(Duration(days: dayIndex));
+              final dayOrders = orders.where((order) {
+                if (order.appointmentDate == null) return false;
+                final orderDate = DateTime(
+                  order.appointmentDate!.year,
+                  order.appointmentDate!.month,
+                  order.appointmentDate!.day,
+                );
+                final currentDate = DateTime(day.year, day.month, day.day);
+                return orderDate == currentDate;
+              }).toList();
+
+              if (dayOrders.isEmpty) {
+                return const SizedBox.shrink();
+              }
+
+              final days = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+              final dayName = days[day.weekday % 7];
+
+              return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                child: ExpansionTile(
+                  title: Text(
+                    'יום $dayName, ${day.day}/${day.month}/${day.year}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  children: dayOrders.map((order) {
+                    return ListTile(
+                      leading: Icon(Icons.event, color: Colors.blue[700]),
+                      title: Text(order.providerName),
+                      subtitle: Text(
+                        '${order.appointmentStartTime ?? ''}${order.appointmentEndTime != null ? ' - ${order.appointmentEndTime}' : ''}',
+                      ),
+                      trailing: Text(
+                        'הזמנה #${order.orderNumber}',
+                        style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                      ),
+                      onTap: () {
+                        // הצגת פרטי ההזמנה
+                        showDialog(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: Text('הזמנה #${order.orderNumber}'),
+                            content: SingleChildScrollView(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text('עסק: ${order.providerName}'),
+                                  const SizedBox(height: 8),
+                                  Text('תאריך: ${_formatAppointmentDate(order.appointmentDate!)}'),
+                                  const SizedBox(height: 8),
+                                  Text('שעה: ${order.appointmentStartTime ?? ''}${order.appointmentEndTime != null ? ' - ${order.appointmentEndTime}' : ''}'),
+                                ],
+                              ),
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context),
+                                child: const Text('סגור'),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    );
+                  }).toList(),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// מסך עריכת הזמנה עם תור
+class EditAppointmentOrderScreen extends StatefulWidget {
+  final order_model.Order order;
+
+  const EditAppointmentOrderScreen({
+    super.key,
+    required this.order,
+  });
+
+  @override
+  State<EditAppointmentOrderScreen> createState() => _EditAppointmentOrderScreenState();
+}
+
+class _EditAppointmentOrderScreenState extends State<EditAppointmentOrderScreen> {
+  late List<order_model.OrderItem> _orderItems;
+  String? _selectedAppointmentId;
+  DateTime? _selectedAppointmentDate;
+  String? _selectedAppointmentStartTime;
+  String? _selectedAppointmentEndTime;
+  bool _isLoading = false;
+  int _providerServicesCount = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _orderItems = List.from(widget.order.items);
+    _selectedAppointmentId = widget.order.appointmentId;
+    _selectedAppointmentDate = widget.order.appointmentDate;
+    _selectedAppointmentStartTime = widget.order.appointmentStartTime;
+    _selectedAppointmentEndTime = widget.order.appointmentEndTime;
+    _loadProviderServicesCount();
+  }
+
+  // טעינת מספר השירותים של העסק
+  Future<void> _loadProviderServicesCount() async {
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.order.providerId)
+          .get();
+      
+      if (userDoc.exists) {
+        final userData = userDoc.data()!;
+        final services = userData['businessServices'] as List<dynamic>?;
+        if (services != null) {
+          // ספירת רק שירותים זמינים
+          final availableServices = services.where((service) {
+            if (service is Map<String, dynamic>) {
+              return service['isAvailable'] as bool? ?? true;
+            }
+            return false;
+          }).toList();
+          setState(() {
+            _providerServicesCount = availableServices.length;
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading provider services count: $e');
+    }
+  }
+
+  Future<void> _saveOrder() async {
+    // בדיקה שיש לפחות שירות אחד
+    if (_orderItems.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('חייב לבחור לפחות שירות אחד'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    if (_selectedAppointmentDate == null || _selectedAppointmentStartTime == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('יש לבחור תור'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final currentUser = FirebaseAuth.instance.currentUser;
+      if (currentUser == null) return;
+
+      // חישוב מחיר כולל
+      double totalPrice = 0;
+      for (var item in _orderItems) {
+        if (item.totalItemPrice != null) {
+          totalPrice += item.totalItemPrice! * item.quantity;
+        }
+      }
+
+      // שחרור התור הישן אם השתנה
+      if (widget.order.appointmentId != null && 
+          widget.order.appointmentId != _selectedAppointmentId) {
+        await FirebaseFirestore.instance
+            .collection('appointments')
+            .doc(widget.order.appointmentId!)
+            .update({
+          'isAvailable': true,
+          'bookedBy': null,
+          'orderId': null,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      // עדכון התור החדש (אם השתנה)
+      if (_selectedAppointmentId != null && 
+          _selectedAppointmentId != widget.order.appointmentId) {
+        await FirebaseFirestore.instance
+            .collection('appointments')
+            .doc(_selectedAppointmentId!)
+            .update({
+          'isAvailable': false,
+          'bookedBy': currentUser.uid,
+          'orderId': widget.order.orderId,
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      // עדכון ההזמנה
+      await FirebaseFirestore.instance
+          .collection('orders')
+          .doc(widget.order.orderId)
+          .update({
+        'items': _orderItems.map((item) => item.toMap()).toList(),
+        'totalPrice': totalPrice,
+        'appointmentId': _selectedAppointmentId,
+        'appointmentDate': _selectedAppointmentDate != null 
+            ? Timestamp.fromDate(_selectedAppointmentDate!) 
+            : null,
+        'appointmentStartTime': _selectedAppointmentStartTime,
+        'appointmentEndTime': _selectedAppointmentEndTime,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      if (mounted) {
+        Navigator.pop(context, true);
+      }
+    } catch (e) {
+      debugPrint('❌ Error updating order: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה בעדכון ההזמנה: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _selectNewAppointment() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => OrderAppointmentBookingScreen(
+          providerId: widget.order.providerId,
+        ),
+      ),
+    );
+
+    if (result != null && mounted) {
+      setState(() {
+        _selectedAppointmentId = result['appointmentId'] as String?;
+        _selectedAppointmentDate = result['date'] as DateTime?;
+        _selectedAppointmentStartTime = result['startTime'] as String?;
+        _selectedAppointmentEndTime = result['endTime'] as String?;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Directionality(
+      textDirection: TextDirection.rtl,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('עריכת הזמנה'),
+          backgroundColor: Theme.of(context).colorScheme.primary,
+          foregroundColor: Colors.white,
+        ),
+        body: _isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : SingleChildScrollView(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // פרטי התור הנוכחי
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'תור נוכחי:',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            if (_selectedAppointmentDate != null)
+                              Text(
+                                _formatAppointmentDate(_selectedAppointmentDate!),
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                            if (_selectedAppointmentStartTime != null)
+                              Text(
+                                '${_selectedAppointmentStartTime}${_selectedAppointmentEndTime != null ? ' - $_selectedAppointmentEndTime' : ''}',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            const SizedBox(height: 16),
+                            ElevatedButton.icon(
+                              onPressed: _selectNewAppointment,
+                              icon: const Icon(Icons.calendar_today),
+                              label: const Text('בחר תור אחר'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.blue,
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    // רשימת שירותים
+                    const Text(
+                      'שירותים:',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    ..._orderItems.asMap().entries.map((entry) {
+                      final index = entry.key;
+                      final item = entry.value;
+                      // בדיקה אם זה השירות האחרון והעסק יש לו רק שירות אחד
+                      final canDelete = !(_orderItems.length == 1 && _providerServicesCount == 1);
+                      
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          title: Text(item.serviceName),
+                          subtitle: Text('כמות: ${item.quantity}'),
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (item.totalItemPrice != null)
+                                Text(
+                                  '₪${(item.totalItemPrice! * item.quantity).toStringAsFixed(0)}',
+                                  style: const TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              IconButton(
+                                icon: Icon(
+                                  Icons.delete,
+                                  color: canDelete ? Colors.red : Colors.grey,
+                                ),
+                                onPressed: canDelete
+                                    ? () {
+                                        setState(() {
+                                          _orderItems.removeAt(index);
+                                        });
+                                      }
+                                    : () {
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          const SnackBar(
+                                            content: Text('לא ניתן למחוק את השירות האחרון - העסק מציע רק שירות אחד'),
+                                            backgroundColor: Colors.orange,
+                                          ),
+                                        );
+                                      },
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 16),
+                    // סך הכל
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'סך הכל:',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              '₪${_orderItems.fold<double>(0, (sum, item) => sum + (item.totalItemPrice ?? 0) * item.quantity).toStringAsFixed(0)}',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.green[700],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    // לחצן שמירה
+                    ElevatedButton(
+                      onPressed: _saveOrder,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(double.infinity, 48),
+                      ),
+                      child: const Text('שמור שינויים'),
+                    ),
+                  ],
+                ),
+              ),
+      ),
+    );
+  }
+
+  String _formatAppointmentDate(DateTime date) {
+    final days = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+    final dayName = days[date.weekday % 7];
+    return 'יום $dayName, ${date.day}/${date.month}/${date.year}';
   }
 }
 

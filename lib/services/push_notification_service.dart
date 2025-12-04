@@ -165,8 +165,10 @@ class PushNotificationService {
           debugPrint('🔊 ✅ Speaking: "$textToSpeak"');
           await TtsService.speakWithLanguage(textToSpeak, 'eng-default');
         } else if (messageType == 'order_delivery') {
-          // עבור order_delivery, נשמור את הלוגיקה הקיימת (אם יש)
-          debugPrint('🔊 Order delivery notification - skipping TTS');
+          // עבור order_delivery, השליח שומע "new order from [providerName]"
+          final textToSpeak = 'new order from $finalName';
+          debugPrint('🔊 ✅ Speaking delivery order: "$textToSpeak"');
+          await TtsService.speakWithLanguage(textToSpeak, 'eng-default');
         }
         debugPrint('🔊 ✅ NEW CODE: TtsService.speak() completed');
       } else {

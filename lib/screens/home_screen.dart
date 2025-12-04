@@ -28,6 +28,7 @@ import '../services/like_service.dart';
 import '../models/notification_preferences.dart';
 import '../services/notification_preferences_service.dart';
 import '../services/share_service.dart';
+import '../utils/phone_validation.dart';
 import '../services/audio_service.dart';
 import '../services/app_sharing_service.dart';
 import '../services/auto_login_service.dart';
@@ -10278,6 +10279,38 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
     }
   }
 
+  // טעינת כל הנתונים עבור לחצן "הזמן עכשיו" - מאחד את כל הבדיקות כדי למנוע rebuilds מרובים
+  Future<Map<String, dynamic>> _loadOrderButtonData(String userId) async {
+    try {
+      // טעינת שירותים ובדיקת סטטוס פתיחה במקביל
+      final servicesFuture = _loadBusinessServicesForProvider(userId);
+      final isOpenFuture = _isProviderOpenNow(userId);
+      
+      final results = await Future.wait([servicesFuture, isOpenFuture]);
+      final services = results[0] as List<Map<String, dynamic>>;
+      final isOpen = results[1] as bool;
+      
+      // אם העסק סגור, לחשב זמן פתיחה
+      DateTime? nextOpeningDateTime;
+      if (!isOpen) {
+        nextOpeningDateTime = await _getNextOpeningDateTime(userId);
+      }
+      
+      return {
+        'hasServices': services.isNotEmpty,
+        'isOpen': isOpen,
+        'nextOpeningDateTime': nextOpeningDateTime,
+      };
+    } catch (e) {
+      debugPrint('Error loading order button data for provider $userId: $e');
+      return {
+        'hasServices': false,
+        'isOpen': false,
+        'nextOpeningDateTime': null,
+      };
+    }
+  }
+
   // טעינת שדות משלוח ותור עבור משתמש מסוים
   Future<Map<String, bool>> _loadProviderServiceSettings(String userId) async {
     try {
@@ -10509,6 +10542,187 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
     final minute = int.parse(parts[1]);
     final now = DateTime.now();
     return DateTime(now.year, now.month, now.day, hour, minute);
+  }
+
+  // חישוב מתי העסק ייפתח הבא (מחזיר DateTime)
+  Future<DateTime?> _getNextOpeningDateTime(String userId) async {
+    try {
+      final now = DateTime.now();
+      final currentTimeStr = '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+      
+      // טעינת נתוני המשתמש
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .get();
+      
+      if (!userDoc.exists) return null;
+      
+      final userData = userDoc.data()!;
+      
+      // בדיקה אם זמין כל השבוע
+      final availableAllWeek = userData['availableAllWeek'] as bool? ?? false;
+      if (availableAllWeek) {
+        // אם זמין כל השבוע, העסק פתוח תמיד, אז לא צריך לחשב זמן פתיחה
+        return null;
+      }
+      
+      // בדיקה אם משתמש בתורים או זמינות
+      final appointmentsDoc = await FirebaseFirestore.instance
+          .collection('appointments')
+          .doc(userId)
+          .get();
+      
+      final useAppointments = appointmentsDoc.exists 
+          ? (appointmentsDoc.data()?['useAppointments'] as bool? ?? false)
+          : false;
+      
+      if (useAppointments) {
+        final slots = (appointmentsDoc.data()?['slots'] as List<dynamic>?)
+            ?.map((e) => AppointmentSlot.fromMap(e as Map<String, dynamic>))
+            .toList() ?? [];
+        
+        // חיפוש זמן הפתיחה הקרוב ביותר (עד 7 ימים קדימה)
+        for (int dayOffset = 0; dayOffset < 7; dayOffset++) {
+          final checkDate = now.add(Duration(days: dayOffset));
+          final checkDayOfWeek = _convertWeekdayToDayOfWeekIndex(checkDate.weekday);
+          
+          final slot = slots.firstWhere(
+            (s) => s.dayOfWeek == checkDayOfWeek,
+            orElse: () => AppointmentSlot(
+              dayOfWeek: checkDayOfWeek,
+              startTime: '00:00',
+              endTime: '00:00',
+              durationMinutes: 30,
+            ),
+          );
+          
+          if (slot.startTime == '00:00' && slot.endTime == '00:00') {
+            continue; // אין זמינות ביום הזה
+          }
+          
+          // בדיקת הפסקות
+          bool isInBreak = false;
+          for (final breakTime in slot.breaks) {
+            if (_isTimeInRange(currentTimeStr, breakTime.startTime, breakTime.endTime)) {
+              // בתוך הפסקה - העסק ייפתח בסוף ההפסקה
+              final breakEndParts = breakTime.endTime.split(':');
+              final breakEndHour = int.parse(breakEndParts[0]);
+              final breakEndMinute = int.parse(breakEndParts[1]);
+              final breakEndDateTime = DateTime(checkDate.year, checkDate.month, checkDate.day, breakEndHour, breakEndMinute);
+              if (dayOffset == 0 && breakEndDateTime.isAfter(now)) {
+                return breakEndDateTime;
+              }
+              isInBreak = true;
+              break;
+            }
+          }
+          
+          if (isInBreak) continue;
+          
+          // אם זה היום הנוכחי
+          if (dayOffset == 0) {
+            // בדיקה אם השעה הנוכחית לפני שעת הפתיחה
+            final startTimeParts = slot.startTime.split(':');
+            final startHour = int.parse(startTimeParts[0]);
+            final startMinute = int.parse(startTimeParts[1]);
+            final startDateTime = DateTime(checkDate.year, checkDate.month, checkDate.day, startHour, startMinute);
+            if (startDateTime.isAfter(now)) {
+              return startDateTime;
+            }
+            // אם השעה אחרי שעת הפתיחה אבל לפני שעת הסגירה, העסק פתוח
+            // אבל אם הפונקציה נקראת, זה אומר שהעסק סגור, אז נמשיך לחפש
+            final endTimeParts = slot.endTime.split(':');
+            final endHour = int.parse(endTimeParts[0]);
+            final endMinute = int.parse(endTimeParts[1]);
+            final endDateTime = DateTime(checkDate.year, checkDate.month, checkDate.day, endHour, endMinute);
+            if (now.isAfter(endDateTime) || now.isAtSameMomentAs(endDateTime)) {
+              // העסק כבר נסגר היום, נחפש ביום הבא
+              continue;
+            }
+          } else {
+            // יום אחר - העסק ייפתח בשעת הפתיחה של היום הזה
+            final startTimeParts = slot.startTime.split(':');
+            final startHour = int.parse(startTimeParts[0]);
+            final startMinute = int.parse(startTimeParts[1]);
+            final checkDateStart = DateTime(checkDate.year, checkDate.month, checkDate.day, startHour, startMinute);
+            if (checkDateStart.isAfter(now)) {
+              return checkDateStart;
+            }
+          }
+        }
+      } else {
+        // בדיקה לפי זמינות
+        final weekAvailabilityData = userData['weekAvailability'] as List<dynamic>?;
+        if (weekAvailabilityData == null || weekAvailabilityData.isEmpty) {
+          return null;
+        }
+        
+        final weekAvailability = WeekAvailability.fromFirestore(weekAvailabilityData);
+        
+        // חיפוש זמן הפתיחה הקרוב ביותר (עד 7 ימים קדימה)
+        for (int dayOffset = 0; dayOffset < 7; dayOffset++) {
+          final checkDate = now.add(Duration(days: dayOffset));
+          final checkDayOfWeek = _convertWeekdayToDayOfWeekIndex(checkDate.weekday);
+          
+          final dayAvailability = weekAvailability.days.firstWhere(
+            (day) => day.day.index == checkDayOfWeek,
+            orElse: () => DayAvailability(day: DayOfWeek.values[checkDayOfWeek], isAvailable: false),
+          );
+          
+          if (!dayAvailability.isAvailable || dayAvailability.startTime == null) {
+            continue; // אין זמינות ביום הזה
+          }
+          
+          // אם זה היום הנוכחי
+          if (dayOffset == 0) {
+            // בדיקה אם השעה הנוכחית לפני שעת הפתיחה
+            final startTimeParts = dayAvailability.startTime!.split(':');
+            final startHour = int.parse(startTimeParts[0]);
+            final startMinute = int.parse(startTimeParts[1]);
+            final startDateTime = DateTime(checkDate.year, checkDate.month, checkDate.day, startHour, startMinute);
+            if (startDateTime.isAfter(now)) {
+              return startDateTime;
+            }
+            // אם השעה אחרי שעת הפתיחה אבל לפני שעת הסגירה, העסק פתוח
+            // אבל אם הפונקציה נקראת, זה אומר שהעסק סגור, אז נמשיך לחפש
+            if (dayAvailability.endTime != null) {
+              final endTimeParts = dayAvailability.endTime!.split(':');
+              final endHour = int.parse(endTimeParts[0]);
+              final endMinute = int.parse(endTimeParts[1]);
+              final endDateTime = DateTime(checkDate.year, checkDate.month, checkDate.day, endHour, endMinute);
+              if (now.isAfter(endDateTime) || now.isAtSameMomentAs(endDateTime)) {
+                // העסק כבר נסגר היום, נחפש ביום הבא
+                continue;
+              }
+            }
+          } else {
+            // יום אחר - העסק ייפתח בשעת הפתיחה של היום הזה
+            final startTimeParts = dayAvailability.startTime!.split(':');
+            final startHour = int.parse(startTimeParts[0]);
+            final startMinute = int.parse(startTimeParts[1]);
+            final checkDateStart = DateTime(checkDate.year, checkDate.month, checkDate.day, startHour, startMinute);
+            if (checkDateStart.isAfter(now)) {
+              return checkDateStart;
+            }
+          }
+        }
+      }
+      
+      return null; // לא נמצא זמן פתיחה
+    } catch (e) {
+      debugPrint('Error calculating next opening datetime: $e');
+      return null;
+    }
+  }
+
+  // המרת DateTime לתאריך עברי (יום בשבוע + שעה)
+  String _formatNextOpeningDateTime(DateTime dateTime) {
+    final daysOfWeek = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+    final dayOfWeek = daysOfWeek[dateTime.weekday % 7];
+    final hour = dateTime.hour.toString().padLeft(2, '0');
+    final minute = dateTime.minute.toString().padLeft(2, '0');
+    return '$dayOfWeek שעה $hour:$minute';
   }
 
   // כרטיס להצגת נותן שירות
@@ -10886,12 +11100,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
             
             // לחצן "הזמן עכשיו" - מוצג רק אם יש שירותים עסקיים
             if (provider.userType == UserType.business && provider.isSubscriptionActive) ...[
-              FutureBuilder<List<Map<String, dynamic>>>(
-                future: _loadBusinessServicesForProvider(provider.userId),
-                builder: (context, servicesSnapshot) {
-                  final hasServices = servicesSnapshot.data?.isNotEmpty ?? false;
+              FutureBuilder<Map<String, dynamic>>(
+                future: _loadOrderButtonData(provider.userId),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const SizedBox.shrink();
+                  }
+                  
+                  final hasServices = snapshot.data?['hasServices'] as bool? ?? false;
                   if (!hasServices) {
                     return const SizedBox.shrink();
+                  }
+                  
+                  final isOpen = snapshot.data?['isOpen'] as bool? ?? false;
+                  final nextOpeningDateTime = snapshot.data?['nextOpeningDateTime'] as DateTime?;
+                  // אם העסק סגור, הלחצן יהיה disabled
+                  final isDisabled = !isOpen;
+                  
+                  // יצירת טקסט הלחצן
+                  String buttonText = 'הזמן עכשיו';
+                  if (isDisabled && nextOpeningDateTime != null) {
+                    buttonText = 'הזמן עכשיו - ייפתח ב-${_formatNextOpeningDateTime(nextOpeningDateTime)}';
+                  } else if (isDisabled) {
+                    buttonText = 'הזמן עכשיו - סגור';
                   }
                   
                   return Padding(
@@ -10899,13 +11130,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                     child: SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                        onPressed: () => _showOrderDialog(context, provider),
+                        onPressed: isDisabled ? null : () => _showOrderDialog(context, provider),
                         icon: const Icon(Icons.shopping_cart),
-                        label: const Text('הזמן עכשיו'),
+                        label: Text(
+                          buttonText,
+                          textAlign: TextAlign.center,
+                        ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green[600],
-                          foregroundColor: Colors.white,
+                          backgroundColor: isDisabled ? Colors.grey[400] : Colors.green[600],
+                          foregroundColor: isDisabled ? Colors.grey[700] : Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 12),
+                          disabledBackgroundColor: Colors.grey[400],
+                          disabledForegroundColor: Colors.grey[700],
                         ),
                       ),
                     ),
@@ -11163,9 +11399,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
       return;
     }
 
-    // טעינת הגדרות שירות (משלוח)
+    // טעינת הגדרות שירות (משלוח ותור)
     final serviceSettings = await _loadProviderServiceSettings(provider.userId);
     final requiresDelivery = serviceSettings['requiresDelivery'] ?? false;
+    final requiresAppointment = serviceSettings['requiresAppointment'] ?? false;
 
     // משתנים לדיאלוג - שינוי לוגיקה: שירות -> כמות -> מרכיבים
     // List<Map> - כל הזמנה היא ייחודית, גם אם זה אותו שירות
@@ -11175,10 +11412,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
     String? selectedDeliveryCategory; // קטגוריית משלוח (foodDelivery, groceryDelivery, smallMoving, largeMoving)
     Map<String, dynamic>? selectedLocation; // {latitude, longitude, address}
     String? paymentType; // 'cash', 'bit', 'credit'
+    Map<String, dynamic>? selectedAppointment; // {date, startTime, endTime, appointmentId}
+    final TextEditingController phoneController = TextEditingController(text: userPhone);
+    String? selectedServiceValue; // ערך ה-dropdown של הוספת שירות
 
-    await showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
+    try {
+      await showDialog(
+        context: context,
+        builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
           // חישוב מחיר לפי המבנה החדש
           double recalculatedTotalPrice = 0.0;
@@ -11258,13 +11499,45 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                   const SizedBox(height: 16),
                   
                   // מספר טלפון
-                  TextField(
-                    enabled: false,
-                    controller: TextEditingController(text: userPhone),
-                    decoration: const InputDecoration(
-                      labelText: 'מספר טלפון',
-                      border: OutlineInputBorder(),
-                    ),
+                  Builder(
+                    builder: (context) {
+                      // בדיקת תקינות מספר הטלפון
+                      final currentPhone = phoneController.text.trim();
+                      final isPhoneValid = currentPhone.isNotEmpty && 
+                          PhoneValidation.isValidIsraeliPhone(currentPhone);
+                      
+                      return TextField(
+                        controller: phoneController,
+                        keyboardType: TextInputType.phone,
+                        decoration: InputDecoration(
+                          labelText: 'מספר טלפון',
+                          border: const OutlineInputBorder(),
+                          hintText: 'הזן מספר טלפון',
+                          errorText: currentPhone.isNotEmpty && !isPhoneValid 
+                              ? 'מספר טלפון לא תקין' 
+                              : null,
+                        ),
+                        onChanged: (value) async {
+                          // עדכון ה-state כדי לבדוק תקינות
+                          setDialogState(() {});
+                          
+                          // שמירת מספר הטלפון בפרופיל כאשר המשתמש מזין אותו
+                          if (value.trim().isNotEmpty && PhoneValidation.isValidIsraeliPhone(value.trim())) {
+                            try {
+                              await FirebaseFirestore.instance
+                                  .collection('users')
+                                  .doc(currentUser.uid)
+                                  .update({
+                                'phoneNumber': value.trim(),
+                              });
+                              debugPrint('✅ Phone number saved to profile: ${value.trim()}');
+                            } catch (e) {
+                              debugPrint('⚠️ Error saving phone number: $e');
+                            }
+                          }
+                        },
+                      );
+                    },
                   ),
                   const SizedBox(height: 16),
                   
@@ -11321,27 +11594,32 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                             const SizedBox(height: 8),
                             Row(
                               children: [
-                                IconButton(
-                                  icon: const Icon(Icons.remove_circle_outline),
-                                  onPressed: () {
-                                    setDialogState(() {
-                                      if (quantity > 1) {
-                                        serviceData['quantity'] = quantity - 1;
-                                      } else {
-                                        selectedServices.removeAt(index);
-                                      }
-                                    });
-                                  },
-                                ),
+                                // אם העסק דורש תור, לא להציג לחצנים + ו-
+                                if (!requiresAppointment) ...[
+                                  IconButton(
+                                    icon: const Icon(Icons.remove_circle_outline),
+                                    onPressed: () {
+                                      setDialogState(() {
+                                        if (quantity > 1) {
+                                          serviceData['quantity'] = quantity - 1;
+                                        } else {
+                                          selectedServices.removeAt(index);
+                                        }
+                                      });
+                                    },
+                                  ),
+                                ],
                                 Text('${quantity}'),
-                                IconButton(
-                                  icon: const Icon(Icons.add_circle_outline),
-                                  onPressed: () {
-                                    setDialogState(() {
-                                      serviceData['quantity'] = (quantity + 1);
-                                    });
-                                  },
-                                ),
+                                if (!requiresAppointment) ...[
+                                  IconButton(
+                                    icon: const Icon(Icons.add_circle_outline),
+                                    onPressed: () {
+                                      setDialogState(() {
+                                        serviceData['quantity'] = (quantity + 1);
+                                      });
+                                    },
+                                  ),
+                                ],
                               ],
                             ),
                             // בחירת מרכיבים
@@ -11386,40 +11664,52 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                   }),
                   
                   // כפתור להוספת שירות חדש
-                  DropdownButtonFormField<String>(
-                    decoration: const InputDecoration(
-                      labelText: 'הוסף שירות',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.add),
-                    ),
-                    items: services.map((service) {
-                      final serviceName = service['name'] as String;
-                      final price = (service['price'] as num?)?.toDouble();
-                      final isCustomPrice = service['isCustomPrice'] as bool? ?? false;
-                      final displayText = isCustomPrice 
-                          ? '$serviceName (בהתאמה אישית)'
-                          : price != null
-                              ? '$serviceName - ₪${price.toStringAsFixed(0)}'
-                              : serviceName;
+                  Builder(
+                    builder: (context) {
+                      // בדיקת תקינות מספר הטלפון
+                      final currentPhone = phoneController.text.trim();
+                      final isPhoneValid = currentPhone.isNotEmpty && 
+                          PhoneValidation.isValidIsraeliPhone(currentPhone);
                       
-                      return DropdownMenuItem(
-                        value: serviceName,
-                        child: Text(displayText),
+                      return DropdownButtonFormField<String>(
+                        value: selectedServiceValue,
+                        decoration: InputDecoration(
+                          labelText: 'הוסף שירות',
+                          border: const OutlineInputBorder(),
+                          prefixIcon: const Icon(Icons.add),
+                          hintText: isPhoneValid ? null : 'הזן מספר טלפון תקין תחילה',
+                        ),
+                        items: services.map((service) {
+                          final serviceName = service['name'] as String;
+                          final price = (service['price'] as num?)?.toDouble();
+                          final isCustomPrice = service['isCustomPrice'] as bool? ?? false;
+                          final displayText = isCustomPrice 
+                              ? '$serviceName (בהתאמה אישית)'
+                              : price != null
+                                  ? '$serviceName - ₪${price.toStringAsFixed(0)}'
+                                  : serviceName;
+                          
+                          return DropdownMenuItem(
+                            value: serviceName,
+                            child: Text(displayText),
+                          );
+                        }).toList(),
+                        onChanged: isPhoneValid ? (selectedServiceName) {
+                          if (selectedServiceName != null) {
+                            setDialogState(() {
+                              // תמיד מוסיף הזמנה חדשה, גם אם השירות כבר קיים
+                              // כך אפשר להזמין אותו שירות עם מרכיבים שונים
+                              selectedServices.add({
+                                'id': nextServiceId[0]++,
+                                'serviceName': selectedServiceName,
+                                'quantity': 1,
+                                'ingredients': <String>[],
+                              });
+                              selectedServiceValue = null; // איפוס ה-dropdown לאחר הוספת השירות
+                            });
+                          }
+                        } : null, // לא פעיל אם מספר הטלפון לא תקין
                       );
-                    }).toList(),
-                    onChanged: (selectedServiceName) {
-                      if (selectedServiceName != null) {
-                        setDialogState(() {
-                          // תמיד מוסיף הזמנה חדשה, גם אם השירות כבר קיים
-                          // כך אפשר להזמין אותו שירות עם מרכיבים שונים
-                          selectedServices.add({
-                            'id': nextServiceId[0]++,
-                            'serviceName': selectedServiceName,
-                            'quantity': 1,
-                            'ingredients': <String>[],
-                          });
-                        });
-                      }
                     },
                   ),
                   
@@ -11451,6 +11741,97 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                         ],
                       ),
                     ),
+                  ],
+                  
+                  // בחירת תור (אם העסק דורש תור)
+                  if (hasSelectedItems && requiresAppointment) ...[
+                    const SizedBox(height: 16),
+                    const Text(
+                      'תור:',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+                    if (selectedAppointment != null) ...[
+                      Card(
+                        color: Colors.orange[50],
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '${_formatAppointmentDate(selectedAppointment!['date'] as DateTime)}',
+                                      style: const TextStyle(fontWeight: FontWeight.bold),
+                                    ),
+                                    Text(
+                                      '${selectedAppointment!['startTime']} - ${selectedAppointment!['endTime']}',
+                                      style: TextStyle(color: Colors.grey[700]),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.close, size: 18),
+                                onPressed: () {
+                                  setDialogState(() {
+                                    selectedAppointment = null;
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ] else ...[
+                      ElevatedButton.icon(
+                        onPressed: () async {
+                          // טעינת הגדרות התורים
+                          final appointmentSettings = await _loadAppointmentSettings(provider.userId);
+                          if (appointmentSettings == null || appointmentSettings.slots.isEmpty) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('לא נמצאו תורים זמינים'),
+                                  backgroundColor: Colors.orange,
+                                ),
+                              );
+                            }
+                            return;
+                          }
+                          
+                          // פתיחת מסך בחירת תור
+                          final result = await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => OrderAppointmentBookingScreen(
+                                providerId: provider.userId,
+                              ),
+                            ),
+                          );
+                          
+                          if (result != null && mounted) {
+                            setDialogState(() {
+                              selectedAppointment = {
+                                'date': result['date'],
+                                'startTime': result['startTime'],
+                                'endTime': result['endTime'],
+                                'appointmentId': result['appointmentId'],
+                              };
+                            });
+                          }
+                        },
+                        icon: const Icon(Icons.calendar_today),
+                        label: const Text('בחר תור'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange[600],
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ],
                   ],
                   
                   // בחירת משלוח/איסוף (אם יש שירות עם משלוח)
@@ -11611,6 +11992,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                 builder: (context) {
                   final isValidOrder = hasSelectedItems && 
                       paymentType != null &&
+                      (!requiresAppointment || selectedAppointment != null) &&
                       (!requiresDelivery || deliveryType != null) &&
                       (!requiresDelivery || deliveryType != 'delivery' || (selectedLocation != null && selectedDeliveryCategory != null));
                   
@@ -11631,8 +12013,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                             selectedDeliveryCategory,
                             paymentType!, // כבר נבדק שהוא לא null
                             userName,
-                            userPhone,
+                            phoneController.text.trim(),
                             services,
+                            selectedAppointment,
                           );
                         },
                         child: const Text('צור הזמנה'),
@@ -11670,6 +12053,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
         },
       ),
     );
+    } finally {
+      // ניקוי ה-controller לאחר סגירת הדיאלוג
+      phoneController.dispose();
+    }
   }
 
   // דיאלוג אישור הזמנה
@@ -11685,7 +12072,43 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
     String customerName,
     String customerPhone,
     List<Map<String, dynamic>> allServices,
+    Map<String, dynamic>? selectedAppointment,
   ) async {
+    // חישוב עלות משלוח (אם רלוונטי)
+    double deliveryFee = 0.0;
+    double? distanceKm;
+    
+    if (deliveryType == 'delivery' && 
+        selectedLocation != null && 
+        (selectedDeliveryCategory == 'foodDelivery' || selectedDeliveryCategory == 'groceryDelivery') &&
+        provider.latitude != null && 
+        provider.longitude != null) {
+      final deliveryLat = (selectedLocation['latitude'] as num?)?.toDouble();
+      final deliveryLng = (selectedLocation['longitude'] as num?)?.toDouble();
+      
+      if (deliveryLat != null && deliveryLng != null) {
+        distanceKm = LocationService.calculateDistance(
+          provider.latitude!,
+          provider.longitude!,
+          deliveryLat,
+          deliveryLng,
+        );
+        
+        // חישוב עלות משלוח לפי המרחק
+        if (distanceKm <= 5.0) {
+          deliveryFee = 20.0;
+        } else if (distanceKm <= 10.0) {
+          deliveryFee = 50.0;
+        } else {
+          // מעל 10 ק"מ - לא צוין, נשתמש ב-50 ש"ח
+          deliveryFee = 50.0;
+        }
+      }
+    }
+    
+    // סך הכל כולל עלות משלוח
+    final finalTotalPrice = totalPrice + deliveryFee;
+    
     // בניית רשימת OrderItems
     final orderItems = <order_model.OrderItem>[];
     for (final serviceData in selectedServices) {
@@ -11845,6 +12268,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                 ],
               ],
               
+              // חישוב והצגת עלות משלוח (רק עבור משלוחי אוכל ומשלוחי קניות מהסופר)
+              if (deliveryFee > 0 && distanceKm != null) ...[
+                const SizedBox(height: 16),
+                const Text(
+                  'עלות משלוח:',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                Text('מרחק: ${distanceKm.toStringAsFixed(1)} ק"מ'),
+                const SizedBox(height: 4),
+                Text(
+                  '₪${deliveryFee.toStringAsFixed(0)}',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.orange[700],
+                  ),
+                ),
+              ],
+              
               // סוג תשלום
               const SizedBox(height: 16),
               const Text(
@@ -11877,7 +12320,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                       style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                     ),
                     Text(
-                      '₪${totalPrice.toStringAsFixed(0)}',
+                      '₪${finalTotalPrice.toStringAsFixed(0)}',
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -11911,13 +12354,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
       await _createOrder(
         provider: provider,
         orderItems: orderItems,
-        totalPrice: totalPrice,
+        totalPrice: finalTotalPrice,
+        deliveryFee: deliveryFee > 0 ? deliveryFee : null,
         deliveryType: deliveryType,
         deliveryLocation: selectedLocation,
         deliveryCategory: selectedDeliveryCategory,
         paymentType: paymentType,
         customerName: customerName,
         customerPhone: customerPhone,
+        selectedAppointment: selectedAppointment,
       );
     }
   }
@@ -11962,12 +12407,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
     required UserProfile provider,
     required List<order_model.OrderItem> orderItems,
     required double totalPrice,
+    double? deliveryFee,
     String? deliveryType,
     Map<String, dynamic>? deliveryLocation,
     String? deliveryCategory,
     required String paymentType,
     required String customerName,
     required String customerPhone,
+    Map<String, dynamic>? selectedAppointment,
   }) async {
     try {
       final currentUser = FirebaseAuth.instance.currentUser;
@@ -11975,6 +12422,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
 
       // קבלת מספר הזמנה הבא עבור העסק
       final orderNumber = await _getNextOrderNumber(provider.userId);
+
+      // אם יש תור, הסטטוס יהיה 'confirmed' במקום 'pending'
+      final orderStatus = selectedAppointment != null ? 'confirmed' : 'pending';
 
       final order = order_model.Order(
         orderId: '', // יוגדר ב-Firestore
@@ -11985,20 +12435,48 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
         providerName: provider.displayName,
         items: orderItems,
         totalPrice: totalPrice,
+        deliveryFee: deliveryFee,
         deliveryType: deliveryType,
         deliveryLocation: deliveryLocation,
         deliveryCategory: deliveryCategory,
         paymentType: paymentType,
-        status: 'pending',
+        status: orderStatus,
         orderNumber: orderNumber,
         createdAt: DateTime.now(),
       );
 
+      final orderData = order.toFirestore();
+      
+      // הוספת פרטי התור אם נבחר
+      if (selectedAppointment != null) {
+        orderData['appointmentDate'] = Timestamp.fromDate(selectedAppointment['date'] as DateTime);
+        orderData['appointmentStartTime'] = selectedAppointment['startTime'];
+        orderData['appointmentEndTime'] = selectedAppointment['endTime'];
+        orderData['appointmentId'] = selectedAppointment['appointmentId'];
+      }
+      
       final orderDocRef = await FirebaseFirestore.instance
           .collection('orders')
-          .add(order.toFirestore());
+          .add(orderData);
       
       final orderId = orderDocRef.id;
+      
+      // אם נבחר תור, לסמן אותו כתפוס
+      if (selectedAppointment != null && selectedAppointment['appointmentId'] != null) {
+        try {
+          await FirebaseFirestore.instance
+              .collection('appointments')
+              .doc(selectedAppointment['appointmentId'] as String)
+              .update({
+            'isAvailable': false,
+            'bookedBy': currentUser.uid,
+            'orderId': orderId,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        } catch (e) {
+          debugPrint('⚠️ Error updating appointment: $e');
+        }
+      }
 
       // שליחת התראה למשתמש העסקי שהוזמן מאצלו שירות
       await NotificationService.sendNotification(
@@ -12526,4 +13004,681 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
     if (!mounted) return;
     await AppSharingService.shareApp(context);
   }
+
+  // פורמט תאריך תור
+  String _formatAppointmentDate(DateTime date) {
+    const days = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+    final dayName = days[date.weekday % 7];
+    return 'יום $dayName, ${date.day}/${date.month}/${date.year}';
+  }
+}
+
+// מסך בחירת תור להזמנות
+class OrderAppointmentBookingScreen extends StatefulWidget {
+  final String providerId;
+
+  const OrderAppointmentBookingScreen({
+    super.key,
+    required this.providerId,
+  });
+
+  @override
+  State<OrderAppointmentBookingScreen> createState() => _OrderAppointmentBookingScreenState();
+}
+
+class _OrderAppointmentBookingScreenState extends State<OrderAppointmentBookingScreen> {
+  List<AppointmentSlot> _availableSlots = [];
+  List<Appointment> _bookedAppointments = [];
+  Appointment? _myBookedAppointment; // התור התפוס של המשתמש הנוכחי
+  bool _isLoading = true;
+  DateTime _selectedWeekStart = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAppointments();
+  }
+
+  Future<void> _loadAppointments() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // טעינת הגדרות התורים של נותן השירות
+      final settingsDoc = await FirebaseFirestore.instance
+          .collection('appointments')
+          .doc(widget.providerId)
+          .get();
+
+      if (settingsDoc.exists) {
+        final settings = AppointmentSettings.fromFirestore(settingsDoc);
+        setState(() {
+          _availableSlots = settings.slots;
+        });
+      }
+
+      // טעינת תורים תפוסים
+      final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+      final bookedQuery = await FirebaseFirestore.instance
+          .collection('appointments')
+          .where('userId', isEqualTo: widget.providerId)
+          .where('isAvailable', isEqualTo: false)
+          .get();
+
+      final allBookedAppointments = bookedQuery.docs
+          .map((doc) => Appointment.fromFirestore(doc))
+          .toList();
+
+      // מציאת התור התפוס של המשתמש הנוכחי (אם יש)
+      Appointment? myAppointment;
+      if (currentUserId != null) {
+        myAppointment = allBookedAppointments.firstWhere(
+          (apt) => apt.bookedBy == currentUserId,
+          orElse: () => Appointment(
+            appointmentId: '',
+            userId: '',
+            dayOfWeek: 0,
+            startTime: '',
+            endTime: '',
+            durationMinutes: 0,
+            isAvailable: true,
+            createdAt: DateTime.now(),
+          ),
+        );
+        if (myAppointment.appointmentId.isEmpty) {
+          myAppointment = null;
+        }
+      }
+
+      setState(() {
+        _bookedAppointments = allBookedAppointments;
+        _myBookedAppointment = myAppointment;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading appointments: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  // המרת DateTime.weekday ל-DayOfWeek enum index
+  int _convertWeekdayToDayOfWeekIndex(int weekday) {
+    return weekday == 7 ? 0 : weekday;
+  }
+
+  // יצירת רשימת תורים אפשריים משבוע
+  List<TimeSlot> _generateTimeSlotsForWeek() {
+    final slots = <TimeSlot>[];
+    final now = DateTime.now();
+    
+    // התחלה משבוע הנוכחי - חישוב ימים לחזרה לראשון
+    final daysToSubtract = _selectedWeekStart.weekday == 7 ? 0 : _selectedWeekStart.weekday;
+    final weekStart = _selectedWeekStart.subtract(Duration(days: daysToSubtract));
+
+    for (int dayOffset = 0; dayOffset < 7; dayOffset++) {
+      final day = weekStart.add(Duration(days: dayOffset));
+      final dayOfWeek = _convertWeekdayToDayOfWeekIndex(day.weekday);
+
+      // מציאת slots זמינים ליום זה
+      final daySlots = _availableSlots.where((slot) => slot.dayOfWeek == dayOfWeek).toList();
+
+      for (final slot in daySlots) {
+        final startTime = _parseTime(slot.startTime);
+        final endTime = _parseTime(slot.endTime);
+        final duration = slot.durationMinutes;
+
+        // יצירת תורים לפי משך
+        var currentTime = startTime;
+        while (currentTime.add(Duration(minutes: duration)).isBefore(endTime) ||
+               currentTime.add(Duration(minutes: duration)) == endTime) {
+          final slotEnd = currentTime.add(Duration(minutes: duration));
+          
+          // בדיקה אם התור עבר את זמנו - אם כן, נדלג עליו
+          final slotDateTime = DateTime(
+            day.year,
+            day.month,
+            day.day,
+            currentTime.hour,
+            currentTime.minute,
+          );
+          
+          if (slotDateTime.isBefore(now)) {
+            currentTime = slotEnd;
+            continue; // דילוג על תור שעבר
+          }
+          
+          final timeSlot = TimeSlot(
+            date: day,
+            startTime: currentTime,
+            endTime: slotEnd,
+            dayOfWeek: dayOfWeek,
+          );
+
+          // בדיקה אם התור תפוס לפי תאריך מדויק ושעה
+          final slotTimeStr = _formatTime(currentTime);
+          final slotDateOnly = DateTime(day.year, day.month, day.day);
+          
+          Appointment? bookedAppointment;
+          for (final apt in _bookedAppointments) {
+            bool matches = false;
+            if (apt.appointmentDate != null) {
+              final aptDateOnly = DateTime(
+                apt.appointmentDate!.year,
+                apt.appointmentDate!.month,
+                apt.appointmentDate!.day,
+              );
+              matches = aptDateOnly == slotDateOnly &&
+                       apt.startTime == slotTimeStr &&
+                       !apt.isAvailable;
+            } else {
+              matches = apt.dayOfWeek == dayOfWeek &&
+                       apt.startTime == slotTimeStr &&
+                       !apt.isAvailable;
+            }
+            if (matches) {
+              bookedAppointment = apt;
+              break;
+            }
+          }
+
+          timeSlot.isBooked = bookedAppointment != null;
+          if (bookedAppointment != null) {
+            timeSlot.appointmentId = bookedAppointment.appointmentId;
+          }
+          slots.add(timeSlot);
+
+          currentTime = slotEnd;
+        }
+      }
+    }
+
+    return slots;
+  }
+
+  DateTime _parseTime(String timeStr) {
+    final parts = timeStr.split(':');
+    final hour = int.parse(parts[0]);
+    final minute = int.parse(parts[1]);
+    return DateTime(2000, 1, 1, hour, minute);
+  }
+
+  String _formatTime(DateTime time) {
+    return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _selectAppointment(TimeSlot slot) async {
+    final currentUserId = FirebaseAuth.instance.currentUser?.uid;
+    if (currentUserId == null) return;
+
+    // בדיקה אם התור עבר את זמנו
+    final now = DateTime.now();
+    final slotDateTime = DateTime(
+      slot.date.year,
+      slot.date.month,
+      slot.date.day,
+      slot.startTime.hour,
+      slot.startTime.minute,
+    );
+    
+    if (slotDateTime.isBefore(now)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('לא ניתן לבחור תור שכבר עבר את זמנו'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+      return;
+    }
+
+    // בדיקה אם יש כבר תור תפוס
+    if (_myBookedAppointment != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('יש לך כבר תור תפוס. יש לשחרר אותו קודם לפני בחירת תור חדש'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+      return;
+    }
+
+    try {
+      // יצירת תור חדש
+      final appointmentId = FirebaseFirestore.instance.collection('appointments').doc().id;
+      final now = DateTime.now();
+
+      await FirebaseFirestore.instance
+          .collection('appointments')
+          .doc(appointmentId)
+          .set({
+        'userId': widget.providerId,
+        'dayOfWeek': slot.dayOfWeek,
+        'startTime': _formatTime(slot.startTime),
+        'endTime': _formatTime(slot.endTime),
+        'durationMinutes': slot.endTime.difference(slot.startTime).inMinutes,
+        'isAvailable': false,
+        'bookedBy': currentUserId,
+        'bookedAt': Timestamp.fromDate(now),
+        'appointmentDate': Timestamp.fromDate(slot.date),
+        'createdAt': Timestamp.fromDate(now),
+        'updatedAt': Timestamp.fromDate(now),
+      });
+
+      if (mounted) {
+        Navigator.of(context).pop({
+          'appointmentId': appointmentId,
+          'date': slot.date,
+          'startTime': _formatTime(slot.startTime),
+          'endTime': _formatTime(slot.endTime),
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error selecting appointment: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה בבחירת התור: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // שחרור התור התפוס של המשתמש
+  Future<void> _releaseMyAppointment() async {
+    if (_myBookedAppointment == null) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('שחרור תור'),
+        content: const Text('האם אתה בטוח שברצונך לשחרר את התור הזה?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('ביטול'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('שחרר'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      // שחרור התור - עדכון isAvailable ל-true
+      await FirebaseFirestore.instance
+          .collection('appointments')
+          .doc(_myBookedAppointment!.appointmentId)
+          .update({
+        'isAvailable': true,
+        'bookedBy': null,
+        'orderId': null,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // רענון הרשימה
+      await _loadAppointments();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('התור שוחרר בהצלחה. כעת תוכל לבחור תור חדש'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error releasing appointment: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה בשחרור התור: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _releaseAppointment(TimeSlot slot) async {
+    if (slot.appointmentId == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('לא ניתן לשחרר תור זה'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('שחרור תור'),
+        content: const Text('האם אתה בטוח שברצונך לשחרר את התור הזה?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('ביטול'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('שחרר'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      // שחרור התור - עדכון isAvailable ל-true
+      await FirebaseFirestore.instance
+          .collection('appointments')
+          .doc(slot.appointmentId!)
+          .update({
+        'isAvailable': true,
+        'bookedBy': null,
+        'orderId': null,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // רענון הרשימה
+      await _loadAppointments();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('התור שוחרר בהצלחה. כעת תוכל לבחור תור חדש'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('❌ Error releasing appointment: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה בשחרור התור: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('בחירת תור'),
+        backgroundColor: Colors.orange[600],
+        foregroundColor: Colors.white,
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _availableSlots.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.calendar_today,
+                        size: 64,
+                        color: Colors.grey[400],
+                      ),
+                      const SizedBox(height: 16),
+                      Text(
+                        'אין תורים זמינים כרגע',
+                        style: TextStyle(
+                          fontSize: 18,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : Column(
+                  children: [
+                    // הצגת התור התפוס הנוכחי (אם יש)
+                    if (_myBookedAppointment != null)
+                      Container(
+                        margin: const EdgeInsets.all(16),
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.orange[50],
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.orange[300]!),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.info_outline, color: Colors.orange[700]),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'יש לך תור תפוס:',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.orange[900],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            if (_myBookedAppointment!.appointmentDate != null)
+                              Text(
+                                _formatAppointmentDate(_myBookedAppointment!.appointmentDate!),
+                                style: const TextStyle(fontSize: 14),
+                              ),
+                            Text(
+                              '${_myBookedAppointment!.startTime}${_myBookedAppointment!.endTime.isNotEmpty ? ' - ${_myBookedAppointment!.endTime}' : ''}',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              'על מנת לבחור תור חדש, יש לשחרר את התור הנוכחי תחילה',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.orange[800],
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            ElevatedButton.icon(
+                              onPressed: () => _releaseMyAppointment(),
+                              icon: const Icon(Icons.cancel),
+                              label: const Text('שחרר תור זה'),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.red,
+                                foregroundColor: Colors.white,
+                                minimumSize: const Size(double.infinity, 40),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    // בחירת שבוע
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.chevron_right),
+                            onPressed: () {
+                              setState(() {
+                                _selectedWeekStart = _selectedWeekStart.subtract(
+                                  const Duration(days: 7),
+                                );
+                              });
+                            },
+                          ),
+                          Text(
+                            '${_formatDate(_selectedWeekStart)} - ${_formatDate(_selectedWeekStart.add(const Duration(days: 6)))}',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.chevron_left),
+                            onPressed: () {
+                              setState(() {
+                                _selectedWeekStart = _selectedWeekStart.add(
+                                  const Duration(days: 7),
+                                );
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    // רשימת תורים
+                    Expanded(
+                      child: ListView.builder(
+                        padding: const EdgeInsets.all(16),
+                        itemCount: _generateTimeSlotsForWeek().length,
+                        itemBuilder: (context, index) {
+                          final slot = _generateTimeSlotsForWeek()[index];
+                          return _buildTimeSlotCard(slot);
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+    );
+  }
+
+  Widget _buildTimeSlotCard(TimeSlot slot) {
+    final dayName = _getDayNameHebrew(slot.dayOfWeek);
+    final dateStr = _formatDate(slot.date);
+    final timeStr = '${_formatTime(slot.startTime)} - ${_formatTime(slot.endTime)}';
+
+    // בדיקה אם התור עבר את זמנו
+    final now = DateTime.now();
+    final slotDateTime = DateTime(
+      slot.date.year,
+      slot.date.month,
+      slot.date.day,
+      slot.startTime.hour,
+      slot.startTime.minute,
+    );
+    final isExpired = slotDateTime.isBefore(now);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      color: slot.isBooked
+          ? Colors.grey[300]
+          : isExpired
+              ? Colors.grey[200]
+              : Theme.of(context).colorScheme.surface,
+      child: ListTile(
+        leading: Icon(
+          slot.isBooked
+              ? Icons.block
+              : isExpired
+                  ? Icons.event_busy
+                  : Icons.access_time,
+          color: slot.isBooked
+              ? Colors.grey
+              : isExpired
+                  ? Colors.grey[600]
+                  : Colors.orange,
+        ),
+        title: Text(
+          'יום $dayName, $dateStr',
+          style: TextStyle(
+            color: isExpired ? Colors.grey[600] : null,
+          ),
+        ),
+        subtitle: Text(
+          timeStr,
+          style: TextStyle(
+            color: isExpired ? Colors.grey[600] : null,
+          ),
+        ),
+        trailing: slot.isBooked
+            ? ElevatedButton(
+                onPressed: () => _releaseAppointment(slot),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('תפוס - שחרר'),
+              )
+            : isExpired
+                ? Text(
+                    'פג תוקף',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontStyle: FontStyle.italic,
+                    ),
+                  )
+                : ElevatedButton(
+                    onPressed: () => _selectAppointment(slot),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.orange[600],
+                      foregroundColor: Colors.white,
+                    ),
+                    child: const Text('בחר'),
+                  ),
+      ),
+    );
+  }
+
+  String _getDayNameHebrew(int dayOfWeek) {
+    const days = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+    return days[dayOfWeek];
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
+  }
+
+  String _formatAppointmentDate(DateTime date) {
+    const days = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+    final dayName = days[date.weekday % 7];
+    return 'יום $dayName, ${date.day}/${date.month}/${date.year}';
+  }
+}
+
+class TimeSlot {
+  final DateTime date;
+  final DateTime startTime;
+  final DateTime endTime;
+  final int dayOfWeek;
+  bool isBooked;
+  String? appointmentId; // מזהה התור אם הוא תפוס
+
+  TimeSlot({
+    required this.date,
+    required this.startTime,
+    required this.endTime,
+    required this.dayOfWeek,
+    this.isBooked = false,
+    this.appointmentId,
+  });
 }

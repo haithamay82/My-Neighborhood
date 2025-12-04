@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../models/order.dart' as order_model;
 import '../models/request.dart';
 import '../models/user_profile.dart';
+import '../models/appointment.dart';
 import '../services/location_service.dart';
 import '../services/notification_service.dart';
 
@@ -22,6 +23,11 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
   String _selectedTab = 'pending'; // 'pending', 'confirmed', 'completed'
   bool? _isCourier;
   UserProfile? _userProfile;
+  bool? _requiresAppointment;
+  DateTime _selectedWeekStart = DateTime.now();
+  int _selectedYear = DateTime.now().year;
+  int _selectedMonth = DateTime.now().month;
+  int _selectedWeek = 1; // שבוע בחודש (1-4 או 5)
 
   @override
   void initState() {
@@ -37,6 +43,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
       final userDoc = await _firestore.collection('users').doc(user.uid).get();
       if (userDoc.exists) {
         final profile = UserProfile.fromFirestore(userDoc);
+        final userData = userDoc.data()!;
         setState(() {
           _userProfile = profile;
           // בדיקה אם המשתמש הוא שליח
@@ -48,6 +55,8 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
           ];
           _isCourier = profile.businessCategories?.any((cat) =>
               courierCategories.any((c) => c.name == cat.name)) ?? false;
+          // בדיקה אם העסק דורש תורים
+          _requiresAppointment = userData['requiresAppointment'] as bool? ?? false;
         });
       }
     } catch (e) {
@@ -85,7 +94,9 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
           foregroundColor: Colors.white,
           toolbarHeight: 50,
         ),
-        body: Column(
+        body: _requiresAppointment == true
+            ? _buildAppointmentWeekView(user.uid)
+            : Column(
           children: [
             // Tabs
             Container(
@@ -767,6 +778,35 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
             ),
             const SizedBox(height: 16),
             
+            // Delivery Fee (if exists)
+            if (order.deliveryFee != null && order.deliveryFee! > 0) ...[
+              const SizedBox(height: 16),
+              const Text(
+                'עלות משלוח:',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'עלות משלוח',
+                    style: TextStyle(
+                      fontSize: 14,
+                    ),
+                  ),
+                  Text(
+                    '₪${order.deliveryFee!.toStringAsFixed(0)}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.orange[700],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            
             // סך הכל
             const Divider(height: 24),
             Row(
@@ -1393,6 +1433,19 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // לחצן "ההזמנה בדרך" לשליח בטאב "הושלמו" (רק אם הוא לקח את ההזמנה והיא לא בדרך ולא נמסרה)
+                    if (_isCourier == true && order.status == 'completed' && order.courierId == _auth.currentUser?.uid && !order.isOnTheWay && !order.isDelivered) ...[
+                      TextButton.icon(
+                        onPressed: () => _markAsOnTheWay(order),
+                        icon: const Icon(Icons.local_shipping, size: 18),
+                        label: const Text('ההזמנה בדרך'),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.blue[700],
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                     // לחצן "נמסרה" לשליח בטאב "הושלמו" (רק אם הוא לקח את ההזמנה והיא לא נמסרה)
                     if (_isCourier == true && order.status == 'completed' && order.courierId == _auth.currentUser?.uid && !order.isDelivered) ...[
                       TextButton.icon(
@@ -1637,6 +1690,35 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
               ],
             ),
             
+            // Delivery Fee (if exists)
+            if (order.deliveryFee != null && order.deliveryFee! > 0) ...[
+              const SizedBox(height: 16),
+              const Text(
+                'עלות משלוח:',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'עלות משלוח',
+                    style: TextStyle(
+                      fontSize: 14,
+                    ),
+                  ),
+                  Text(
+                    '₪${order.deliveryFee!.toStringAsFixed(0)}',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.orange[700],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+            
             // Total Price
             const Divider(height: 24),
             Row(
@@ -1690,16 +1772,36 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
                 ],
               ),
             ] else if (order.status == 'preparing' || order.status == 'confirmed') ...[
-              // הזמנות בתהליך הכנה - לחצן הושלמה (גם preparing וגם confirmed - הזמנות ישנות)
+              // הזמנות בתהליך הכנה - לחצני הושלמה ובטל הזמנה
               const Divider(height: 24),
-              ElevatedButton(
-                onPressed: () => _completeOrder(order),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green,
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size(double.infinity, 48),
-                ),
-                child: const Text('הושלמה'),
+              Row(
+                children: [
+                  Expanded(
+                    flex: 7,
+                    child: ElevatedButton(
+                      onPressed: () => _cancelOrder(order),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(double.infinity, 48),
+                      ),
+                      child: const Text('בטל הזמנה'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 3,
+                    child: ElevatedButton(
+                      onPressed: () => _completeOrder(order),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                        foregroundColor: Colors.white,
+                        minimumSize: const Size(double.infinity, 48),
+                      ),
+                      child: const Text('הושלמה'),
+                    ),
+                  ),
+                ],
               ),
             ],
           ],
@@ -1715,6 +1817,26 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
         'status': 'preparing',
         'updatedAt': FieldValue.serverTimestamp(),
       });
+
+      // שליחת התראה למזמין
+      try {
+        final orderNumber = order.orderNumber.toString();
+        final providerName = order.providerName.isEmpty ? 'העסק' : order.providerName;
+        await NotificationService.sendNotification(
+          toUserId: order.customerId,
+          title: 'הזמנה מאושרת',
+          message: 'ההזמנה שלך ($orderNumber) מאושרת בתהליך הכנה מ-$providerName',
+          type: 'order_approved',
+          data: {
+            'orderId': order.orderId,
+            'orderNumber': orderNumber,
+            'providerName': providerName,
+          },
+        );
+        debugPrint('✅ Notification sent to customer: ${order.customerId}');
+      } catch (notificationError) {
+        debugPrint('⚠️ Error sending notification to customer: $notificationError');
+      }
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1792,6 +1914,75 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
       
       await _firestore.collection('orders').doc(order.orderId).update(updateData);
 
+      // טעינת ההזמנה המעודכנת מ-Firestore כדי לוודא שיש לנו את ה-courierId העדכני
+      final updatedOrderDoc = await _firestore.collection('orders').doc(order.orderId).get();
+      final updatedOrderData = updatedOrderDoc.data();
+      final updatedCourierId = updatedOrderData?['courierId'] as String?;
+      
+      debugPrint('📦 Order completed - checking for courier notification:');
+      debugPrint('   - Order ID: ${order.orderId}');
+      debugPrint('   - Original courierId: ${order.courierId}');
+      debugPrint('   - Updated courierId from Firestore: $updatedCourierId');
+
+      // שליחת התראה למזמין
+      try {
+        final orderNumber = order.orderNumber.toString();
+        String message;
+        if (updatedCourierId != null && order.courierName != null) {
+          message = 'ההזמנה שלך ($orderNumber) מוכנה, השליח: ${order.courierName}';
+        } else {
+          message = 'ההזמנה שלך ($orderNumber) מוכנה';
+        }
+        
+        await NotificationService.sendNotification(
+          toUserId: order.customerId,
+          title: 'הזמנה מוכנה',
+          message: message,
+          type: 'order_ready',
+          data: {
+            'orderId': order.orderId,
+            'orderNumber': orderNumber,
+            'courierName': order.courierName,
+          },
+        );
+        debugPrint('✅ Notification sent to customer: ${order.customerId}');
+      } catch (notificationError) {
+        debugPrint('⚠️ Error sending notification to customer: $notificationError');
+      }
+
+      // שליחת התראה לשליח אם יש שליח משובץ (בודקים גם את הערך המקורי וגם את הערך המעודכן)
+      final courierIdToNotify = updatedCourierId ?? order.courierId;
+      if (courierIdToNotify != null && courierIdToNotify.isNotEmpty) {
+        try {
+          final orderNumber = order.orderNumber.toString();
+          final message = 'הזמנה מס ($orderNumber) הושלמה ומוכנה לשילוח!';
+          
+          debugPrint('📤 Sending notification to courier: $courierIdToNotify');
+          debugPrint('   - Message: $message');
+          debugPrint('   - Order ID: ${order.orderId}');
+          
+          await NotificationService.sendNotification(
+            toUserId: courierIdToNotify,
+            title: 'הזמנה מוכנה לשילוח',
+            message: message,
+            type: 'order_ready_for_delivery',
+            data: {
+              'orderId': order.orderId,
+              'orderNumber': orderNumber,
+              'providerName': order.providerName,
+            },
+          );
+          debugPrint('✅ Notification sent to courier: $courierIdToNotify');
+        } catch (notificationError) {
+          debugPrint('⚠️ Error sending notification to courier: $notificationError');
+          debugPrint('   - Error details: ${notificationError.toString()}');
+        }
+      } else {
+        debugPrint('⚠️ No courier ID found - skipping courier notification');
+        debugPrint('   - updatedCourierId: $updatedCourierId');
+        debugPrint('   - order.courierId: ${order.courierId}');
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -1806,6 +1997,59 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('שגיאה בסימון ההזמנה כהושלמה: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  /// סימון הזמנה כ"בדרך" על ידי השליח
+  Future<void> _markAsOnTheWay(order_model.Order order) async {
+    try {
+      // עדכון הסטטוס ל-isOnTheWay = true
+      final updateData = <String, dynamic>{
+        'isOnTheWay': true,
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+      
+      await _firestore.collection('orders').doc(order.orderId).update(updateData);
+
+      // שליחת התראה למזמין
+      try {
+        final orderNumber = order.orderNumber.toString();
+        final message = 'ההזמנה שלך ($orderNumber) מ- ${order.providerName}, בדרך אליך 😊';
+        
+        await NotificationService.sendNotification(
+          toUserId: order.customerId,
+          title: 'ההזמנה בדרך',
+          message: message,
+          type: 'order_on_the_way',
+          data: {
+            'orderId': order.orderId,
+            'orderNumber': orderNumber,
+            'providerName': order.providerName,
+          },
+        );
+        debugPrint('✅ Notification sent to customer: ${order.customerId}');
+      } catch (notificationError) {
+        debugPrint('⚠️ Error sending notification to customer: $notificationError');
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('ההזמנה סומנה כבדרך'),
+            backgroundColor: Colors.blue,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error marking order as on the way: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה בסימון ההזמנה כבדרך: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -1882,6 +2126,79 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
     }
   }
 
+  Future<void> _cancelOrder(order_model.Order order) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('ביטול הזמנה'),
+        content: const Text(
+          'האם אתה בטוח שברצונך לבטל את ההזמנה?\n\n'
+          'ההזמנה תחזור לטאב ממתינות.'
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('ביטול'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.orange),
+            child: const Text('בטל הזמנה'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        // החזרת ההזמנה למצב pending (ממתינות)
+        await _firestore.collection('orders').doc(order.orderId).update({
+          'status': 'pending',
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+
+        // שליחת התראה למזמין
+        try {
+          final orderNumber = order.orderNumber.toString();
+          final providerName = order.providerName.isEmpty ? 'העסק' : order.providerName;
+          await NotificationService.sendNotification(
+            toUserId: order.customerId,
+            title: 'הזמנה בוטלה',
+            message: 'ההזמנה שלך ($orderNumber) בוטלה על ידי $providerName והוחזרה לממתינות',
+            type: 'order_cancelled',
+            data: {
+              'orderId': order.orderId,
+              'orderNumber': orderNumber,
+              'providerName': providerName,
+            },
+          );
+          debugPrint('✅ Notification sent to customer: ${order.customerId}');
+        } catch (notificationError) {
+          debugPrint('⚠️ Error sending notification to customer: $notificationError');
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('ההזמנה בוטלה והוחזרה לממתינות'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+      } catch (e) {
+        debugPrint('Error cancelling order: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('שגיאה בביטול ההזמנה: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    }
+  }
+
   Future<void> _rejectOrder(order_model.Order order) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1908,6 +2225,26 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
           'status': 'cancelled',
           'updatedAt': FieldValue.serverTimestamp(),
         });
+
+        // שליחת התראה למזמין
+        try {
+          final orderNumber = order.orderNumber.toString();
+          final providerName = order.providerName.isEmpty ? 'העסק' : order.providerName;
+          await NotificationService.sendNotification(
+            toUserId: order.customerId,
+            title: 'הזמנה נדחתה',
+            message: 'מצטערים ההזמנה שלך ($orderNumber) נדחתה על ידי $providerName',
+            type: 'order_rejected',
+            data: {
+              'orderId': order.orderId,
+              'orderNumber': orderNumber,
+              'providerName': providerName,
+            },
+          );
+          debugPrint('✅ Notification sent to customer: ${order.customerId}');
+        } catch (notificationError) {
+          debugPrint('⚠️ Error sending notification to customer: $notificationError');
+        }
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1965,6 +2302,10 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
 
   String _formatDate(DateTime date) {
     return '${date.day}/${date.month}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+  }
+
+  String _formatDateOnly(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
   }
 
   /// הצגת דיאלוג עם מפה שמציגה את מיקום העסק וכתובת המשלוח
@@ -2257,5 +2598,1118 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
       );
     }
   }
+
+  // תצוגת שבוע עבור עסקים עם קביעת תורים
+  Widget _buildAppointmentWeekView(String userId) {
+    // חישוב מספר השבועות בחודש הנבחר
+    final weeksInMonth = _getWeeksInMonth(_selectedYear, _selectedMonth);
+    
+    // וידוא ש-_selectedWeek לא גדול ממספר השבועות
+    if (_selectedWeek > weeksInMonth) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        setState(() {
+          _selectedWeek = weeksInMonth;
+          _selectedWeekStart = _calculateWeekDate(_selectedYear, _selectedMonth, _selectedWeek);
+        });
+      });
+    }
+    
+    return CustomScrollView(
+      slivers: [
+        // סליידרים קבועים בחלק העליון - נשארים קבועים בעת גלילה
+        SliverToBoxAdapter(
+          child: Container(
+            color: Colors.blue[50],
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                  // סליידר בחירת שנה
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(color: Colors.grey[300]!),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'בחר שנה:',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Row(
+                          children: [
+                            Text('${DateTime.now().year}'),
+                            Expanded(
+                              child: Slider(
+                                value: _selectedYear.toDouble(),
+                                min: DateTime.now().year.toDouble(),
+                                max: (DateTime.now().year + 1).toDouble(),
+                                divisions: 1,
+                                label: '$_selectedYear',
+                                onChanged: (value) {
+                                  setState(() {
+                                    _selectedYear = value.toInt();
+                                    // עדכון השבוע אם צריך
+                                    final newWeeksInMonth = _getWeeksInMonth(_selectedYear, _selectedMonth);
+                                    if (_selectedWeek > newWeeksInMonth) {
+                                      _selectedWeek = newWeeksInMonth;
+                                    }
+                                    _selectedWeekStart = _calculateWeekDate(_selectedYear, _selectedMonth, _selectedWeek);
+                                  });
+                                },
+                              ),
+                            ),
+                            Text('${DateTime.now().year + 1}'),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  // סליידר בחירת חודש
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(color: Colors.grey[300]!),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'בחר חודש:',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Row(
+                          children: [
+                            const Text('1'),
+                            Expanded(
+                              child: Slider(
+                                value: _selectedMonth.toDouble(),
+                                min: 1,
+                                max: 12,
+                                divisions: 11,
+                                label: _getMonthName(_selectedMonth),
+                                onChanged: (value) {
+                                  setState(() {
+                                    _selectedMonth = value.toInt();
+                                    // עדכון השבוע אם צריך
+                                    final newWeeksInMonth = _getWeeksInMonth(_selectedYear, _selectedMonth);
+                                    if (_selectedWeek > newWeeksInMonth) {
+                                      _selectedWeek = newWeeksInMonth;
+                                    }
+                                    _selectedWeekStart = _calculateWeekDate(_selectedYear, _selectedMonth, _selectedWeek);
+                                  });
+                                },
+                              ),
+                            ),
+                            const Text('12'),
+                          ],
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            _getMonthName(_selectedMonth),
+                            style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // סליידר בחירת שבוע
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(color: Colors.grey[300]!),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'בחר שבוע:',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Row(
+                          children: [
+                            const Text('1'),
+                            Expanded(
+                              child: Slider(
+                                value: _selectedWeek.clamp(1, weeksInMonth).toDouble(),
+                                min: 1,
+                                max: weeksInMonth.toDouble(),
+                                divisions: weeksInMonth > 1 ? weeksInMonth - 1 : 0,
+                                label: 'שבוע ${_selectedWeek.clamp(1, weeksInMonth)}',
+                                onChanged: (value) {
+                                  setState(() {
+                                    _selectedWeek = value.toInt();
+                                    _selectedWeekStart = _calculateWeekDate(_selectedYear, _selectedMonth, _selectedWeek);
+                                  });
+                                },
+                              ),
+                            ),
+                            Text('$weeksInMonth'),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        // תצוגת השבוע - scrollable
+        _buildWeekCalendarSliver(userId),
+      ],
+    );
+  }
+
+  // חישוב תאריך השבוע לפי שנה, חודש ושבוע
+  DateTime _calculateWeekDate(int year, int month, int week) {
+    // מציאת היום הראשון של החודש
+    final firstDayOfMonth = DateTime(year, month, 1);
+    
+    // מציאת ראשון השבוע הראשון של החודש
+    final firstDayWeekday = firstDayOfMonth.weekday == 7 ? 0 : firstDayOfMonth.weekday;
+    final firstWeekStart = firstDayOfMonth.subtract(Duration(days: firstDayWeekday));
+    
+    // חישוב תחילת השבוע הנבחר (שבוע 1 = השבוע הראשון, שבוע 2 = השבוע השני, וכו')
+    final weekStart = firstWeekStart.add(Duration(days: (week - 1) * 7));
+    
+    return weekStart;
+  }
+
+  // חישוב מספר השבועות בחודש
+  int _getWeeksInMonth(int year, int month) {
+    final firstDay = DateTime(year, month, 1);
+    final lastDay = DateTime(year, month + 1, 0);
+    
+    // מציאת ראשון השבוע הראשון
+    final firstDayWeekday = firstDay.weekday == 7 ? 0 : firstDay.weekday;
+    final firstWeekStart = firstDay.subtract(Duration(days: firstDayWeekday));
+    
+    // מציאת ראשון השבוע האחרון
+    final lastDayWeekday = lastDay.weekday == 7 ? 0 : lastDay.weekday;
+    final lastWeekStart = lastDay.subtract(Duration(days: lastDayWeekday));
+    
+    // חישוב מספר השבועות
+    final weeks = ((lastWeekStart.difference(firstWeekStart).inDays) / 7).floor() + 1;
+    
+    return weeks;
+  }
+
+  // שם חודש בעברית
+  String _getMonthName(int month) {
+    const months = [
+      'ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
+      'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'
+    ];
+    return months[month - 1];
+  }
+
+  // תצוגת לוח שנה שבועי - Sliver
+  Widget _buildWeekCalendarSliver(String userId) {
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _loadWeekAppointments(userId),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const SliverToBoxAdapter(
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return SliverToBoxAdapter(
+            child: Center(
+              child: Text('שגיאה בטעינת התורים: ${snapshot.error}'),
+            ),
+          );
+        }
+
+        final data = snapshot.data ?? {};
+        final appointmentSettings = data['settings'] as AppointmentSettings?;
+        final bookedAppointments = data['booked'] as List<Appointment>? ?? [];
+        final ordersWithAppointments = data['orders'] as List<order_model.Order>? ?? [];
+
+        if (appointmentSettings == null || appointmentSettings.slots.isEmpty) {
+          return const SliverToBoxAdapter(
+            child: Center(
+              child: Text('לא הוגדרו תורים זמינים'),
+            ),
+          );
+        }
+
+        // חישוב ימי השבוע
+        final daysToSubtract = _selectedWeekStart.weekday == 7 ? 0 : _selectedWeekStart.weekday;
+        final weekStart = _selectedWeekStart.subtract(Duration(days: daysToSubtract));
+
+        return SliverList(
+          delegate: SliverChildBuilderDelegate(
+            (context, dayIndex) {
+              final day = weekStart.add(Duration(days: dayIndex));
+              final dayOfWeek = _convertWeekdayToDayOfWeekIndex(day.weekday);
+              final daySlots = appointmentSettings.slots
+                  .where((slot) => slot.dayOfWeek == dayOfWeek)
+                  .toList();
+
+              if (daySlots.isEmpty) {
+                return const SizedBox.shrink();
+              }
+
+              return _buildDayColumn(day, dayOfWeek, daySlots, bookedAppointments, ordersWithAppointments);
+            },
+            childCount: 7,
+          ),
+        );
+      },
+    );
+  }
+
+  // תצוגת לוח שנה שבועי
+  Widget _buildWeekCalendar(String userId) {
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _loadWeekAppointments(userId),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (snapshot.hasError) {
+          return Center(
+            child: Text('שגיאה בטעינת התורים: ${snapshot.error}'),
+          );
+        }
+
+        final data = snapshot.data ?? {};
+        final appointmentSettings = data['settings'] as AppointmentSettings?;
+        final bookedAppointments = data['booked'] as List<Appointment>? ?? [];
+        final ordersWithAppointments = data['orders'] as List<order_model.Order>? ?? [];
+
+        if (appointmentSettings == null || appointmentSettings.slots.isEmpty) {
+          return const Center(
+            child: Text('לא הוגדרו תורים זמינים'),
+          );
+        }
+
+        // חישוב ימי השבוע
+        final daysToSubtract = _selectedWeekStart.weekday == 7 ? 0 : _selectedWeekStart.weekday;
+        final weekStart = _selectedWeekStart.subtract(Duration(days: daysToSubtract));
+
+        return ListView.builder(
+          padding: const EdgeInsets.all(8),
+          itemCount: 7,
+          itemBuilder: (context, dayIndex) {
+            final day = weekStart.add(Duration(days: dayIndex));
+            final dayOfWeek = _convertWeekdayToDayOfWeekIndex(day.weekday);
+            final daySlots = appointmentSettings.slots
+                .where((slot) => slot.dayOfWeek == dayOfWeek)
+                .toList();
+
+            if (daySlots.isEmpty) {
+              return const SizedBox.shrink();
+            }
+
+            return _buildDayColumn(day, dayOfWeek, daySlots, bookedAppointments, ordersWithAppointments);
+          },
+        );
+      },
+    );
+  }
+
+  // עמודה ליום אחד
+  Widget _buildDayColumn(
+    DateTime day,
+    int dayOfWeek,
+    List<AppointmentSlot> daySlots,
+    List<Appointment> bookedAppointments,
+    List<order_model.Order> ordersWithAppointments,
+  ) {
+    final dayName = _getDayNameHebrew(dayOfWeek);
+    final dateStr = _formatDateOnly(day);
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // כותרת היום
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.blue[100],
+              borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(8),
+                topRight: Radius.circular(8),
+              ),
+            ),
+            child: Row(
+              children: [
+                Text(
+                  'יום $dayName, $dateStr',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // רשימת תורים
+          ...daySlots.expand((slot) => _generateTimeSlotsForDay(
+                day,
+                slot,
+                bookedAppointments,
+                ordersWithAppointments,
+              )),
+        ],
+      ),
+    );
+  }
+
+  // יצירת תורים ליום אחד
+  List<Widget> _generateTimeSlotsForDay(
+    DateTime day,
+    AppointmentSlot slot,
+    List<Appointment> bookedAppointments,
+    List<order_model.Order> ordersWithAppointments,
+  ) {
+    final slots = <Widget>[];
+    final startTime = _parseTime(slot.startTime);
+    final endTime = _parseTime(slot.endTime);
+    final duration = slot.durationMinutes;
+
+    var currentTime = startTime;
+    while (currentTime.add(Duration(minutes: duration)).isBefore(endTime) ||
+           currentTime.add(Duration(minutes: duration)) == endTime) {
+      final slotEnd = currentTime.add(Duration(minutes: duration));
+      final slotTimeStr = _formatTime(currentTime);
+      final slotDateOnly = DateTime(day.year, day.month, day.day);
+
+      // מציאת תור תפוס
+      Appointment? bookedAppointment;
+      for (final apt in bookedAppointments) {
+        bool matches = false;
+        if (apt.appointmentDate != null) {
+          final aptDateOnly = DateTime(
+            apt.appointmentDate!.year,
+            apt.appointmentDate!.month,
+            apt.appointmentDate!.day,
+          );
+          matches = aptDateOnly == slotDateOnly &&
+                   apt.startTime == slotTimeStr &&
+                   !apt.isAvailable;
+        }
+        if (matches) {
+          bookedAppointment = apt;
+          break;
+        }
+      }
+
+      // מציאת הזמנה קשורה - נחפש לפי appointmentId
+      order_model.Order? relatedOrder;
+      if (bookedAppointment != null) {
+        try {
+          relatedOrder = ordersWithAppointments.firstWhere(
+            (order) {
+              // נבדוק אם יש appointmentId בהזמנה
+              // נטען את זה מ-Firestore אם צריך
+              return false; // נטען את זה בדיאלוג
+            },
+            orElse: () => ordersWithAppointments.first,
+          );
+        } catch (e) {
+          relatedOrder = null;
+        }
+      }
+
+      slots.add(
+        _buildTimeSlotCard(
+          day,
+          slotTimeStr,
+          _formatTime(slotEnd),
+          bookedAppointment,
+          relatedOrder,
+        ),
+      );
+
+      currentTime = slotEnd;
+    }
+
+    return slots;
+  }
+
+  // כרטיס תור
+  Widget _buildTimeSlotCard(
+    DateTime date,
+    String startTime,
+    String endTime,
+    Appointment? bookedAppointment,
+    order_model.Order? order,
+  ) {
+    final isBooked = bookedAppointment != null;
+
+    return InkWell(
+      onTap: isBooked ? () => _showAppointmentDetailsDialog(bookedAppointment!, order) : null,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: isBooked ? Colors.orange[50] : Colors.green[50],
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isBooked ? Colors.orange[300]! : Colors.green[300]!,
+            width: 1,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Text(
+                '$startTime - $endTime',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: isBooked ? Colors.orange[900] : Colors.green[900],
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            if (isBooked)
+              const Icon(Icons.event_busy, color: Colors.orange)
+            else
+              const Icon(Icons.event_available, color: Colors.green),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // טעינת תורים לשבוע
+  Future<Map<String, dynamic>> _loadWeekAppointments(String userId) async {
+    try {
+      // טעינת הגדרות תורים
+      final settingsDoc = await _firestore
+          .collection('appointments')
+          .doc(userId)
+          .get();
+
+      AppointmentSettings? settings;
+      if (settingsDoc.exists) {
+        settings = AppointmentSettings.fromFirestore(settingsDoc);
+      }
+
+      // טעינת תורים תפוסים
+      final bookedQuery = await _firestore
+          .collection('appointments')
+          .where('userId', isEqualTo: userId)
+          .where('isAvailable', isEqualTo: false)
+          .get();
+
+      final bookedAppointments = bookedQuery.docs
+          .map((doc) => Appointment.fromFirestore(doc))
+          .toList();
+
+      // טעינת הזמנות עם תורים
+      final ordersQuery = await _firestore
+          .collection('orders')
+          .where('providerId', isEqualTo: userId)
+          .where('appointmentId', isNotEqualTo: null)
+          .get();
+
+      final orders = ordersQuery.docs
+          .map((doc) => order_model.Order.fromFirestore(doc))
+          .toList();
+
+      return {
+        'settings': settings,
+        'booked': bookedAppointments,
+        'orders': orders,
+      };
+    } catch (e) {
+      debugPrint('Error loading week appointments: $e');
+      return {};
+    }
+  }
+
+  // המרת DateTime.weekday ל-DayOfWeek enum index
+  int _convertWeekdayToDayOfWeekIndex(int weekday) {
+    return weekday == 7 ? 0 : weekday;
+  }
+
+  // שם יום בעברית
+  String _getDayNameHebrew(int dayOfWeek) {
+    const days = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+    return days[dayOfWeek];
+  }
+
+  // המרת זמן
+  DateTime _parseTime(String timeStr) {
+    final parts = timeStr.split(':');
+    final hour = int.parse(parts[0]);
+    final minute = int.parse(parts[1]);
+    return DateTime(2000, 1, 1, hour, minute);
+  }
+
+  // פורמט זמן
+  String _formatTime(DateTime time) {
+    return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+  }
+
+  // דיאלוג פרטי המזמין
+  Future<void> _showAppointmentDetailsDialog(Appointment appointment, order_model.Order? order) async {
+    order_model.Order? loadedOrder = order;
+    
+    // נטען את ההזמנה אם לא קיבלנו אותה
+    if (loadedOrder == null) {
+      try {
+        final orderQuery = await _firestore
+            .collection('orders')
+            .where('appointmentId', isEqualTo: appointment.appointmentId)
+            .limit(1)
+            .get();
+
+        if (orderQuery.docs.isNotEmpty) {
+          loadedOrder = order_model.Order.fromFirestore(orderQuery.docs.first);
+        }
+      } catch (e) {
+        debugPrint('Error loading order: $e');
+      }
+    }
+
+    if (loadedOrder == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('לא נמצאה הזמנה קשורה'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+      return;
+    }
+
+    final finalOrder = loadedOrder;
+
+    await showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('פרטי התור'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('שם המזמין: ${finalOrder.customerName}'),
+              const SizedBox(height: 8),
+              Text('טלפון: ${finalOrder.customerPhone}'),
+              const SizedBox(height: 8),
+              const Text('שירותים:', style: TextStyle(fontWeight: FontWeight.bold)),
+              ...finalOrder.items.map((item) => Padding(
+                    padding: const EdgeInsets.only(right: 16, top: 4),
+                    child: Text('• ${item.serviceName} x${item.quantity}'),
+                  )),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  ElevatedButton(
+                    onPressed: () => _cancelAppointment(appointment, finalOrder),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                    child: const Text('בטל תור'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () => _moveAppointment(appointment, finalOrder),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                    child: const Text('הזז תור'),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('סגור'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ביטול תור
+  Future<void> _cancelAppointment(Appointment appointment, order_model.Order order) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('ביטול תור'),
+        content: const Text('האם אתה בטוח שברצונך לבטל את התור הזה?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('ביטול'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('בטל תור'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      // שחרור התור
+      await _firestore
+          .collection('appointments')
+          .doc(appointment.appointmentId)
+          .update({
+        'isAvailable': true,
+        'bookedBy': null,
+        'orderId': null,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // עדכון ההזמנה
+      await _firestore
+          .collection('orders')
+          .doc(order.orderId)
+          .update({
+        'appointmentId': null,
+        'appointmentDate': null,
+        'appointmentStartTime': null,
+        'appointmentEndTime': null,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // שליחת התראה למזמין
+      await NotificationService.sendNotification(
+        toUserId: order.customerId,
+        title: 'תור בוטל',
+        message: 'התור שלך בוטל על ידי ${order.providerName}',
+        type: 'appointment_cancelled',
+        data: {
+          'orderId': order.orderId,
+          'appointmentId': appointment.appointmentId,
+        },
+      );
+
+      if (mounted) {
+        Navigator.pop(context); // סגירת דיאלוג הפרטים
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('התור בוטל בהצלחה'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error cancelling appointment: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה בביטול התור: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  // הזזת תור
+  Future<void> _moveAppointment(Appointment appointment, order_model.Order order) async {
+    // נסגור את הדיאלוג הנוכחי ונפתח מסך בחירת תור חדש
+    Navigator.pop(context); // סגירת דיאלוג הפרטים
+
+    // פתיחת מסך בחירת תור חדש
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => OrderAppointmentMoveScreen(
+          providerId: order.providerId,
+          currentAppointment: appointment,
+          order: order,
+        ),
+      ),
+    );
+
+    if (result != null && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('התור הוזז בהצלחה'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+  }
+}
+
+// מסך הזזת תור
+class OrderAppointmentMoveScreen extends StatefulWidget {
+  final String providerId;
+  final Appointment currentAppointment;
+  final order_model.Order order;
+
+  const OrderAppointmentMoveScreen({
+    super.key,
+    required this.providerId,
+    required this.currentAppointment,
+    required this.order,
+  });
+
+  @override
+  State<OrderAppointmentMoveScreen> createState() => _OrderAppointmentMoveScreenState();
+}
+
+class _OrderAppointmentMoveScreenState extends State<OrderAppointmentMoveScreen> {
+  List<AppointmentSlot> _availableSlots = [];
+  List<Appointment> _bookedAppointments = [];
+  bool _isLoading = true;
+  DateTime _selectedWeekStart = DateTime.now();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAppointments();
+  }
+
+  Future<void> _loadAppointments() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final settingsDoc = await FirebaseFirestore.instance
+          .collection('appointments')
+          .doc(widget.providerId)
+          .get();
+
+      if (settingsDoc.exists) {
+        final settings = AppointmentSettings.fromFirestore(settingsDoc);
+        setState(() {
+          _availableSlots = settings.slots;
+        });
+      }
+
+      final bookedQuery = await FirebaseFirestore.instance
+          .collection('appointments')
+          .where('userId', isEqualTo: widget.providerId)
+          .where('isAvailable', isEqualTo: false)
+          .get();
+
+      setState(() {
+        _bookedAppointments = bookedQuery.docs
+            .map((doc) => Appointment.fromFirestore(doc))
+            .toList();
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('Error loading appointments: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  int _convertWeekdayToDayOfWeekIndex(int weekday) {
+    return weekday == 7 ? 0 : weekday;
+  }
+
+  List<TimeSlot> _generateTimeSlotsForWeek() {
+    final slots = <TimeSlot>[];
+    final daysToSubtract = _selectedWeekStart.weekday == 7 ? 0 : _selectedWeekStart.weekday;
+    final weekStart = _selectedWeekStart.subtract(Duration(days: daysToSubtract));
+
+    for (int dayOffset = 0; dayOffset < 7; dayOffset++) {
+      final day = weekStart.add(Duration(days: dayOffset));
+      final dayOfWeek = _convertWeekdayToDayOfWeekIndex(day.weekday);
+      final daySlots = _availableSlots.where((slot) => slot.dayOfWeek == dayOfWeek).toList();
+
+      for (final slot in daySlots) {
+        final startTime = _parseTime(slot.startTime);
+        final endTime = _parseTime(slot.endTime);
+        final duration = slot.durationMinutes;
+
+        var currentTime = startTime;
+        while (currentTime.add(Duration(minutes: duration)).isBefore(endTime) ||
+               currentTime.add(Duration(minutes: duration)) == endTime) {
+          final slotEnd = currentTime.add(Duration(minutes: duration));
+          final timeSlot = TimeSlot(
+            date: day,
+            startTime: currentTime,
+            endTime: slotEnd,
+            dayOfWeek: dayOfWeek,
+          );
+
+          final slotTimeStr = _formatTime(currentTime);
+          final slotDateOnly = DateTime(day.year, day.month, day.day);
+
+          final isBooked = _bookedAppointments.any((apt) {
+            if (apt.appointmentDate != null) {
+              final aptDateOnly = DateTime(
+                apt.appointmentDate!.year,
+                apt.appointmentDate!.month,
+                apt.appointmentDate!.day,
+              );
+              return aptDateOnly == slotDateOnly &&
+                     apt.startTime == slotTimeStr &&
+                     !apt.isAvailable;
+            } else {
+              return apt.dayOfWeek == dayOfWeek &&
+                     apt.startTime == slotTimeStr &&
+                     !apt.isAvailable;
+            }
+          });
+
+          timeSlot.isBooked = isBooked;
+          slots.add(timeSlot);
+
+          currentTime = slotEnd;
+        }
+      }
+    }
+
+    return slots;
+  }
+
+  DateTime _parseTime(String timeStr) {
+    final parts = timeStr.split(':');
+    final hour = int.parse(parts[0]);
+    final minute = int.parse(parts[1]);
+    return DateTime(2000, 1, 1, hour, minute);
+  }
+
+  String _formatTime(DateTime time) {
+    return '${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _moveToSlot(TimeSlot slot) async {
+    try {
+      // שחרור התור הישן
+      await FirebaseFirestore.instance
+          .collection('appointments')
+          .doc(widget.currentAppointment.appointmentId)
+          .update({
+        'isAvailable': true,
+        'bookedBy': null,
+        'orderId': null,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // יצירת תור חדש
+      final appointmentId = FirebaseFirestore.instance.collection('appointments').doc().id;
+      final now = DateTime.now();
+
+      await FirebaseFirestore.instance
+          .collection('appointments')
+          .doc(appointmentId)
+          .set({
+        'userId': widget.providerId,
+        'dayOfWeek': slot.dayOfWeek,
+        'startTime': _formatTime(slot.startTime),
+        'endTime': _formatTime(slot.endTime),
+        'durationMinutes': slot.endTime.difference(slot.startTime).inMinutes,
+        'isAvailable': false,
+        'bookedBy': widget.order.customerId,
+        'bookedAt': Timestamp.fromDate(now),
+        'appointmentDate': Timestamp.fromDate(slot.date),
+        'orderId': widget.order.orderId,
+        'createdAt': Timestamp.fromDate(now),
+        'updatedAt': Timestamp.fromDate(now),
+      });
+
+      // עדכון ההזמנה
+      await FirebaseFirestore.instance
+          .collection('orders')
+          .doc(widget.order.orderId)
+          .update({
+        'appointmentId': appointmentId,
+        'appointmentDate': Timestamp.fromDate(slot.date),
+        'appointmentStartTime': _formatTime(slot.startTime),
+        'appointmentEndTime': _formatTime(slot.endTime),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // שליחת התראה למזמין
+      await NotificationService.sendNotification(
+        toUserId: widget.order.customerId,
+        title: 'תור הוזז',
+        message: 'התור שלך הוזז ל-${_formatDate(slot.date)} ${_formatTime(slot.startTime)}',
+        type: 'appointment_moved',
+        data: {
+          'orderId': widget.order.orderId,
+          'appointmentId': appointmentId,
+        },
+      );
+
+      if (mounted) {
+        Navigator.of(context).pop({'moved': true});
+      }
+    } catch (e) {
+      debugPrint('Error moving appointment: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה בהזזת התור: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  String _getDayNameHebrew(int dayOfWeek) {
+    const days = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+    return days[dayOfWeek];
+  }
+
+  String _formatDate(DateTime date) {
+    return '${date.day}/${date.month}/${date.year}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('הזזת תור'),
+        backgroundColor: Colors.blue[600],
+        foregroundColor: Colors.white,
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.chevron_right),
+                        onPressed: () {
+                          setState(() {
+                            _selectedWeekStart = _selectedWeekStart.subtract(
+                              const Duration(days: 7),
+                            );
+                          });
+                        },
+                      ),
+                      Text(
+                        '${_formatDate(_selectedWeekStart)} - ${_formatDate(_selectedWeekStart.add(const Duration(days: 6)))}',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.chevron_left),
+                        onPressed: () {
+                          setState(() {
+                            _selectedWeekStart = _selectedWeekStart.add(
+                              const Duration(days: 7),
+                            );
+                          });
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _generateTimeSlotsForWeek().where((s) => !s.isBooked).length,
+                    itemBuilder: (context, index) {
+                      final availableSlots = _generateTimeSlotsForWeek().where((s) => !s.isBooked).toList();
+                      final slot = availableSlots[index];
+                      final dayName = _getDayNameHebrew(slot.dayOfWeek);
+                      final dateStr = _formatDate(slot.date);
+                      final timeStr = '${_formatTime(slot.startTime)} - ${_formatTime(slot.endTime)}';
+
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          leading: const Icon(Icons.access_time, color: Colors.green),
+                          title: Text('יום $dayName, $dateStr'),
+                          subtitle: Text(timeStr),
+                          trailing: ElevatedButton(
+                            onPressed: () => _moveToSlot(slot),
+                            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue),
+                            child: const Text('הזז לכאן'),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+// Delegate עבור SliverPersistentHeader
+class _SliverAppBarDelegate extends SliverPersistentHeaderDelegate {
+  final double minHeight;
+  final double maxHeight;
+  final Widget child;
+
+  _SliverAppBarDelegate({
+    required this.minHeight,
+    required this.maxHeight,
+    required this.child,
+  });
+
+  @override
+  double get minExtent => minHeight;
+
+  @override
+  double get maxExtent => maxHeight;
+
+  @override
+  Widget build(BuildContext context, double shrinkOffset, bool overlapsContent) {
+    return child;
+  }
+
+  @override
+  bool shouldRebuild(_SliverAppBarDelegate oldDelegate) {
+    return maxHeight != oldDelegate.maxHeight ||
+        minHeight != oldDelegate.minHeight ||
+        child != oldDelegate.child;
+  }
+}
+
+class TimeSlot {
+  final DateTime date;
+  final DateTime startTime;
+  final DateTime endTime;
+  final int dayOfWeek;
+  bool isBooked;
+
+  TimeSlot({
+    required this.date,
+    required this.startTime,
+    required this.endTime,
+    required this.dayOfWeek,
+    this.isBooked = false,
+  });
 }
 
