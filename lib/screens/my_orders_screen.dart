@@ -7,6 +7,7 @@ import 'dart:async';
 import '../models/order.dart' as order_model;
 import '../l10n/app_localizations.dart';
 import '../services/location_service.dart';
+import '../services/notification_service.dart';
 import 'home_screen.dart';
 
 class MyOrdersScreen extends StatefulWidget {
@@ -1738,6 +1739,70 @@ class _EditAppointmentOrderScreenState extends State<EditAppointmentOrderScreen>
         'appointmentEndTime': _selectedAppointmentEndTime,
         'updatedAt': FieldValue.serverTimestamp(),
       });
+
+      // שליחת התראה לעסק אם התור השתנה
+      final oldAppointmentId = widget.order.appointmentId;
+      final newAppointmentId = _selectedAppointmentId;
+      final oldAppointmentDate = widget.order.appointmentDate;
+      final newAppointmentDate = _selectedAppointmentDate;
+      final oldStartTime = widget.order.appointmentStartTime;
+      final newStartTime = _selectedAppointmentStartTime;
+      
+      // בדיקה אם התור השתנה (ID, תאריך, או שעה)
+      bool appointmentChanged = false;
+      if (oldAppointmentId != newAppointmentId) {
+        appointmentChanged = true;
+      } else if (oldAppointmentDate != null && newAppointmentDate != null) {
+        // השוואת תאריכים (רק יום, חודש, שנה)
+        final oldDateOnly = DateTime(oldAppointmentDate.year, oldAppointmentDate.month, oldAppointmentDate.day);
+        final newDateOnly = DateTime(newAppointmentDate.year, newAppointmentDate.month, newAppointmentDate.day);
+        if (oldDateOnly != newDateOnly) {
+          appointmentChanged = true;
+        } else if (oldStartTime != newStartTime) {
+          // אם התאריך זהה אבל השעה שונה
+          appointmentChanged = true;
+        }
+      } else if (oldAppointmentDate == null && newAppointmentDate != null) {
+        appointmentChanged = true;
+      } else if (oldAppointmentDate != null && newAppointmentDate == null) {
+        appointmentChanged = true;
+      } else if (oldStartTime != newStartTime) {
+        appointmentChanged = true;
+      }
+      
+      if (appointmentChanged) {
+        try {
+          // טעינת שם הלקוח
+          final customerDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(currentUser.uid)
+              .get();
+          final customerName = customerDoc.exists 
+              ? (customerDoc.data()?['displayName'] ?? customerDoc.data()?['name'] ?? 'לקוח')
+              : 'לקוח';
+          
+          // פורמט תאריך ושעה
+          String appointmentStr = '';
+          if (newAppointmentDate != null && newStartTime != null) {
+            final dateStr = '${newAppointmentDate.day}/${newAppointmentDate.month}/${newAppointmentDate.year}';
+            appointmentStr = '$dateStr בשעה $newStartTime';
+          }
+          
+          await NotificationService.sendNotification(
+            toUserId: widget.order.providerId,
+            title: 'תור שונה',
+            message: '$customerName שינה את התור שלו${appointmentStr.isNotEmpty ? ' ל-$appointmentStr' : ''}',
+            type: 'appointment_changed',
+            data: {
+              'orderId': widget.order.orderId,
+              'appointmentId': newAppointmentId,
+            },
+          );
+        } catch (e) {
+          debugPrint('❌ Error sending appointment changed notification: $e');
+          // לא נעצור את התהליך אם יש שגיאה בשליחת התראה
+        }
+      }
 
       if (mounted) {
         Navigator.pop(context, true);

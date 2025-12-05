@@ -45,20 +45,27 @@ class _Ingredient {
 class _Service {
   final TextEditingController nameController;
   final TextEditingController priceController;
+  final TextEditingController? durationController; // משך זמן השירות (רק אם דורש תור)
   File? imageFile;
   bool isCustomPrice;
   final List<_Ingredient> ingredients;
+  int? selectedDurationMinutes; // משך זמן נבחר מהרשימה (15/30/45/60/90)
+  bool useCustomDuration; // האם משתמש בכתיבה חופשית
 
   _Service({
     required this.nameController,
     required this.priceController,
+    this.durationController,
   }) : imageFile = null,
        isCustomPrice = false,
-       ingredients = [];
+       ingredients = [],
+       selectedDurationMinutes = null,
+       useCustomDuration = false;
 
   void dispose() {
     nameController.dispose();
     priceController.dispose();
+    durationController?.dispose();
     for (final ingredient in ingredients) {
       ingredient.dispose();
     }
@@ -348,6 +355,7 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
   // שדות חדשים למודעה
   bool _requiresAppointment = false; // האם השירות דורש תור
   bool _requiresDelivery = false; // האם השירות דורש משלוח
+  bool _noAppointmentNoDelivery = false; // השירותים אינם דורשים קביעת תור ואין משלוחים
   // שדות מיקום משלוח - לא נדרש יותר, משתמשים במיקום הראשי
 
   // בדיקת התראות סינון (לא נדרש למודעות כרגע)
@@ -1061,10 +1069,25 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
   
   // הוספת שירות חדש
   void _addService() {
+    // בדיקה שהמשתמש בחר אחת מהאפשרויות
+    if (!_requiresAppointment && !_requiresDelivery && !_noAppointmentNoDelivery) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('אנא בחר אחת מהאפשרויות: תור, משלוח, או ללא תור וללא משלוח'),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    
     setState(() {
       _services.add(_Service(
         nameController: TextEditingController(),
         priceController: TextEditingController(),
+        durationController: _requiresAppointment 
+            ? TextEditingController() 
+            : null, // רק אם דורש תור
       ));
     });
   }
@@ -1179,6 +1202,74 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
               },
             ),
             const SizedBox(height: 16),
+            
+            // שדה משך זמן השירות (רק אם דורש תור)
+            if (_requiresAppointment) ...[
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<int>(
+                      value: service.selectedDurationMinutes,
+                      decoration: const InputDecoration(
+                        labelText: 'משך זמן השירות *',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.access_time),
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 15, child: Text('15 דקות')),
+                        DropdownMenuItem(value: 30, child: Text('30 דקות')),
+                        DropdownMenuItem(value: 45, child: Text('45 דקות')),
+                        DropdownMenuItem(value: 60, child: Text('60 דקות')),
+                        DropdownMenuItem(value: 90, child: Text('90 דקות')),
+                        DropdownMenuItem(value: -1, child: Text('זמן אחר')),
+                      ],
+                      onChanged: (value) {
+                        setState(() {
+                          service.selectedDurationMinutes = value;
+                          service.useCustomDuration = value == -1;
+                          if (value != -1) {
+                            service.durationController?.clear();
+                          }
+                        });
+                      },
+                      validator: (value) {
+                        if (value == null) {
+                          return 'אנא בחר משך זמן';
+                        }
+                        if (value == -1 && (service.durationController?.text.isEmpty ?? true)) {
+                          return 'אנא הזן משך זמן';
+                        }
+                        return null;
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              if (service.useCustomDuration) ...[
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: service.durationController,
+                  decoration: const InputDecoration(
+                    labelText: 'משך זמן בדקות *',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.edit),
+                    helperText: 'הזן מספר דקות (לדוגמה: 120)',
+                  ),
+                  keyboardType: TextInputType.number,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'אנא הזן משך זמן';
+                    }
+                    final minutes = int.tryParse(value);
+                    if (minutes == null || minutes <= 0) {
+                      return 'אנא הזן מספר תקין';
+                    }
+                    return null;
+                  },
+                ),
+              ],
+              const SizedBox(height: 16),
+            ],
             
             // תמונה
             Row(
@@ -1753,29 +1844,6 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
                       ),
                       const SizedBox(height: 16),
                       
-                      // רשימת שירותים
-                      ..._services.asMap().entries.map((entry) {
-                        final index = entry.key;
-                        final service = entry.value;
-                        return _buildServiceCard(index, service);
-                      }).toList(),
-                      
-                      // לחצן הוסף שירות
-                      SizedBox(
-                        width: double.infinity,
-                        child: ElevatedButton.icon(
-                          onPressed: _selectedCategories.isEmpty ? null : _addService,
-                          icon: const Icon(Icons.add),
-                          label: const Text('הוסף שירות'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Theme.of(context).colorScheme.primary,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      
                       // שדה דורש תור
                       Card(
                         child: CheckboxListTile(
@@ -1784,7 +1852,14 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
                           value: _requiresAppointment,
                           onChanged: (value) {
                             setState(() {
-                              _requiresAppointment = value ?? false;
+                              if (value == true) {
+                                // אם בוחרים תור, מבטלים משלוח ואפשרות שלישית
+                                _requiresAppointment = true;
+                                _requiresDelivery = false;
+                                _noAppointmentNoDelivery = false;
+                              } else {
+                                _requiresAppointment = false;
+                              }
                             });
                           },
                           secondary: const Icon(Icons.calendar_today),
@@ -1800,12 +1875,95 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
                           value: _requiresDelivery,
                           onChanged: (value) {
                             setState(() {
-                              _requiresDelivery = value ?? false;
+                              if (value == true) {
+                                // אם בוחרים משלוח, מבטלים תור ואפשרות שלישית
+                                _requiresDelivery = true;
+                                _requiresAppointment = false;
+                                _noAppointmentNoDelivery = false;
+                                // איפוס משך זמן בשירותים קיימים
+                                for (var service in _services) {
+                                  service.selectedDurationMinutes = null;
+                                  service.useCustomDuration = false;
+                                  service.durationController?.clear();
+                                }
+                              } else {
+                                _requiresDelivery = false;
+                              }
                             });
                           },
                           secondary: const Icon(Icons.local_shipping),
                         ),
                       ),
+                      const SizedBox(height: 16),
+                      
+                      // שדה ללא תור וללא משלוח
+                      Card(
+                        child: CheckboxListTile(
+                          title: const Text('השירותים אינם דורשים קביעת תור ואין משלוחים'),
+                          subtitle: const Text('אם השירותים אינם דורשים תור ואין משלוחים, בחר באפשרות זו'),
+                          value: _noAppointmentNoDelivery,
+                          onChanged: (value) {
+                            setState(() {
+                              if (value == true) {
+                                // אם בוחרים אפשרות שלישית, מבטלים תור ומשלוח
+                                _noAppointmentNoDelivery = true;
+                                _requiresAppointment = false;
+                                _requiresDelivery = false;
+                                // איפוס משך זמן בשירותים קיימים
+                                for (var service in _services) {
+                                  service.selectedDurationMinutes = null;
+                                  service.useCustomDuration = false;
+                                  service.durationController?.clear();
+                                }
+                              } else {
+                                _noAppointmentNoDelivery = false;
+                              }
+                            });
+                          },
+                          secondary: const Icon(Icons.block),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      
+                      // רשימת שירותים - אחרי הצ'קבוקסים ולפני כפתור הוסף שירות
+                      ..._services.asMap().entries.map((entry) {
+                        final index = entry.key;
+                        final service = entry.value;
+                        return _buildServiceCard(index, service);
+                      }).toList(),
+                      
+                      // לחצן הוסף שירות - אחרי רשימת השירותים
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: (_selectedCategories.isEmpty || 
+                                     (!_requiresAppointment && !_requiresDelivery && !_noAppointmentNoDelivery))
+                              ? null
+                              : _addService,
+                          icon: const Icon(Icons.add),
+                          label: const Text('הוסף שירות'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Theme.of(context).colorScheme.primary,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                          ),
+                        ),
+                      ),
+                      if (_selectedCategories.isEmpty || 
+                          (!_requiresAppointment && !_requiresDelivery && !_noAppointmentNoDelivery))
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Text(
+                            _selectedCategories.isEmpty
+                                ? 'אנא בחר תחום קודם'
+                                : 'אנא בחר אחת מהאפשרויות: תור, משלוח, או ללא תור וללא משלוח',
+                            style: TextStyle(
+                              color: Theme.of(context).colorScheme.error,
+                              fontSize: 12,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
                       const SizedBox(height: 16),
                       
                       // בחירת מיקום - זמין רק אחרי בחירת קטגוריה
@@ -1817,35 +1975,13 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
                                 ? Colors.grey 
                                 : null,
                           ),
-                          title: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  _selectedAddress ?? 'בחר מיקום העסק שלך',
-                                  style: TextStyle(
-                                    color: _selectedCategories.isEmpty 
-                                        ? Colors.grey 
-                                        : null,
-                                  ),
-                                ),
-                              ),
-                              GestureDetector(
-                                onTap: () => _showLocationInfoDialog(),
-                                child: Container(
-                                  padding: const EdgeInsets.all(4),
-                                  decoration: BoxDecoration(
-                                    color: Theme.of(context).colorScheme.primaryContainer,
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(color: Theme.of(context).colorScheme.primary),
-                                  ),
-                                  child: Icon(
-                                    Icons.info_outline,
-                                    color: Theme.of(context).colorScheme.primary,
-                                    size: 16,
-                                  ),
-                                ),
-                              ),
-                            ],
+                          title: Text(
+                            _selectedAddress ?? 'בחר מיקום העסק שלך',
+                            style: TextStyle(
+                              color: _selectedCategories.isEmpty 
+                                  ? Colors.grey 
+                                  : null,
+                            ),
                           ),
                           subtitle: _selectedCategories.isEmpty
                               ? Text(
@@ -1990,128 +2126,6 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
   }
 
   /// הצגת דיאלוג מידע על בחירת מיקום
-  void _showLocationInfoDialog() {
-    final l10n = AppLocalizations.of(context);
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
-        title: Row(
-          children: [
-            Icon(
-              Icons.info_outline,
-              color: Theme.of(context).colorScheme.primary,
-              size: 28,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                l10n.locationInfoTitle,
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Theme.of(context).brightness == Brightness.dark
-                      ? Colors.white
-                      : Colors.black87,
-                ),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 2,
-              ),
-            ),
-          ],
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                                    color: Theme.of(context).colorScheme.primaryContainer,
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: Theme.of(context).colorScheme.primary),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    l10n.howToSelectLocation,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).brightness == Brightness.dark
-                          ? Colors.white
-                          : Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    l10n.selectLocationInstructions,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).brightness == Brightness.dark
-                          ? Colors.white70
-                          : Colors.black87,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Theme.of(context).colorScheme.primary),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    l10n.locationSelectionTips,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).brightness == Brightness.dark
-                          ? Colors.white
-                          : Colors.black87,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    l10n.locationSelectionTipsDetails,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).brightness == Brightness.dark
-                          ? Colors.white70
-                          : Colors.black87,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: Text(
-              l10n.understood,
-              style: TextStyle(
-                color: Theme.of(context).colorScheme.primary,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _selectLocation() async {
     final result = await Navigator.push(
       context,
@@ -2536,6 +2550,21 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
                       if (!service.isCustomPrice && service.priceController.text.trim().isNotEmpty) {
                         serviceData['price'] = double.tryParse(service.priceController.text.trim()) ?? 0.0;
                       }
+                      // שמירת משך זמן השירות (רק אם דורש תור)
+                      if (_requiresAppointment) {
+                        int? durationMinutes;
+                        if (service.useCustomDuration && service.durationController != null) {
+                          final customDuration = int.tryParse(service.durationController!.text.trim());
+                          if (customDuration != null && customDuration > 0) {
+                            durationMinutes = customDuration;
+                          }
+                        } else if (service.selectedDurationMinutes != null && service.selectedDurationMinutes! > 0) {
+                          durationMinutes = service.selectedDurationMinutes;
+                        }
+                        if (durationMinutes != null) {
+                          serviceData['durationMinutes'] = durationMinutes;
+                        }
+                      }
                       // שמירת תמונה אם קיימת
                       if (service.imageFile != null) {
                         try {
@@ -2561,6 +2590,7 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
                     updateData['businessServices'] = servicesData;
                     updateData['requiresAppointment'] = _requiresAppointment;
                     updateData['requiresDelivery'] = _requiresDelivery;
+                    updateData['noAppointmentNoDelivery'] = _noAppointmentNoDelivery;
                     
                     // העלאת תמונת עסק אם יש
                     if (_businessImageFile != null) {
@@ -3085,6 +3115,21 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
                       if (!service.isCustomPrice && service.priceController.text.trim().isNotEmpty) {
                         serviceData['price'] = double.tryParse(service.priceController.text.trim()) ?? 0.0;
                       }
+                      // שמירת משך זמן השירות (רק אם דורש תור)
+                      if (_requiresAppointment) {
+                        int? durationMinutes;
+                        if (service.useCustomDuration && service.durationController != null) {
+                          final customDuration = int.tryParse(service.durationController!.text.trim());
+                          if (customDuration != null && customDuration > 0) {
+                            durationMinutes = customDuration;
+                          }
+                        } else if (service.selectedDurationMinutes != null && service.selectedDurationMinutes! > 0) {
+                          durationMinutes = service.selectedDurationMinutes;
+                        }
+                        if (durationMinutes != null) {
+                          serviceData['durationMinutes'] = durationMinutes;
+                        }
+                      }
                       // שמירת תמונה אם קיימת
                       if (service.imageFile != null) {
                         try {
@@ -3110,6 +3155,7 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
                     updateData['businessServices'] = servicesData;
                     updateData['requiresAppointment'] = _requiresAppointment;
                     updateData['requiresDelivery'] = _requiresDelivery;
+                    updateData['noAppointmentNoDelivery'] = _noAppointmentNoDelivery;
                     
                     // העלאת תמונת עסק אם יש
                     if (_businessImageFile != null) {
@@ -3333,22 +3379,45 @@ class _BusinessManagementScreenState extends State<BusinessManagementScreen> wit
     
     // בדיקת תקינות כל השירותים
     bool hasInvalidService = false;
+    String? invalidServiceMessage;
     for (var service in _services) {
       if (service.nameController.text.trim().isEmpty) {
         hasInvalidService = true;
+        invalidServiceMessage = 'אנא מלא את כל פרטי השירותים';
         break;
       }
       if (!service.isCustomPrice && (service.priceController.text.trim().isEmpty || 
           double.tryParse(service.priceController.text.trim()) == null)) {
         hasInvalidService = true;
+        invalidServiceMessage = 'אנא מלא את כל פרטי השירותים';
         break;
+      }
+      // בדיקת משך זמן השירות (אם דורש תור)
+      if (_requiresAppointment) {
+        if (service.useCustomDuration) {
+          if (service.durationController == null || service.durationController!.text.trim().isEmpty) {
+            hasInvalidService = true;
+            invalidServiceMessage = 'אנא הזן משך זמן לכל השירותים';
+            break;
+          }
+          final customDuration = int.tryParse(service.durationController!.text.trim());
+          if (customDuration == null || customDuration <= 0) {
+            hasInvalidService = true;
+            invalidServiceMessage = 'אנא הזן משך זמן תקין לכל השירותים';
+            break;
+          }
+        } else if (service.selectedDurationMinutes == null || service.selectedDurationMinutes! <= 0) {
+          hasInvalidService = true;
+          invalidServiceMessage = 'אנא בחר משך זמן לכל השירותים';
+          break;
+        }
       }
     }
     
     if (hasInvalidService) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('אנא מלא את כל פרטי השירותים'),
+        SnackBar(
+          content: Text(invalidServiceMessage ?? 'אנא מלא את כל פרטי השירותים'),
           backgroundColor: Colors.red,
         ),
       );

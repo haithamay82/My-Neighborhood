@@ -36,23 +36,29 @@ class _Ingredient {
 class _Service {
   final TextEditingController nameController;
   final TextEditingController priceController;
+  final TextEditingController? durationController; // משך זמן השירות (רק אם דורש תור)
   File? imageFile;
   String? imageUrl;
   bool isCustomPrice;
   final List<_Ingredient> ingredients;
+  int? selectedDurationMinutes; // משך זמן נבחר מהרשימה (15/30/45/60/90)
+  bool useCustomDuration; // האם משתמש בכתיבה חופשית
 
   _Service({
     required this.nameController,
     required this.priceController,
-    this.imageFile,
+    this.durationController,
     this.imageUrl,
     this.isCustomPrice = false,
     List<_Ingredient>? ingredients,
-  }) : ingredients = ingredients ?? [];
+  }) : ingredients = ingredients ?? [],
+       selectedDurationMinutes = null,
+       useCustomDuration = false;
 
   void dispose() {
     nameController.dispose();
     priceController.dispose();
+    durationController?.dispose();
     for (final ingredient in ingredients) {
       ingredient.dispose();
     }
@@ -63,10 +69,12 @@ class _BusinessServicesEditScreenState extends State<BusinessServicesEditScreen>
   final List<_Service> _services = [];
   final ImagePicker _imagePicker = ImagePicker();
   bool _isLoading = false;
+  bool _requiresAppointment = false; // האם השירותים דורשים קביעת תור
 
   @override
   void initState() {
     super.initState();
+    _loadUserSettings();
     // טעינת השירותים הקיימים
     for (var serviceData in widget.initialServices) {
       final ingredients = <_Ingredient>[];
@@ -88,6 +96,23 @@ class _BusinessServicesEditScreenState extends State<BusinessServicesEditScreen>
         }
       }
       
+      // טעינת משך זמן השירות אם קיים
+      final durationMinutes = serviceData['durationMinutes'] as int?;
+      TextEditingController? durationController;
+      int? selectedDurationMinutes;
+      bool useCustomDuration = false;
+      
+      if (durationMinutes != null && durationMinutes > 0) {
+        // בדיקה אם זה אחד מהערכים הסטנדרטיים
+        if ([15, 30, 45, 60, 90].contains(durationMinutes)) {
+          selectedDurationMinutes = durationMinutes;
+        } else {
+          // זה ערך מותאם אישית
+          useCustomDuration = true;
+          durationController = TextEditingController(text: durationMinutes.toString());
+        }
+      }
+      
       _services.add(_Service(
         nameController: TextEditingController(text: serviceData['name'] as String? ?? ''),
         priceController: TextEditingController(
@@ -95,10 +120,33 @@ class _BusinessServicesEditScreenState extends State<BusinessServicesEditScreen>
               ? (serviceData['price'] as num).toString() 
               : '',
         ),
+        durationController: durationController,
         imageUrl: serviceData['imageUrl'] as String?,
         isCustomPrice: serviceData['isCustomPrice'] as bool? ?? false,
         ingredients: ingredients,
-      ));
+      )..selectedDurationMinutes = selectedDurationMinutes
+       ..useCustomDuration = useCustomDuration);
+    }
+  }
+
+  Future<void> _loadUserSettings() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) return;
+      
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      
+      if (userDoc.exists && mounted) {
+        final userData = userDoc.data()!;
+        setState(() {
+          _requiresAppointment = userData['requiresAppointment'] as bool? ?? false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading user settings: $e');
     }
   }
 
@@ -115,6 +163,9 @@ class _BusinessServicesEditScreenState extends State<BusinessServicesEditScreen>
       _services.add(_Service(
         nameController: TextEditingController(),
         priceController: TextEditingController(),
+        durationController: _requiresAppointment 
+            ? TextEditingController() 
+            : null, // רק אם דורש תור
       ));
     });
   }
@@ -184,6 +235,38 @@ class _BusinessServicesEditScreenState extends State<BusinessServicesEditScreen>
         );
         return;
       }
+      // בדיקת משך זמן השירות (אם דורש תור)
+      if (_requiresAppointment) {
+        if (service.useCustomDuration) {
+          if (service.durationController == null || service.durationController!.text.trim().isEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('אנא הזן משך זמן לכל השירותים'),
+                backgroundColor: Colors.red,
+              ),
+            );
+            return;
+          }
+          final customDuration = int.tryParse(service.durationController!.text.trim());
+          if (customDuration == null || customDuration <= 0) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('אנא הזן משך זמן תקין לכל השירותים'),
+                backgroundColor: Colors.red,
+              ),
+            );
+            return;
+          }
+        } else if (service.selectedDurationMinutes == null || service.selectedDurationMinutes! <= 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('אנא בחר משך זמן לכל השירותים'),
+              backgroundColor: Colors.red,
+            ),
+          );
+          return;
+        }
+      }
     }
 
     setState(() => _isLoading = true);
@@ -207,6 +290,22 @@ class _BusinessServicesEditScreenState extends State<BusinessServicesEditScreen>
         
         if (!service.isCustomPrice && service.priceController.text.trim().isNotEmpty) {
           serviceData['price'] = double.tryParse(service.priceController.text.trim()) ?? 0.0;
+        }
+        
+        // שמירת משך זמן השירות (רק אם דורש תור)
+        if (_requiresAppointment) {
+          int? durationMinutes;
+          if (service.useCustomDuration && service.durationController != null) {
+            final customDuration = int.tryParse(service.durationController!.text.trim());
+            if (customDuration != null && customDuration > 0) {
+              durationMinutes = customDuration;
+            }
+          } else if (service.selectedDurationMinutes != null && service.selectedDurationMinutes! > 0) {
+            durationMinutes = service.selectedDurationMinutes;
+          }
+          if (durationMinutes != null) {
+            serviceData['durationMinutes'] = durationMinutes;
+          }
         }
         
         // העלאת תמונה אם קיימת
@@ -337,6 +436,54 @@ class _BusinessServicesEditScreenState extends State<BusinessServicesEditScreen>
                 ),
               ],
             ),
+            // שדה משך זמן השירות (רק אם דורש תור)
+            if (_requiresAppointment) ...[
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<int>(
+                      value: service.selectedDurationMinutes,
+                      decoration: const InputDecoration(
+                        labelText: 'משך זמן השירות *',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.access_time),
+                      ),
+                      items: const [
+                        DropdownMenuItem(value: 15, child: Text('15 דקות')),
+                        DropdownMenuItem(value: 30, child: Text('30 דקות')),
+                        DropdownMenuItem(value: 45, child: Text('45 דקות')),
+                        DropdownMenuItem(value: 60, child: Text('60 דקות')),
+                        DropdownMenuItem(value: 90, child: Text('90 דקות')),
+                        DropdownMenuItem(value: -1, child: Text('זמן אחר')),
+                      ],
+                      onChanged: (value) {
+                        setState(() {
+                          service.selectedDurationMinutes = value;
+                          service.useCustomDuration = value == -1;
+                          if (value != -1) {
+                            service.durationController?.clear();
+                          }
+                        });
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              if (service.useCustomDuration) ...[
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: service.durationController,
+                  decoration: const InputDecoration(
+                    labelText: 'משך זמן בדקות *',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.edit),
+                    helperText: 'הזן מספר דקות (לדוגמה: 120)',
+                  ),
+                  keyboardType: TextInputType.number,
+                ),
+              ],
+            ],
             const SizedBox(height: 12),
             Row(
               children: [

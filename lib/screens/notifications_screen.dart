@@ -378,8 +378,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> with WidgetsB
               ),
         onTap: () {
           _markAsRead(notification.notificationId);
-          // אם זה התראה של הזמנה, נווט למסך ניהול הזמנות
-          if ((notification.originalType == 'order_new' || notification.originalType == 'order_delivery') ||
+          // אם זה התראה של הזמנה או תור, נווט למסך ניהול הזמנות
+          if ((notification.originalType == 'order_new' || 
+               notification.originalType == 'order_delivery' ||
+               notification.originalType == 'appointment_changed') ||
               (notification.data != null && notification.data!.containsKey('orderId'))) {
             final String? orderId = notification.data?['orderId'] as String?;
             // נשתמש ב-originalType אם יש, אחרת 'order_new' כברירת מחדל

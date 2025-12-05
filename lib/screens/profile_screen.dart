@@ -81,6 +81,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
   // שדות עבור שירותים עסקיים
   bool _requiresAppointment = false; // האם השירות דורש תור
   bool _requiresDelivery = false; // האם השירות ניתן במשלוח
+  bool _noAppointmentNoDelivery = false; // השירותים אינם דורשים קביעת תור ואין משלוחים
   bool _isUpdatingSettings = false; // דגל למניעת עדכונים כפולים
 
   @override
@@ -7598,6 +7599,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         setState(() {
           _requiresAppointment = userData['requiresAppointment'] as bool? ?? false;
           _requiresDelivery = userData['requiresDelivery'] as bool? ?? false;
+          _noAppointmentNoDelivery = userData['noAppointmentNoDelivery'] as bool? ?? false;
         });
       }
     } catch (e) {
@@ -7606,7 +7608,11 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
   }
 
   // עדכון הגדרות שירותים (משלוח ותור)
-  Future<void> _updateServiceSettings({bool? requiresAppointment, bool? requiresDelivery}) async {
+  Future<void> _updateServiceSettings({
+    bool? requiresAppointment,
+    bool? requiresDelivery,
+    bool? noAppointmentNoDelivery,
+  }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
     
@@ -7617,30 +7623,48 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     // חישוב הערכים החדשים
     bool newRequiresAppointment = requiresAppointment ?? _requiresAppointment;
     bool newRequiresDelivery = requiresDelivery ?? _requiresDelivery;
+    bool newNoAppointmentNoDelivery = noAppointmentNoDelivery ?? _noAppointmentNoDelivery;
     
-    // אם מנסים להפעיל אחד כשהשני כבר פעיל, יש לבטל את השני אוטומטית
+    // אם מנסים להפעיל אחד כשאחרים כבר פעילים, יש לבטל אותם אוטומטית
     bool willCancelOther = false;
     bool? finalRequiresAppointment = requiresAppointment;
     bool? finalRequiresDelivery = requiresDelivery;
+    bool? finalNoAppointmentNoDelivery = noAppointmentNoDelivery;
     
-    if (requiresAppointment == true && _requiresDelivery) {
+    if (requiresAppointment == true && (_requiresDelivery || _noAppointmentNoDelivery)) {
       finalRequiresDelivery = false;
+      finalNoAppointmentNoDelivery = false;
+      newRequiresDelivery = false;
+      newNoAppointmentNoDelivery = false;
+      willCancelOther = true;
+    }
+    if (requiresDelivery == true && (_requiresAppointment || _noAppointmentNoDelivery)) {
+      finalRequiresAppointment = false;
+      finalNoAppointmentNoDelivery = false;
+      newRequiresAppointment = false;
+      newNoAppointmentNoDelivery = false;
+      willCancelOther = true;
+    }
+    if (noAppointmentNoDelivery == true && (_requiresAppointment || _requiresDelivery)) {
+      finalRequiresAppointment = false;
+      finalRequiresDelivery = false;
+      newRequiresAppointment = false;
       newRequiresDelivery = false;
       willCancelOther = true;
     }
-    if (requiresDelivery == true && _requiresAppointment) {
-      finalRequiresAppointment = false;
-      newRequiresAppointment = false;
-      willCancelOther = true;
-    }
 
-    // בדיקה סופית - לא ניתן ששניהם יהיו פעילים
-    if (newRequiresAppointment && newRequiresDelivery) {
+    // בדיקה סופית - לא ניתן שכמה מהם יהיו פעילים יחד
+    int activeCount = 0;
+    if (newRequiresAppointment) activeCount++;
+    if (newRequiresDelivery) activeCount++;
+    if (newNoAppointmentNoDelivery) activeCount++;
+    
+    if (activeCount > 1) {
       _isUpdatingSettings = false;
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('לא ניתן לבחור גם שירותים דורשים קביעת תור וגם שירות במשלוח. יש לבחור אחד מהם בלבד.'),
+            content: Text('לא ניתן לבחור יותר מאפשרות אחת. יש לבחור אחת בלבד: תור, משלוח, או ללא תור וללא משלוח.'),
             backgroundColor: Colors.orange,
             duration: Duration(seconds: 3),
           ),
@@ -7667,7 +7691,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
           ],
         ),
         content: Text(
-          _getConfirmationMessage(finalRequiresAppointment, finalRequiresDelivery, willCancelOther),
+          _getConfirmationMessage(finalRequiresAppointment, finalRequiresDelivery, finalNoAppointmentNoDelivery, willCancelOther),
         ),
         actions: [
           TextButton(
@@ -7714,6 +7738,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
           if (finalRequiresDelivery != null) {
             _requiresDelivery = finalRequiresDelivery;
           }
+          if (finalNoAppointmentNoDelivery != null) {
+            _noAppointmentNoDelivery = finalNoAppointmentNoDelivery;
+          }
         });
       }
 
@@ -7728,6 +7755,41 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
       if (finalRequiresDelivery != null) {
         updateData['requiresDelivery'] = finalRequiresDelivery;
       }
+      if (finalNoAppointmentNoDelivery != null) {
+        updateData['noAppointmentNoDelivery'] = finalNoAppointmentNoDelivery;
+      }
+
+      // אם מבטלים "שירותים דורשים קביעת תור", בוחרים "משלוח", או בוחרים "ללא תור וללא משלוח", יש להסיר את durationMinutes מכל השירותים
+      if (finalRequiresAppointment == false || finalRequiresDelivery == true || finalNoAppointmentNoDelivery == true) {
+        try {
+          final userDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .get();
+          
+          if (userDoc.exists) {
+            final userData = userDoc.data()!;
+            final services = userData['businessServices'] as List<dynamic>?;
+            
+            if (services != null && services.isNotEmpty) {
+              // הסרת durationMinutes מכל שירות
+              final updatedServices = services.map((service) {
+                if (service is Map<String, dynamic>) {
+                  final serviceMap = Map<String, dynamic>.from(service);
+                  serviceMap.remove('durationMinutes');
+                  return serviceMap;
+                }
+                return service;
+              }).toList();
+              
+              updateData['businessServices'] = updatedServices;
+            }
+          }
+        } catch (e) {
+          debugPrint('Error removing durationMinutes from services: $e');
+          // ממשיכים גם אם יש שגיאה - העדכון הראשי עדיין יתבצע
+        }
+      }
 
       await FirebaseFirestore.instance
           .collection('users')
@@ -7735,11 +7797,16 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
           .update(updateData);
 
       if (mounted) {
+        String message = 'ההגדרות עודכנו בהצלחה';
+        if (shouldResetToAvailability) {
+          message = 'ההגדרות עודכנו בהצלחה. הגדרת התורים הוחזרה לזמינות';
+        } else if (finalRequiresAppointment == false || finalRequiresDelivery == true || finalNoAppointmentNoDelivery == true) {
+          message = 'ההגדרות עודכנו בהצלחה. משך הזמן הוסר מכל השירותים';
+        }
+        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(shouldResetToAvailability
-                ? 'ההגדרות עודכנו בהצלחה. הגדרת התורים הוחזרה לזמינות'
-                : 'ההגדרות עודכנו בהצלחה'),
+            content: Text(message),
             backgroundColor: Colors.green,
             duration: const Duration(seconds: 2),
           ),
@@ -7768,7 +7835,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
   }
 
   // יצירת הודעת אישור לשינוי הגדרות
-  String _getConfirmationMessage(bool? requiresAppointment, bool? requiresDelivery, bool willCancelOther) {
+  String _getConfirmationMessage(bool? requiresAppointment, bool? requiresDelivery, bool? noAppointmentNoDelivery, bool willCancelOther) {
     List<String> changes = [];
     
     if (requiresAppointment != null) {
@@ -7776,6 +7843,9 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         changes.add('הפעלת שירותים דורשים קביעת תור');
         if (_requiresDelivery) {
           changes.add('ביטול שירות במשלוח (אוטומטי)');
+        }
+        if (_noAppointmentNoDelivery) {
+          changes.add('ביטול ללא תור וללא משלוח (אוטומטי)');
         }
       } else {
         changes.add('ביטול שירותים דורשים קביעת תור');
@@ -7788,8 +7858,25 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
         if (_requiresAppointment) {
           changes.add('ביטול שירותים דורשים קביעת תור (אוטומטי)');
         }
+        if (_noAppointmentNoDelivery) {
+          changes.add('ביטול ללא תור וללא משלוח (אוטומטי)');
+        }
       } else {
         changes.add('ביטול שירות במשלוח');
+      }
+    }
+    
+    if (noAppointmentNoDelivery != null) {
+      if (noAppointmentNoDelivery) {
+        changes.add('הפעלת ללא תור וללא משלוח');
+        if (_requiresAppointment) {
+          changes.add('ביטול שירותים דורשים קביעת תור (אוטומטי)');
+        }
+        if (_requiresDelivery) {
+          changes.add('ביטול שירות במשלוח (אוטומטי)');
+        }
+      } else {
+        changes.add('ביטול ללא תור וללא משלוח');
       }
     }
     
@@ -10256,11 +10343,12 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                   Switch(
                     value: _requiresAppointment,
                     onChanged: _isUpdatingSettings ? null : (newValue) async {
-                      // אם מנסים להפעיל כשהשני כבר פעיל, יש לבטל את השני
-                      if (newValue && _requiresDelivery) {
+                      // אם מנסים להפעיל כשאחרים כבר פעילים, יש לבטל אותם
+                      if (newValue && (_requiresDelivery || _noAppointmentNoDelivery)) {
                         await _updateServiceSettings(
                           requiresAppointment: true,
                           requiresDelivery: false,
+                          noAppointmentNoDelivery: false,
                         );
                       } else {
                         // עדכון רגיל
@@ -10289,11 +10377,12 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                   Switch(
                     value: _requiresDelivery,
                     onChanged: _isUpdatingSettings ? null : (newValue) async {
-                      // אם מנסים להפעיל כשהשני כבר פעיל, יש לבטל את השני
-                      if (newValue && _requiresAppointment) {
+                      // אם מנסים להפעיל כשאחרים כבר פעילים, יש לבטל אותם
+                      if (newValue && (_requiresAppointment || _noAppointmentNoDelivery)) {
                         await _updateServiceSettings(
                           requiresAppointment: false,
                           requiresDelivery: true,
+                          noAppointmentNoDelivery: false,
                         );
                       } else {
                         // עדכון רגיל
@@ -10303,11 +10392,45 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                   ),
                 ],
               ),
+              const SizedBox(height: 12),
+              // השירותים אינם דורשים קביעת תור ואין משלוחים
+              Row(
+                children: [
+                  Icon(Icons.block, size: 20, color: Theme.of(context).colorScheme.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'השירותים אינם דורשים קביעת תור ואין משלוחים',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Theme.of(context).colorScheme.onSurface,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  Switch(
+                    value: _noAppointmentNoDelivery,
+                    onChanged: _isUpdatingSettings ? null : (newValue) async {
+                      // אם מנסים להפעיל כשאחרים כבר פעילים, יש לבטל אותם
+                      if (newValue && (_requiresAppointment || _requiresDelivery)) {
+                        await _updateServiceSettings(
+                          requiresAppointment: false,
+                          requiresDelivery: false,
+                          noAppointmentNoDelivery: true,
+                        );
+                      } else {
+                        // עדכון רגיל
+                        await _updateServiceSettings(noAppointmentNoDelivery: newValue);
+                      }
+                    },
+                  ),
+                ],
+              ),
               const SizedBox(height: 8),
               Padding(
                 padding: const EdgeInsets.only(right: 28),
                 child: Text(
-                  'שימו לב: ניתן לבחור רק אחת מהאפשרויות - או שירותים דורשים קביעת תור או שירות במשלוח',
+                  'שימו לב: ניתן לבחור רק אחת מהאפשרויות - תור, משלוח, או ללא תור וללא משלוח',
                   style: TextStyle(
                     fontSize: 12,
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -10354,6 +10477,21 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
     final isCustomPrice = service['isCustomPrice'] as bool? ?? false;
     final imageUrl = service['imageUrl'] as String?;
     final isAvailable = service['isAvailable'] as bool? ?? true; // ברירת מחדל זמין
+    final durationMinutes = service['durationMinutes'] as int?;
+    
+    // בניית טקסט המשנה
+    List<String> subtitleParts = [];
+    if (isCustomPrice) {
+      subtitleParts.add('מחיר בהתאמה אישית');
+    } else if (price != null) {
+      subtitleParts.add('₪${price.toStringAsFixed(0)}');
+    } else {
+      subtitleParts.add('ללא מחיר');
+    }
+    // הצגת משך זמן רק אם השירותים דורשים קביעת תור
+    if (_requiresAppointment && durationMinutes != null && durationMinutes > 0) {
+      subtitleParts.add('משך זמן: ${durationMinutes} דקות');
+    }
     
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
@@ -10373,11 +10511,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               )
             : const Icon(Icons.business),
         title: Text(name),
-        subtitle: isCustomPrice
-            ? const Text('מחיר בהתאמה אישית')
-            : price != null
-                ? Text('₪${price.toStringAsFixed(0)}')
-                : const Text('ללא מחיר'),
+        subtitle: Text(subtitleParts.join(' • ')),
         trailing: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -10388,8 +10522,17 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
               },
             ),
             IconButton(
-          icon: const Icon(Icons.delete, color: Colors.red),
-          onPressed: () => _deleteService(index),
+              icon: const Icon(Icons.edit, color: Colors.blue),
+              onPressed: () async {
+                final services = await _loadBusinessServices();
+                await _showEditServicesDialog(services);
+              },
+              tooltip: 'ערוך שירותים',
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete, color: Colors.red),
+              onPressed: () => _deleteService(index),
+              tooltip: 'מחק שירות',
             ),
           ],
         ),

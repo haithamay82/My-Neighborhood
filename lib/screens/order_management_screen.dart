@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -9,6 +10,23 @@ import '../models/user_profile.dart';
 import '../models/appointment.dart';
 import '../services/location_service.dart';
 import '../services/notification_service.dart';
+
+// מחלקת נתונים למשבצת תור
+class AppointmentSlotData {
+  final DateTime date;
+  final String startTime;
+  final String endTime;
+  final Appointment? bookedAppointment;
+  final order_model.Order? order;
+
+  AppointmentSlotData({
+    required this.date,
+    required this.startTime,
+    required this.endTime,
+    this.bookedAppointment,
+    this.order,
+  });
+}
 
 class OrderManagementScreen extends StatefulWidget {
   const OrderManagementScreen({super.key});
@@ -28,11 +46,33 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
   int _selectedYear = DateTime.now().year;
   int _selectedMonth = DateTime.now().month;
   int _selectedWeek = 1; // שבוע בחודש (1-4 או 5)
+  
+  // מצב הזזת תור
+  bool _isMoveMode = false;
+  Appointment? _appointmentToMove;
+  order_model.Order? _orderToMove;
 
   @override
   void initState() {
     super.initState();
     _loadUserProfile();
+    // אפשר סיבוב מסך (VERTICAL ו-HORIZONTAL) רק למסך הזה
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+  }
+
+  @override
+  void dispose() {
+    // החזרת הגבלת סיבוב למצב רגיל (רק PORTRAIT)
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+    super.dispose();
   }
 
   Future<void> _loadUserProfile() async {
@@ -83,16 +123,27 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
       textDirection: TextDirection.rtl,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text(
-            'ניהול הזמנות',
-            style: TextStyle(
+          title: Text(
+            _isMoveMode ? 'הזזת תור - בחר תור חדש' : 'ניהול הזמנות',
+            style: const TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w600,
             ),
           ),
-          backgroundColor: Theme.of(context).colorScheme.primary,
+          backgroundColor: _isMoveMode 
+              ? Colors.blue[700] 
+              : Theme.of(context).colorScheme.primary,
           foregroundColor: Colors.white,
           toolbarHeight: 50,
+          actions: _isMoveMode
+              ? [
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: _cancelMoveMode,
+                    tooltip: 'ביטול הזזה',
+                  ),
+                ]
+              : null,
         ),
         body: _requiresAppointment == true
             ? _buildAppointmentWeekView(user.uid)
@@ -2870,7 +2921,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
     return months[month - 1];
   }
 
-  // תצוגת לוח שנה שבועי - Sliver
+  // תצוגת לוח שנה שבועי - Grid View (כמו בתמונה)
   Widget _buildWeekCalendarSliver(String userId) {
     return FutureBuilder<Map<String, dynamic>>(
       future: _loadWeekAppointments(userId),
@@ -2906,194 +2957,513 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
         final daysToSubtract = _selectedWeekStart.weekday == 7 ? 0 : _selectedWeekStart.weekday;
         final weekStart = _selectedWeekStart.subtract(Duration(days: daysToSubtract));
 
-        return SliverList(
-          delegate: SliverChildBuilderDelegate(
-            (context, dayIndex) {
-              final day = weekStart.add(Duration(days: dayIndex));
-              final dayOfWeek = _convertWeekdayToDayOfWeekIndex(day.weekday);
-              final daySlots = appointmentSettings.slots
-                  .where((slot) => slot.dayOfWeek == dayOfWeek)
-                  .toList();
+        // טעינת משכי הזמן מהשירותים
+        final serviceDurations = data['serviceDurations'] as List<int>? ?? [];
+        
+        // יצירת רשימת שעות לכל הימים
+        final allTimeSlots = _generateAllTimeSlotsForWeek(
+          weekStart,
+          appointmentSettings,
+          bookedAppointments,
+          ordersWithAppointments,
+          serviceDurations,
+        );
 
-              if (daySlots.isEmpty) {
-                return const SizedBox.shrink();
-              }
-
-              return _buildDayColumn(day, dayOfWeek, daySlots, bookedAppointments, ordersWithAppointments);
-            },
-            childCount: 7,
+        return SliverToBoxAdapter(
+          child: _buildWeekGridCalendar(
+            weekStart,
+            allTimeSlots,
+            appointmentSettings,
+            bookedAppointments,
+            ordersWithAppointments,
           ),
         );
       },
     );
   }
 
-  // עמודה ליום אחד
-  Widget _buildDayColumn(
-    DateTime day,
-    int dayOfWeek,
-    List<AppointmentSlot> daySlots,
+  // יצירת כל משבצות הזמן לשבוע
+  Map<String, Map<String, AppointmentSlotData>> _generateAllTimeSlotsForWeek(
+    DateTime weekStart,
+    AppointmentSettings settings,
+    List<Appointment> bookedAppointments,
+    List<order_model.Order> ordersWithAppointments,
+    List<int> serviceDurations,
+  ) {
+    final timeSlotsMap = <String, Map<String, AppointmentSlotData>>{};
+
+    // יצירת רשימת כל השעות האפשריות
+    final allHours = <String>[];
+    for (int dayIndex = 0; dayIndex < 7; dayIndex++) {
+      final day = weekStart.add(Duration(days: dayIndex));
+      final dayOfWeek = _convertWeekdayToDayOfWeekIndex(day.weekday);
+      final daySlots = settings.slots.where((slot) => slot.dayOfWeek == dayOfWeek).toList();
+
+      for (final slot in daySlots) {
+        final startTime = _parseTime(slot.startTime);
+        final endTime = _parseTime(slot.endTime);
+        // שימוש במשך הזמן המינימלי מהשירותים, או במשך הזמן של ה-slot אם אין שירותים
+        final duration = serviceDurations.isNotEmpty 
+            ? serviceDurations.reduce((a, b) => a < b ? a : b)
+            : slot.durationMinutes;
+
+        var currentTime = startTime;
+        while (currentTime.add(Duration(minutes: duration)).isBefore(endTime) ||
+               currentTime.add(Duration(minutes: duration)) == endTime) {
+          final slotEnd = currentTime.add(Duration(minutes: duration));
+          final timeKey = _formatTime(currentTime);
+          
+          if (!allHours.contains(timeKey)) {
+            allHours.add(timeKey);
+          }
+
+          final slotDateOnly = DateTime(day.year, day.month, day.day);
+          
+          // מציאת תור תפוס
+          Appointment? bookedAppointment;
+          for (final apt in bookedAppointments) {
+            bool matches = false;
+            if (apt.appointmentDate != null) {
+              final aptDateOnly = DateTime(
+                apt.appointmentDate!.year,
+                apt.appointmentDate!.month,
+                apt.appointmentDate!.day,
+              );
+              matches = aptDateOnly == slotDateOnly &&
+                       apt.startTime == timeKey &&
+                       !apt.isAvailable;
+            }
+            if (matches) {
+              bookedAppointment = apt;
+              break;
+            }
+          }
+
+          // מציאת הזמנה קשורה
+          order_model.Order? relatedOrder;
+          if (bookedAppointment != null) {
+            try {
+              relatedOrder = ordersWithAppointments.firstWhere(
+                (order) => order.appointmentId == bookedAppointment!.appointmentId,
+                orElse: () => ordersWithAppointments.first,
+              );
+            } catch (e) {
+              relatedOrder = null;
+            }
+          }
+
+          final dayKey = '${day.year}-${day.month}-${day.day}';
+          if (!timeSlotsMap.containsKey(dayKey)) {
+            timeSlotsMap[dayKey] = {};
+          }
+          
+          timeSlotsMap[dayKey]![timeKey] = AppointmentSlotData(
+            date: day,
+            startTime: timeKey,
+            endTime: _formatTime(slotEnd),
+            bookedAppointment: bookedAppointment,
+            order: relatedOrder,
+          );
+
+          currentTime = slotEnd;
+        }
+      }
+    }
+
+    return timeSlotsMap;
+  }
+
+  // בניית לוח שנה שבועי - Grid View
+  Widget _buildWeekGridCalendar(
+    DateTime weekStart,
+    Map<String, Map<String, AppointmentSlotData>> timeSlotsMap,
+    AppointmentSettings settings,
     List<Appointment> bookedAppointments,
     List<order_model.Order> ordersWithAppointments,
   ) {
-    final dayName = _getDayNameHebrew(dayOfWeek);
-    final dateStr = _formatDateOnly(day);
+    // יצירת רשימת כל השעות לפי ההגדרות של כל יום
+    final allHours = <String>[];
+    final days = <DateTime>[];
+    for (int i = 0; i < 7; i++) {
+      days.add(weekStart.add(Duration(days: i)));
+    }
+    
+    // עבור כל יום, הוספת השעות לפי ההגדרות
+    for (final day in days) {
+      final dayOfWeek = _convertWeekdayToDayOfWeekIndex(day.weekday);
+      final daySlots = settings.slots.where((slot) => slot.dayOfWeek == dayOfWeek).toList();
+      
+      for (final slot in daySlots) {
+        final startTime = _parseTime(slot.startTime);
+        final endTime = _parseTime(slot.endTime);
+        final duration = slot.durationMinutes;
+        
+        var currentTime = startTime;
+        while (currentTime.add(Duration(minutes: duration)).isBefore(endTime) ||
+               currentTime.add(Duration(minutes: duration)) == endTime) {
+          final timeKey = _formatTime(currentTime);
+          if (!allHours.contains(timeKey)) {
+            allHours.add(timeKey);
+          }
+          currentTime = currentTime.add(Duration(minutes: duration));
+        }
+      }
+    }
+    allHours.sort();
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // כותרת היום
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.blue[100],
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(8),
-                topRight: Radius.circular(8),
-              ),
-            ),
-            child: Row(
-              children: [
-                Text(
-                  'יום $dayName, $dateStr',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
+    // חישוב רוחב כל עמודה (יום)
+    final dayColumnWidth = 120.0;
+    final totalWidth = 80.0 + (dayColumnWidth * days.length);
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SingleChildScrollView(
+        child: SizedBox(
+          width: totalWidth,
+          child: Column(
+            children: [
+              // כותרת - ימי השבוע
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                color: Colors.blue[50],
+                child: Row(
+                  children: [
+                    // עמודת שעות (ריקה)
+                    SizedBox(
+                      width: 80,
+                      child: const Text(
+                        'שעה',
+                        style: TextStyle(fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    // ימי השבוע
+                    ...days.map((day) {
+                      final dayOfWeek = _convertWeekdayToDayOfWeekIndex(day.weekday);
+                      final dayName = _getDayNameHebrew(dayOfWeek);
+                      final dateStr = _formatDateOnly(day);
+                      return SizedBox(
+                        width: dayColumnWidth,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: Colors.grey[300]!),
+                          ),
+                          child: Column(
+                            children: [
+                              Text(
+                                dayName,
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                              ),
+                              Text(
+                                dateStr,
+                                style: const TextStyle(fontSize: 10),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                  ],
                 ),
-              ],
-            ),
+              ),
+              // שורות זמן
+              ...allHours.map((hour) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // עמודת שעות
+                    SizedBox(
+                      width: 80,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey[300]!),
+                          color: Colors.grey[100],
+                        ),
+                        child: Text(
+                          hour,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                    // משבצות זמן לכל יום
+                    ...days.map((day) {
+                      final dayKey = '${day.year}-${day.month}-${day.day}';
+                      final dayOfWeek = _convertWeekdayToDayOfWeekIndex(day.weekday);
+                      final daySlots = settings.slots.where((slot) => slot.dayOfWeek == dayOfWeek).toList();
+                      
+                      // בדיקה אם השעה נמצאת בטווח הזמן של היום
+                      bool isHourInDayRange = false;
+                      for (final slot in daySlots) {
+                        final slotStart = _parseTime(slot.startTime);
+                        final slotEnd = _parseTime(slot.endTime);
+                        final hourTime = _parseTime(hour);
+                        
+                        if ((hourTime.isAfter(slotStart.subtract(const Duration(minutes: 1))) &&
+                            hourTime.isBefore(slotEnd)) || hourTime == slotStart) {
+                          isHourInDayRange = true;
+                          break;
+                        }
+                      }
+                      
+                      final slotData = timeSlotsMap[dayKey]?[hour];
+                      final isEmpty = slotData == null;
+                      final isAvailable = isEmpty || slotData.bookedAppointment == null;
+                      
+                      // הצגת משבצת רק אם השעה נמצאת בטווח הזמן של היום
+                      if (!isHourInDayRange) {
+                        return SizedBox(
+                          width: dayColumnWidth,
+                          child: Container(
+                            height: 80,
+                            padding: const EdgeInsets.all(2),
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Colors.grey[200]!),
+                              color: Colors.grey[50],
+                            ),
+                            child: const SizedBox.shrink(),
+                          ),
+                        );
+                      }
+                      
+                      return SizedBox(
+                        width: dayColumnWidth,
+                        child: Container(
+                          height: 80,
+                          padding: const EdgeInsets.all(2),
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                              color: _isMoveMode && isAvailable
+                                  ? Colors.blue[700]!
+                                  : Colors.grey[300]!,
+                              width: _isMoveMode && isAvailable ? 3 : 1,
+                            ),
+                            color: _isMoveMode && isAvailable
+                                ? Colors.blue[100]!
+                                : Colors.transparent,
+                          ),
+                          child: slotData != null
+                              ? _buildTimeSlotCard(
+                                  slotData.date,
+                                  slotData.startTime,
+                                  slotData.endTime,
+                                  slotData.bookedAppointment,
+                                  slotData.order,
+                                  isMoveMode: _isMoveMode,
+                                  onMoveTap: isAvailable && _isMoveMode
+                                      ? () => _performMoveToSlot(
+                                            slotData.date,
+                                            slotData.startTime,
+                                            slotData.endTime,
+                                          )
+                                      : null,
+                                )
+                              : _isMoveMode && isEmpty
+                                  ? _buildEmptySlotForMove(
+                                      day,
+                                      hour,
+                                    )
+                                  : const SizedBox.shrink(),
+                        ),
+                      );
+                    }),
+                  ],
+                );
+              }),
+            ],
           ),
-          // רשימת תורים
-          ...daySlots.expand((slot) => _generateTimeSlotsForDay(
-                day,
-                slot,
-                bookedAppointments,
-                ordersWithAppointments,
-              )),
-        ],
+        ),
       ),
     );
   }
 
-  // יצירת תורים ליום אחד
-  List<Widget> _generateTimeSlotsForDay(
-    DateTime day,
-    AppointmentSlot slot,
-    List<Appointment> bookedAppointments,
-    List<order_model.Order> ordersWithAppointments,
-  ) {
-    final slots = <Widget>[];
-    final startTime = _parseTime(slot.startTime);
-    final endTime = _parseTime(slot.endTime);
-    final duration = slot.durationMinutes;
 
-    var currentTime = startTime;
-    while (currentTime.add(Duration(minutes: duration)).isBefore(endTime) ||
-           currentTime.add(Duration(minutes: duration)) == endTime) {
-      final slotEnd = currentTime.add(Duration(minutes: duration));
-      final slotTimeStr = _formatTime(currentTime);
-      final slotDateOnly = DateTime(day.year, day.month, day.day);
-
-      // מציאת תור תפוס
-      Appointment? bookedAppointment;
-      for (final apt in bookedAppointments) {
-        bool matches = false;
-        if (apt.appointmentDate != null) {
-          final aptDateOnly = DateTime(
-            apt.appointmentDate!.year,
-            apt.appointmentDate!.month,
-            apt.appointmentDate!.day,
-          );
-          matches = aptDateOnly == slotDateOnly &&
-                   apt.startTime == slotTimeStr &&
-                   !apt.isAvailable;
-        }
-        if (matches) {
-          bookedAppointment = apt;
-          break;
-        }
-      }
-
-      // מציאת הזמנה קשורה - נחפש לפי appointmentId
-      order_model.Order? relatedOrder;
-      if (bookedAppointment != null) {
-        try {
-          relatedOrder = ordersWithAppointments.firstWhere(
-            (order) {
-              // נבדוק אם יש appointmentId בהזמנה
-              // נטען את זה מ-Firestore אם צריך
-              return false; // נטען את זה בדיאלוג
-            },
-            orElse: () => ordersWithAppointments.first,
-          );
-        } catch (e) {
-          relatedOrder = null;
-        }
-      }
-
-      slots.add(
-        _buildTimeSlotCard(
-          day,
-          slotTimeStr,
-          _formatTime(slotEnd),
-          bookedAppointment,
-          relatedOrder,
+  // משבצת ריקה למצב הזזה
+  Widget _buildEmptySlotForMove(DateTime date, String hour) {
+    // חישוב endTime לפי durationMinutes מהתור המקורי
+    final durationMinutes = _appointmentToMove?.durationMinutes ?? 30;
+    final endTime = _formatTime(_parseTime(hour).add(Duration(minutes: durationMinutes)));
+    
+    return InkWell(
+      onTap: () => _performMoveToSlot(
+        date,
+        hour,
+        endTime,
+      ),
+      child: Container(
+        width: double.infinity,
+        height: double.infinity,
+        decoration: BoxDecoration(
+          color: Colors.blue[50]!,
+          borderRadius: BorderRadius.circular(4),
         ),
-      );
-
-      currentTime = slotEnd;
-    }
-
-    return slots;
+        child: const Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.add_circle_outline, color: Colors.blue, size: 24),
+              SizedBox(height: 4),
+              Text(
+                'הזז לכאן',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blue,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
-  // כרטיס תור
+  // כרטיס תור - משבצת עם פרטי המזמין (כמו בתמונה)
   Widget _buildTimeSlotCard(
     DateTime date,
     String startTime,
     String endTime,
     Appointment? bookedAppointment,
-    order_model.Order? order,
-  ) {
+    order_model.Order? order, {
+    bool isMoveMode = false,
+    VoidCallback? onMoveTap,
+  }) {
     final isBooked = bookedAppointment != null;
     final appointment = bookedAppointment; // Capture for type promotion
 
+    // צבעים שונים לפי סוג התור (כמו בתמונה)
+    Color backgroundColor;
+    Color borderColor;
+    Color textColor;
+    IconData icon;
+
+    if (isBooked && order != null) {
+      // תור תפוס - צבעים שונים לפי סוג השירות
+      final serviceType = order.items.isNotEmpty ? order.items.first.serviceName.toLowerCase() : '';
+      if (serviceType.contains('פגישה') || serviceType.contains('meet')) {
+        backgroundColor = Colors.pink[50]!;
+        borderColor = Colors.pink[300]!;
+        textColor = Colors.pink[900]!;
+        icon = Icons.people;
+      } else if (serviceType.contains('שיחה') || serviceType.contains('call')) {
+        backgroundColor = Colors.lightGreen[50]!;
+        borderColor = Colors.lightGreen[300]!;
+        textColor = Colors.lightGreen[900]!;
+        icon = Icons.phone;
+      } else if (serviceType.contains('ביקור') || serviceType.contains('review')) {
+        backgroundColor = Colors.blue[50]!;
+        borderColor = Colors.blue[300]!;
+        textColor = Colors.blue[900]!;
+        icon = Icons.access_time;
+      } else {
+        backgroundColor = Colors.orange[50]!;
+        borderColor = Colors.orange[300]!;
+        textColor = Colors.orange[900]!;
+        icon = Icons.event_busy;
+      }
+    } else {
+      // תור פנוי
+      backgroundColor = Colors.green[50]!;
+      borderColor = Colors.green[300]!;
+      textColor = Colors.green[900]!;
+      icon = Icons.event_available;
+    }
+
     return InkWell(
-      onTap: isBooked && appointment != null ? () => _showAppointmentDetailsDialog(appointment, order) : null,
+      onTap: isMoveMode && onMoveTap != null
+          ? onMoveTap
+          : (isBooked && appointment != null
+              ? () => _showAppointmentDetailsDialog(appointment, order)
+              : null),
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        padding: const EdgeInsets.all(10),
+        width: double.infinity,
+        height: double.infinity,
+        padding: const EdgeInsets.all(4),
         decoration: BoxDecoration(
-          color: isBooked ? Colors.orange[50] : Colors.green[50],
-          borderRadius: BorderRadius.circular(8),
+          color: backgroundColor,
+          borderRadius: BorderRadius.circular(4),
           border: Border.all(
-            color: isBooked ? Colors.orange[300]! : Colors.green[300]!,
-            width: 1,
+            color: borderColor,
+            width: 1.5,
           ),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(
-              child: Text(
-                '$startTime - $endTime',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: isBooked ? Colors.orange[900] : Colors.green[900],
+        child: isMoveMode && !isBooked
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.swap_horiz, size: 20, color: Colors.blue[700]),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'הזז לכאן',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blue,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
                 ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            if (isBooked)
-              const Icon(Icons.event_busy, color: Colors.orange)
-            else
-              const Icon(Icons.event_available, color: Colors.green),
-          ],
-        ),
+              )
+            : isBooked && order != null
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    children: [
+                      // אייקון
+                      Row(
+                        children: [
+                          Icon(icon, size: 12, color: textColor),
+                          const SizedBox(width: 2),
+                          Expanded(
+                            child: Text(
+                              order.customerName,
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: textColor,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      // זמן
+                      Text(
+                        '$startTime - $endTime',
+                        style: TextStyle(
+                          fontSize: 8,
+                          color: textColor,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      // שירות ראשון (אם יש)
+                      if (order.items.isNotEmpty)
+                        Text(
+                          order.items.first.serviceName,
+                          style: TextStyle(
+                            fontSize: 8,
+                            color: textColor,
+                            fontStyle: FontStyle.italic,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                        ),
+                    ],
+                  )
+                : Center(
+                    child: Icon(
+                      icon,
+                      size: 16,
+                      color: textColor,
+                    ),
+                  ),
       ),
     );
   }
@@ -3110,6 +3480,55 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
       AppointmentSettings? settings;
       if (settingsDoc.exists) {
         settings = AppointmentSettings.fromFirestore(settingsDoc);
+      }
+
+      // טעינת שירותים עסקיים כדי לקבל את משך הזמן שלהם
+      final userDoc = await _firestore
+          .collection('users')
+          .doc(userId)
+          .get();
+      
+      List<int> serviceDurations = [];
+      if (userDoc.exists) {
+        final userData = userDoc.data()!;
+        final businessServices = userData['businessServices'] as List<dynamic>?;
+        if (businessServices != null) {
+          for (var service in businessServices) {
+            if (service is Map<String, dynamic>) {
+              final durationMinutes = service['durationMinutes'] as int?;
+              if (durationMinutes != null && durationMinutes > 0) {
+                if (!serviceDurations.contains(durationMinutes)) {
+                  serviceDurations.add(durationMinutes);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // אם יש שירותים עם משך זמן, עדכן את ה-slots להשתמש בהם
+      if (settings != null && serviceDurations.isNotEmpty) {
+        // יצירת slots חדשים בהתאם למשך הזמן של השירותים
+        final updatedSlots = <AppointmentSlot>[];
+        
+        // עבור כל slot קיים, יצירת slots חדשים לכל משך זמן
+        for (final originalSlot in settings.slots) {
+          // אם יש משך זמן מינימלי, נשתמש בו
+          // אחרת נשתמש במשך הזמן של ה-slot המקורי
+          final minDuration = serviceDurations.reduce((a, b) => a < b ? a : b);
+          
+          // יצירת slot חדש עם משך הזמן המינימלי
+          updatedSlots.add(originalSlot.copyWith(durationMinutes: minDuration));
+        }
+        
+        // עדכון ה-settings עם ה-slots החדשים
+        settings = AppointmentSettings(
+          userId: settings.userId,
+          useAppointments: settings.useAppointments,
+          slots: updatedSlots,
+          createdAt: settings.createdAt,
+          updatedAt: settings.updatedAt,
+        );
       }
 
       // טעינת תורים תפוסים
@@ -3138,6 +3557,7 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
         'settings': settings,
         'booked': bookedAppointments,
         'orders': orders,
+        'serviceDurations': serviceDurations, // שמירת רשימת משכי הזמן לשימוש מאוחר יותר
       };
     } catch (e) {
       debugPrint('Error loading week appointments: $e');
@@ -3332,32 +3752,139 @@ class _OrderManagementScreenState extends State<OrderManagementScreen> {
     }
   }
 
-  // הזזת תור
+  // הזזת תור - הפעלת מצב הזזה
   Future<void> _moveAppointment(Appointment appointment, order_model.Order order) async {
-    // נסגור את הדיאלוג הנוכחי ונפתח מסך בחירת תור חדש
+    // נסגור את הדיאלוג הנוכחי
     Navigator.pop(context); // סגירת דיאלוג הפרטים
 
-    // פתיחת מסך בחירת תור חדש
-    final result = await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => OrderAppointmentMoveScreen(
-          providerId: order.providerId,
-          currentAppointment: appointment,
-          order: order,
-        ),
-      ),
-    );
+    // הפעלת מצב הזזה
+    setState(() {
+      _isMoveMode = true;
+      _appointmentToMove = appointment;
+      _orderToMove = order;
+    });
 
-    if (result != null && mounted) {
+    // הצגת הודעה למשתמש
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('התור הוזז בהצלחה'),
-          backgroundColor: Colors.green,
+        SnackBar(
+          content: const Text('בחר תור פנוי להזזה'),
+          backgroundColor: Colors.blue,
+          action: SnackBarAction(
+            label: 'ביטול',
+            textColor: Colors.white,
+            onPressed: () {
+              setState(() {
+                _isMoveMode = false;
+                _appointmentToMove = null;
+                _orderToMove = null;
+              });
+            },
+          ),
+          duration: const Duration(seconds: 5),
         ),
       );
     }
   }
+
+  // ביטול מצב הזזה
+  void _cancelMoveMode() {
+    setState(() {
+      _isMoveMode = false;
+      _appointmentToMove = null;
+      _orderToMove = null;
+    });
+  }
+
+  // ביצוע הזזה לתור חדש
+  Future<void> _performMoveToSlot(DateTime date, String startTime, String endTime) async {
+    if (_appointmentToMove == null || _orderToMove == null) return;
+
+    try {
+      // שחרור התור הישן
+      await _firestore
+          .collection('appointments')
+          .doc(_appointmentToMove!.appointmentId)
+          .update({
+        'isAvailable': true,
+        'bookedBy': null,
+        'orderId': null,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // יצירת תור חדש - שימוש ב-durationMinutes מהתור המקורי
+      final appointmentId = _firestore.collection('appointments').doc().id;
+      final now = DateTime.now();
+      final dayOfWeek = _convertWeekdayToDayOfWeekIndex(date.weekday);
+      // שימוש ב-durationMinutes מהתור המקורי
+      final durationMinutes = _appointmentToMove!.durationMinutes;
+
+      await _firestore
+          .collection('appointments')
+          .doc(appointmentId)
+          .set({
+        'userId': _orderToMove!.providerId,
+        'dayOfWeek': dayOfWeek,
+        'startTime': startTime,
+        'endTime': endTime,
+        'durationMinutes': durationMinutes,
+        'isAvailable': false,
+        'bookedBy': _orderToMove!.customerId,
+        'bookedAt': Timestamp.fromDate(now),
+        'appointmentDate': Timestamp.fromDate(date),
+        'orderId': _orderToMove!.orderId,
+        'createdAt': Timestamp.fromDate(now),
+        'updatedAt': Timestamp.fromDate(now),
+      });
+
+      // עדכון ההזמנה
+      await _firestore
+          .collection('orders')
+          .doc(_orderToMove!.orderId)
+          .update({
+        'appointmentId': appointmentId,
+        'appointmentDate': Timestamp.fromDate(date),
+        'appointmentStartTime': startTime,
+        'appointmentEndTime': endTime,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // שליחת התראה למזמין
+      await NotificationService.sendNotification(
+        toUserId: _orderToMove!.customerId,
+        title: 'תור הוזז',
+        message: 'התור שלך הוזז ל-${_formatDateOnly(date)} בשעה $startTime',
+        type: 'appointment_moved',
+        data: {
+          'orderId': _orderToMove!.orderId,
+          'appointmentId': appointmentId,
+        },
+      );
+
+      // ביטול מצב הזזה
+      _cancelMoveMode();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('התור הוזז בהצלחה'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error moving appointment: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('שגיאה בהזזת התור: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
 }
 
 // מסך הזזת תור

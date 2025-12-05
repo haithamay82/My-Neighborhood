@@ -13,11 +13,9 @@ class AppointmentSettingsScreen extends StatefulWidget {
 
 class _AppointmentSettingsScreenState extends State<AppointmentSettingsScreen> {
   final List<AppointmentSlot> _slots = [];
-  int _selectedDuration = 30; // 15, 30, 60, 90 דקות
-  final List<int> _durationOptions = [15, 30, 60, 90];
+  int? _selectedDuration; // משך זמן נבחר (חייב להיות אחד מהשירותים)
   bool _isLoading = false;
-  final TextEditingController _customDurationController = TextEditingController();
-  bool _isCustomDuration = false; // האם משתמש בהזנה ידנית
+  Set<int> _serviceDurations = {}; // משכי זמן שהוגדרו בשירותים
 
   @override
   void initState() {
@@ -27,7 +25,6 @@ class _AppointmentSettingsScreenState extends State<AppointmentSettingsScreen> {
 
   @override
   void dispose() {
-    _customDurationController.dispose();
     super.dispose();
   }
 
@@ -40,6 +37,7 @@ class _AppointmentSettingsScreenState extends State<AppointmentSettingsScreen> {
     });
 
     try {
+      // טעינת הגדרות תורים
       final doc = await FirebaseFirestore.instance
           .collection('appointments')
           .doc(user.uid)
@@ -50,14 +48,44 @@ class _AppointmentSettingsScreenState extends State<AppointmentSettingsScreen> {
         setState(() {
           _slots.clear();
           _slots.addAll(settings.slots);
-          if (_slots.isNotEmpty) {
+          if (_slots.isNotEmpty && _serviceDurations.contains(_slots.first.durationMinutes)) {
             _selectedDuration = _slots.first.durationMinutes;
-            // בדיקה אם משך התור הוא אחד מהאופציות הקבועות
-            _isCustomDuration = !_durationOptions.contains(_selectedDuration);
-            if (_isCustomDuration) {
-              _customDurationController.text = _selectedDuration.toString();
+          } else if (_serviceDurations.isNotEmpty) {
+            // אם אין תור נבחר או שהתור הקיים לא תואם לשירותים, נבחר את הראשון
+            _selectedDuration = _serviceDurations.first;
+          }
+        });
+      } else if (_serviceDurations.isNotEmpty) {
+        // אם אין הגדרות תורים, נבחר את משך הזמן הראשון מהשירותים
+        setState(() {
+          _selectedDuration = _serviceDurations.first;
+        });
+      }
+
+      // טעינת משכי זמן מהשירותים
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      
+      if (userDoc.exists) {
+        final userData = userDoc.data()!;
+        final businessServices = userData['businessServices'] as List<dynamic>?;
+        final Set<int> durations = {};
+        
+        if (businessServices != null) {
+          for (var service in businessServices) {
+            if (service is Map<String, dynamic>) {
+              final durationMinutes = service['durationMinutes'] as int?;
+              if (durationMinutes != null && durationMinutes > 0) {
+                durations.add(durationMinutes);
+              }
             }
           }
+        }
+        
+        setState(() {
+          _serviceDurations = durations;
         });
       }
     } catch (e) {
@@ -118,6 +146,9 @@ class _AppointmentSettingsScreenState extends State<AppointmentSettingsScreen> {
   }
 
   void _addDaySlot(int dayOfWeek) {
+    if (_selectedDuration == null) return;
+    final duration = _selectedDuration!;
+    
     setState(() {
       // בדיקה אם היום כבר קיים
       final existingIndex = _slots.indexWhere((slot) => slot.dayOfWeek == dayOfWeek);
@@ -127,7 +158,7 @@ class _AppointmentSettingsScreenState extends State<AppointmentSettingsScreen> {
           dayOfWeek: dayOfWeek,
           startTime: _slots[existingIndex].startTime,
           endTime: _slots[existingIndex].endTime,
-          durationMinutes: _selectedDuration,
+          durationMinutes: duration,
           breaks: _slots[existingIndex].breaks,
         );
       } else {
@@ -136,7 +167,7 @@ class _AppointmentSettingsScreenState extends State<AppointmentSettingsScreen> {
           dayOfWeek: dayOfWeek,
           startTime: '09:00',
           endTime: '17:00',
-          durationMinutes: _selectedDuration,
+          durationMinutes: duration,
           breaks: [],
         ));
       }
@@ -234,97 +265,70 @@ class _AppointmentSettingsScreenState extends State<AppointmentSettingsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // משך תור
-                    Text(
-                      'משך תור:',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Theme.of(context).colorScheme.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      children: _durationOptions.map((duration) {
-                        final isSelected = _selectedDuration == duration && !_isCustomDuration;
-                        return ChoiceChip(
-                          label: Text('$duration דק׳'),
-                          selected: isSelected,
-                          onSelected: (selected) {
-                            if (selected) {
-                              setState(() {
-                                _isCustomDuration = false;
-                                _customDurationController.clear();
-                                _selectedDuration = duration;
-                                // עדכון כל התורים הקיימים למשך החדש
-                                for (var i = 0; i < _slots.length; i++) {
-                                  _slots[i] = AppointmentSlot(
-                                    dayOfWeek: _slots[i].dayOfWeek,
-                                    startTime: _slots[i].startTime,
-                                    endTime: _slots[i].endTime,
-                                    durationMinutes: duration,
-                                    breaks: _slots[i].breaks, // שמירה על ההפסקות
-                                  );
-                                }
-                              });
-                            }
-                          },
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 12),
-                    // הזנה ידנית של משך התור
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _customDurationController,
-                            keyboardType: TextInputType.number,
-                            decoration: InputDecoration(
-                              labelText: 'משך תור מותאם אישית (דקות)',
-                              hintText: 'הכנס מספר דקות',
-                              border: OutlineInputBorder(),
-                              suffixText: 'דק׳',
-                              errorText: _isCustomDuration && (_selectedDuration <= 0 || _selectedDuration > 1440)
-                                  ? 'מספר לא תקין (1-1440 דקות)'
-                                  : null,
+                    // משך תור - רק מהשירותים
+                    if (_serviceDurations.isEmpty) ...[
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: Colors.orange[50],
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.orange[200]!),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.warning_amber, size: 20, color: Colors.orange[700]),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'לא הוגדרו שירותים עם משך זמן. אנא הגדר שירותים עם משך זמן במסך פרופיל.',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.orange[900],
+                                ),
+                              ),
                             ),
-                            onChanged: (value) {
-                              if (value.isNotEmpty) {
-                                final intValue = int.tryParse(value);
-                                if (intValue != null && intValue > 0 && intValue <= 1440) {
-                                  setState(() {
-                                    _isCustomDuration = true;
-                                    _selectedDuration = intValue;
-                                    // עדכון כל התורים הקיימים למשך החדש
-                                    for (var i = 0; i < _slots.length; i++) {
-                                      _slots[i] = AppointmentSlot(
-                                        dayOfWeek: _slots[i].dayOfWeek,
-                                        startTime: _slots[i].startTime,
-                                        endTime: _slots[i].endTime,
-                                        durationMinutes: intValue,
-                                        breaks: _slots[i].breaks, // שמירה על ההפסקות
-                                      );
-                                    }
-                                  });
-                                } else if (intValue != null) {
-                                  setState(() {
-                                    _isCustomDuration = true;
-                                    _selectedDuration = intValue; // נשמור גם אם לא תקין כדי להציג שגיאה
-                                  });
-                                }
-                              } else {
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                    ] else ...[
+                      Text(
+                        'משך תור (לפי השירותים שהוגדרו):',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Theme.of(context).colorScheme.onSurface,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: (_serviceDurations.toList()..sort()).map((duration) {
+                          final isSelected = _selectedDuration == duration;
+                          return ChoiceChip(
+                            label: Text('$duration דק׳'),
+                            selected: isSelected,
+                            onSelected: (selected) {
+                              if (selected) {
                                 setState(() {
-                                  _isCustomDuration = false;
+                                  _selectedDuration = duration;
+                                  // עדכון כל התורים הקיימים למשך החדש
+                                  for (var i = 0; i < _slots.length; i++) {
+                                    _slots[i] = AppointmentSlot(
+                                      dayOfWeek: _slots[i].dayOfWeek,
+                                      startTime: _slots[i].startTime,
+                                      endTime: _slots[i].endTime,
+                                      durationMinutes: duration,
+                                      breaks: _slots[i].breaks, // שמירה על ההפסקות
+                                    );
+                                  }
                                 });
                               }
                             },
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (_isCustomDuration && _selectedDuration > 0 && _selectedDuration <= 1440) ...[
+                          );
+                        }).toList(),
+                      ),
                       const SizedBox(height: 8),
                       Container(
                         padding: const EdgeInsets.all(8),
@@ -339,7 +343,7 @@ class _AppointmentSettingsScreenState extends State<AppointmentSettingsScreen> {
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                'משך התור נקבע ל-${_selectedDuration} דקות',
+                                'משכי הזמן מוגדרים לפי השירותים. לעדכון משכי זמן, ערוך את השירותים במסך פרופיל.',
                                 style: TextStyle(
                                   fontSize: 12,
                                   color: Colors.blue[900],
@@ -349,6 +353,7 @@ class _AppointmentSettingsScreenState extends State<AppointmentSettingsScreen> {
                           ],
                         ),
                       ),
+                      const SizedBox(height: 24),
                     ],
                     const SizedBox(height: 24),
                     // רשימת ימים
@@ -370,7 +375,7 @@ class _AppointmentSettingsScreenState extends State<AppointmentSettingsScreen> {
                               dayOfWeek: index,
                               startTime: '09:00',
                               endTime: '17:00',
-                              durationMinutes: _selectedDuration,
+                              durationMinutes: _selectedDuration ?? 30,
                             );
 
                       return Card(

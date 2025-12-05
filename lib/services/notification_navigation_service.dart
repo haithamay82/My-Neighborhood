@@ -74,6 +74,7 @@ class NotificationNavigationService {
           
         case 'order_new':
         case 'order_delivery':
+        case 'appointment_changed':
           await _navigateToOrderManagement(context, orderId);
           break;
           
