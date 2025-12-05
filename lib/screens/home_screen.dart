@@ -127,11 +127,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
   List<UserProfile> _newBusinesses = []; // רשימת העסקים החדשים
   bool _isLoadingNewBusinesses = false; // מצב טעינה עבור עסקים חדשים
   PageController? _newBusinessesPageController; // בקר לסליידר
-  AnimationController? _newBusinessesAnimationController; // בקר אנימציה לתנועה רציפה
-  Animation<double>? _newBusinessesAnimation; // אנימציה לתנועה רציפה
+  AnimationController? _newBusinessesAnimationController; // בקר אנימציה (לא בשימוש כרגע, נשמר למקרה עתידי)
   bool _isSliderPaused = false; // האם הסליידר מושעה (כאשר המשתמש לוחץ עליו)
-  double _pausedAnimationValue = 0.0; // ערך האנימציה כשהסליידר הושעה
   bool _isUserSwiping = false; // האם המשתמש מזיז את הסליידר ידנית
+  Timer? _sliderTimer; // טיימר להזזה step-by-step
+  int _currentBusinessIndex = 0; // אינדקס העסק הנוכחי
   
   // משתנים לסינון נותני שירות
   MainCategory? _selectedMainCategoryFromCirclesForProviders; // קטגוריה ראשית מהעיגולים
@@ -1358,7 +1358,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
     }
   }
   
-  // אתחול הסליידר עם תנועה רציפה
+  // אתחול הסליידר עם תנועה step-by-step (עצירה של 2 שניות בכל עסק)
   void _initializeNewBusinessesSlider() {
     if (_newBusinesses.isEmpty) return;
     
@@ -1371,100 +1371,48 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
     
     // איפוס דגל ההשהיה והמיקום
     _isSliderPaused = false;
-    _pausedAnimationValue = 0.0;
     _isUserSwiping = false;
+    _currentBusinessIndex = 0;
+    
+    // ביטול טיימר קודם אם קיים
+    _sliderTimer?.cancel();
     
     // ביטול אנימציה קודמת אם קיימת
     _newBusinessesAnimationController?.dispose();
     
-    // יצירת בקר אנימציה לתנועה רציפה
-    // כל עסק יוצג למשך 5 שניות
-    final totalDuration = Duration(seconds: 5 * _newBusinesses.length);
-    _newBusinessesAnimationController = AnimationController(
-      duration: totalDuration,
-      vsync: this,
-    );
+    // התחלת הלולאה - מעבר לעסק הראשון
+    _startSliderStep();
+  }
+  
+  // פונקציה להזזה לעסק הבא עם עצירה של 2 שניות
+  void _startSliderStep() {
+    if (!mounted || _newBusinesses.isEmpty || _newBusinessesPageController == null) return;
     
-    // יצירת אנימציה ליניארית מ-0 עד 1 (אחוז מהלולאה)
-    _newBusinessesAnimation = Tween<double>(
-      begin: 0.0,
-      end: 1.0, // ערך בין 0 ל-1
-    ).animate(CurvedAnimation(
-      parent: _newBusinessesAnimationController!,
-      curve: Curves.linear,
-    ));
+    // אם הסליידר מושעה, לא נמשיך
+    if (_isSliderPaused) {
+      return;
+    }
     
-    double? lastPageValue;
-    bool isResetting = false;
+    // מעבר לעסק הנוכחי עם אנימציה קצרה
+    if (_newBusinessesPageController!.hasClients) {
+      _newBusinessesPageController!.animateToPage(
+        _currentBusinessIndex,
+        duration: const Duration(milliseconds: 300), // אנימציה קצרה של מעבר
+        curve: Curves.easeInOut,
+      );
+    }
     
-    // האזנה לשינויים באנימציה
-    _newBusinessesAnimation!.addListener(() {
-      if (!mounted || _newBusinessesPageController == null || !_newBusinessesPageController!.hasClients) {
-        return;
-      }
+    // עצירה של 2 שניות לפני מעבר לעסק הבא
+    _sliderTimer?.cancel();
+    _sliderTimer = Timer(const Duration(seconds: 2), () {
+      if (!mounted || _isSliderPaused) return;
       
-      // אם הסליידר מושעה, לא נעדכן את המיקום
-      if (_isSliderPaused) {
-        return;
-      }
+      // מעבר לעסק הבא
+      _currentBusinessIndex = (_currentBusinessIndex + 1) % _newBusinesses.length;
       
-      // נחשב את המיקום לפי האחוז מהאנימציה כפול מספר העסקים
-      // animationProgress הוא בין 0 ל-1, אז נכפיל במספר העסקים
-      final animationProgress = _newBusinessesAnimation!.value; // ערך בין 0 ל-1
-      var currentPageValue = animationProgress * _newBusinesses.length;
-      
-      // אם הגענו לסוף (אחרי העסק האחרון), נקפוץ לראשון מיידית ונמשיך
-      // נבדוק אם הגענו ל-1.0 (סוף האנימציה) ונקפוץ לראשון לפני שהאנימציה תתאפס
-      if (animationProgress >= 0.99 && !isResetting) {
-        isResetting = true;
-        // קפיצה מיידית לראשון כדי למנוע עצירה
-        _newBusinessesPageController!.jumpToPage(0);
-        // איפוס האנימציה והמשך מיידית
-        _newBusinessesAnimationController!.reset();
-        _newBusinessesAnimationController!.forward();
-        lastPageValue = 0.0;
-        // איפוס הדגל אחרי קצת זמן
-        Future.delayed(const Duration(milliseconds: 100), () {
-          isResetting = false;
-        });
-        return;
-      }
-      
-      // אם לא בסוף, נאפס את הדגל
-      if (animationProgress < 0.9) {
-        isResetting = false;
-      }
-      
-      // עדכון רציף של המיקום
-      if (lastPageValue == null || (currentPageValue - lastPageValue!).abs() > 0.001) {
-        lastPageValue = currentPageValue;
-        isResetting = false;
-        
-        // עדכון המיקום בצורה חלקה ורציפה באמצעות animateTo
-        // נחשב את ה-offset לפי המיקום הנוכחי
-        try {
-          final pageWidth = _newBusinessesPageController!.position.viewportDimension;
-          final offset = currentPageValue * pageWidth;
-          
-          _newBusinessesPageController!.animateTo(
-            offset,
-            duration: const Duration(milliseconds: 16), // ~60 FPS
-            curve: Curves.linear,
-          );
-        } catch (e) {
-          // אם יש שגיאה, נשתמש ב-animateToPage כגיבוי
-          final pageIndex = currentPageValue.floor() % _newBusinesses.length;
-          _newBusinessesPageController!.animateToPage(
-            pageIndex,
-            duration: const Duration(milliseconds: 16),
-            curve: Curves.linear,
-          );
-        }
-      }
+      // המשך הלולאה
+      _startSliderStep();
     });
-    
-    // התחלת האנימציה - repeat() יוצר לולאה אינסופית
-    _newBusinessesAnimationController!.repeat();
   }
   
   // גלילה לעסק שנבחר מהסליידר - מציג אותו ראשון ברשימה
@@ -1681,20 +1629,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
           allowImplicitScrolling: false,
           physics: const ClampingScrollPhysics(), // מאפשר swipe וגם לא חוסם לחיצות
           onPageChanged: (index) {
+            // עדכון האינדקס הנוכחי כשהמשתמש מזיז ידנית
+            _currentBusinessIndex = index;
+            
             // כאשר המשתמש מזיז את הסליידר ידנית (swipe), עוצרים את התנועה האוטומטית
             _isUserSwiping = true;
-            if (!_isSliderPaused && _newBusinessesAnimationController != null) {
+            if (!_isSliderPaused) {
               setState(() {
                 _isSliderPaused = true;
-                // שמירת המיקום הנוכחי של האנימציה
-                _pausedAnimationValue = _newBusinessesAnimationController!.value;
               });
-              _newBusinessesAnimationController?.stop();
+              _sliderTimer?.cancel();
             }
             
             // אחרי 1 שנייה, אם המשתמש לא נוגע יותר, נמשיך את הסליידר
             Future.delayed(const Duration(milliseconds: 1000), () {
-              if (mounted && _isUserSwiping && _isSliderPaused && _newBusinessesAnimationController != null) {
+              if (mounted && _isUserSwiping && _isSliderPaused) {
                 _isUserSwiping = false;
                 _resumeSliderAnimation();
               }
@@ -1711,50 +1660,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
   
   // פונקציה להמשך האנימציה מהמיקום הנוכחי
   void _resumeSliderAnimation() {
-    if (_newBusinessesAnimationController == null || _newBusinesses.isEmpty) return;
+    if (_newBusinesses.isEmpty || !mounted) return;
     
-    // נשתמש ב-WidgetsBinding כדי לקבל את המיקום הנוכחי אחרי שהסליידר סיים לזוז
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || _newBusinessesAnimationController == null) return;
-      
-      // חישוב המיקום הנוכחי של הסליידר
-      double currentPage = 0.0;
-      if (_newBusinessesPageController != null && _newBusinessesPageController!.hasClients) {
-        try {
-          // נשתמש ב-position כדי לקבל את המיקום המדויק
-          final position = _newBusinessesPageController!.position;
-          if (position.hasContentDimensions) {
-            final pageWidth = position.viewportDimension;
-            final offset = position.pixels;
-            currentPage = pageWidth > 0 ? offset / pageWidth : 0.0;
-          } else {
-            // אם אין עדיין מימדים, נשתמש בערך האנימציה שנשמר
-            currentPage = _pausedAnimationValue * _newBusinesses.length;
-          }
-        } catch (e) {
-          // אם יש שגיאה, נשתמש בערך האנימציה שנשמר
-          currentPage = _pausedAnimationValue * _newBusinesses.length;
-        }
-      } else {
-        currentPage = _pausedAnimationValue * _newBusinesses.length;
-      }
-      
-      // חישוב הערך הנורמלי (0-1) לפי המיקום הנוכחי
-      // אם המשתמש עבר את הסוף, נחזור להתחלה
-      final normalizedValue = (currentPage % _newBusinesses.length) / _newBusinesses.length;
-      
-      // עדכון האנימציה מהמיקום הנוכחי
-      _newBusinessesAnimationController!.value = normalizedValue;
-      
-      if (mounted) {
-        setState(() {
-          _isSliderPaused = false;
-        });
-      }
-      
-      // המשך האנימציה
-      _newBusinessesAnimationController!.forward();
-    });
+    // עדכון המצב
+    if (mounted) {
+      setState(() {
+        _isSliderPaused = false;
+      });
+    }
+    
+    // המשך הלולאה מהמיקום הנוכחי
+    _startSliderStep();
   }
   
   // ווידג'ט לכרטיס עסק בסליידר
@@ -1893,20 +1809,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
   // פונקציה לטיפול בלחיצה ממושכת על כרטיס עסק
   void _handleBusinessCardLongPress() {
     // עצירת הסליידר בלחיצה ממושכת
-    if (!_isSliderPaused && _newBusinessesAnimationController != null) {
+    if (!_isSliderPaused) {
       setState(() {
         _isSliderPaused = true;
-        // שמירת המיקום הנוכחי של האנימציה
-        _pausedAnimationValue = _newBusinessesAnimationController!.value;
       });
-      _newBusinessesAnimationController?.stop();
+      _sliderTimer?.cancel();
     }
   }
   
   // פונקציה לטיפול בשחרור לחיצה ממושכת
   void _handleBusinessCardLongPressEnd() {
     // המשך הסליידר כשעוזבים את הלחיצה הממושכת
-    if (_isSliderPaused && _newBusinessesAnimationController != null) {
+    if (_isSliderPaused) {
       _resumeSliderAnimation();
     }
   }
@@ -5546,6 +5460,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
     _setStateDebounceTimer?.cancel();
     _requestCache.clear(); // Clear cache on dispose
     // ניקוי סליידר עסקים חדשים
+    _sliderTimer?.cancel();
     _newBusinessesAnimationController?.dispose();
     _newBusinessesPageController?.dispose();
     super.dispose();
