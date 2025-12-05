@@ -130,6 +130,7 @@ class AppLocalizations {
       'systemTheme': 'מערכת',
       'goldTheme': 'זהב',
       'searchHint': 'חיפוש בקשות...',
+      'searchProvidersHint': 'חיפוש עסקים ועצמאיים...',
       'location': 'מיקום',
       'nearMe': 'קרוב אליי',
       'wholeVillage': 'כל הכפר',
@@ -1022,7 +1023,7 @@ class AppLocalizations {
       'loadingRequestsError': 'שגיאה בטעינת הבקשות',
       // טקסטים נוספים ממסך הבית
       'requestsFromAdvertisers': 'השכונה החכמה שלי',
-      'allRequests': 'כל הבקשות',
+      'allRequests': 'בקשות בשכונה',
       'advancedFilter': 'סינון בקשות',
       'goToAllRequests': 'עבור לכל הבקשות',
       'filterSaved': 'הסינון נשמר',
@@ -1572,6 +1573,7 @@ class AppLocalizations {
       'systemTheme': 'النظام',
       'goldTheme': 'ذهبي',
       'searchHint': 'البحث في الطلبات...',
+      'searchProvidersHint': 'البحث عن الشركات والمستقلين...',
       'location': 'الموقع',
       'nearMe': 'قريب مني',
       'wholeVillage': 'كامل القرية',
@@ -3012,6 +3014,7 @@ class AppLocalizations {
       'systemTheme': 'System',
       'goldTheme': 'Gold',
       'searchHint': 'Search requests...',
+      'searchProvidersHint': 'Search businesses and freelancers...',
       'location': 'Location',
       'nearMe': 'Near me',
       'wholeVillage': 'Whole village',
@@ -4306,6 +4309,7 @@ Payments:
   String get systemTheme => _safeGet('systemTheme', fallback: 'System');
   String get goldTheme => _safeGet('goldTheme', fallback: 'Gold');
   String get searchHint => _safeGet('searchHint', fallback: 'Search requests...');
+  String get searchProvidersHint => _safeGet('searchProvidersHint', fallback: 'Search businesses and freelancers...');
   String get location => _safeGet('location', fallback: 'Location');
   String get nearMe => _safeGet('nearMe', fallback: 'Near me');
   String get wholeVillage => _safeGet('wholeVillage', fallback: 'Whole village');

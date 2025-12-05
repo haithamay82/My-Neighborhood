@@ -1743,49 +1743,7 @@ class _MainAppState extends State<MainApp> with WidgetsBindingObserver, AudioMix
                 );
               },
             ),
-            floatingActionButton: _selectedIndex == 0 // הצג רק במסך הבית (אינדקס 0)
-                ? StreamBuilder<DocumentSnapshot>(
-                    stream: FirebaseAuth.instance.currentUser != null
-                        ? FirebaseFirestore.instance
-                            .collection('users')
-                            .doc(FirebaseAuth.instance.currentUser!.uid)
-                            .snapshots()
-                        : null,
-                    builder: (context, snapshot) {
-                      return Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          // כפתור "בקשה חדשה"
-                          Container(
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(30),
-                      color: const Color(0xFFFFD700), // צהוב זהב
-                      border: Border.all(
-                                color: const Color(0xFF2196F3),
-                                width: 3,
-                      ),
-                    ),
-                    child: FloatingActionButton(
-                              heroTag: "new_request",
-                      onPressed: () {
-                        debugPrint('🔍 FloatingActionButton pressed!');
-                        _showNewRequestDialog();
-                      },
-                              backgroundColor: Colors.transparent,
-                      foregroundColor: Colors.white,
-                              elevation: 0,
-                      child: const Icon(
-                                Icons.add_rounded,
-                        size: 28,
-                      ),
-                    ),
-                          ),
-                        ],
-                  );
-                    },
-                  )
-                : null,
+            floatingActionButton: null, // ה-FloatingActionButton מוצג ישירות ב-HomeScreen
           ),
         );
       },

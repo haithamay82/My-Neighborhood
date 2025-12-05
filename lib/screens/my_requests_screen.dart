@@ -18,6 +18,9 @@ import '../services/app_state_service.dart';
 import '../services/like_service.dart';
 import '../services/location_service.dart';
 import '../services/audio_service.dart';
+import 'new_request_screen.dart';
+import '../services/monthly_requests_tracker.dart';
+import 'profile_screen.dart';
 
 class MyRequestsScreen extends StatefulWidget {
   const MyRequestsScreen({super.key});
@@ -1592,7 +1595,251 @@ class _MyRequestsScreenState extends State<MyRequestsScreen> {
             );
           },
         ),
+        floatingActionButton: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(30),
+            color: const Color(0xFFFFD700), // צהוב זהב
+            border: Border.all(
+              color: const Color(0xFF2196F3),
+              width: 3,
+            ),
+          ),
+          child: FloatingActionButton(
+            heroTag: "new_request_my_requests",
+            onPressed: () {
+              debugPrint('🔍 FloatingActionButton pressed in MyRequestsScreen!');
+              _showNewRequestDialog();
+            },
+            backgroundColor: Colors.transparent,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            child: const Icon(
+              Icons.add_rounded,
+              size: 28,
+            ),
+          ),
+        ),
       ),
+    );
+  }
+  
+  // פונקציה להצגת דיאלוג בקשה חדשה
+  void _showNewRequestDialog() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        
+        if (userDoc.exists) {
+          final userData = userDoc.data()!;
+          final isTemporaryGuest = userData['isTemporaryGuest'] ?? false;
+          
+          if (isTemporaryGuest) {
+            debugPrint('🔍 _showNewRequestDialog: Temporary guest detected, blocking request creation');
+            if (!mounted) return;
+            final l10n = AppLocalizations.of(context);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(l10n.pleaseRegisterFirst),
+                backgroundColor: Colors.orange,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+            return;
+          }
+        }
+      } catch (e) {
+        debugPrint('🔍 _showNewRequestDialog: Error checking temporary guest status: $e');
+      }
+    }
+    
+    // בדיקת מגבלת בקשות חודשיות
+    final canCreateRequest = await _checkMonthlyRequestLimit();
+    debugPrint('🔍 _showNewRequestDialog: canCreateRequest = $canCreateRequest');
+    
+    // Guard context usage after async gap
+    if (!mounted) return;
+    
+    if (!canCreateRequest) {
+      debugPrint('🔍 _showNewRequestDialog: Cannot create request, showing limit dialog');
+      return; // הדיאלוג כבר הוצג
+    }
+    
+    debugPrint('🔍 _showNewRequestDialog: Can create request, navigating to NewRequestScreen');
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const NewRequestScreen(),
+      ),
+    );
+  }
+  
+  // בדיקת מגבלת בקשות חודשיות
+  Future<bool> _checkMonthlyRequestLimit() async {
+    try {
+      debugPrint('🔍 _checkMonthlyRequestLimit: Starting check');
+      
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        debugPrint('🔍 _checkMonthlyRequestLimit: No user found');
+        return false;
+      }
+
+      debugPrint('🔍 _checkMonthlyRequestLimit: User ID: ${user.uid}');
+
+      // בדיקה אם המשתמש הוא מנהל
+      final userEmail = user.email;
+      if (userEmail == 'haitham.ay82@gmail.com' || userEmail == 'admin@gmail.com') {
+        debugPrint('🔍 _checkMonthlyRequestLimit: Admin user detected, bypassing limits');
+        return true;
+      }
+
+      // קבלת פרופיל המשתמש
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      if (!userDoc.exists) {
+        debugPrint('🔍 _checkMonthlyRequestLimit: User document does not exist');
+        return false;
+      }
+
+      final userData = userDoc.data()!;
+      final maxRequestsPerMonth = userData['maxRequestsPerMonth'] ?? 1;
+      
+      debugPrint('🔍 _checkMonthlyRequestLimit: maxRequestsPerMonth = $maxRequestsPerMonth');
+      
+      // שימוש באותה לוגיקה כמו הפרופיל
+      final currentMonthRequests = await MonthlyRequestsTracker.getCurrentMonthRequestsCount();
+      
+      debugPrint('🔍 _checkMonthlyRequestLimit: currentMonthRequests = $currentMonthRequests');
+      debugPrint('🔍 _checkMonthlyRequestLimit: Checking if $currentMonthRequests >= $maxRequestsPerMonth');
+
+      if (currentMonthRequests >= maxRequestsPerMonth) {
+        debugPrint('🔍 _checkMonthlyRequestLimit: LIMIT REACHED! Showing dialog');
+        // חישוב תאריך החודש הבא
+        final now = DateTime.now();
+        final nextMonth = DateTime(now.year, now.month + 1, 1);
+        final nextMonthFormatted = '${nextMonth.day}/${nextMonth.month}/${nextMonth.year}';
+        
+        debugPrint('🔍 _checkMonthlyRequestLimit: nextMonthFormatted = $nextMonthFormatted');
+        
+        // הצגת דיאלוג מגבלה
+        await _showMonthlyLimitDialog(nextMonthFormatted, maxRequestsPerMonth);
+        return false;
+      }
+
+      debugPrint('🔍 _checkMonthlyRequestLimit: Limit not reached, allowing request creation');
+      return true;
+    } catch (e) {
+      debugPrint('🔍 _checkMonthlyRequestLimit: Error: $e');
+      return true; // במקרה של שגיאה, אפשר ליצור בקשה
+    }
+  }
+
+  /// הצגת דיאלוג מגבלת בקשות חודשיות
+  Future<void> _showMonthlyLimitDialog(String nextMonthDate, int maxRequests) async {
+    if (!mounted) return;
+    
+    return showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        final dialogL10n = AppLocalizations.of(context);
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.warning, color: Colors.orange[700], size: 28),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  dialogL10n.monthlyLimitReached,
+                  style: const TextStyle(fontSize: 16),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  dialogL10n.monthlyLimitMessage(maxRequests),
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  dialogL10n.youCan,
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(Icons.schedule, size: 16, color: Colors.blue),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        dialogL10n.waitForNextMonth(nextMonthDate),
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(Icons.upgrade, size: 16, color: Colors.green),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        dialogL10n.upgradeSubscription,
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await playButtonSound();
+                if (context.mounted) {
+                  Navigator.of(context).pop();
+                }
+              },
+              child: Text(dialogL10n.understood),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                await playButtonSound();
+                if (context.mounted) {
+                  Navigator.of(context).pop();
+                }
+                // ניווט ישירות למסך פרופיל
+                if (context.mounted) {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => const ProfileScreen(),
+                    ),
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green[600],
+                foregroundColor: Colors.white,
+              ),
+              child: Text(dialogL10n.upgradeSubscriptionInProfile),
+            ),
+          ],
+        );
+      },
     );
   }
 

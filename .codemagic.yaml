@@ -7,7 +7,7 @@ workflows:
       groups:
         - keystore_credentials
       vars:
-        PACKAGE_NAME: "com.example.flutter1"
+        PACKAGE_NAME: "com.myneighborhood.app"
       flutter: stable
     scripts:
       - name: Get Flutter dependencies

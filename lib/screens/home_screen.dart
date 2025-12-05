@@ -42,6 +42,8 @@ import 'profile_screen.dart';
 import 'location_picker_screen.dart';
 import 'tutorial_center_screen.dart';
 import 'my_requests_screen.dart';
+import 'new_request_screen.dart';
+import '../services/monthly_requests_tracker.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -175,6 +177,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
   bool _showMyRequests = false; // true = בקשות שפניתי אליהם, false = כל הבקשות
   bool _showServiceProviders = false; // true = נותני שירות, false = בקשות
   bool _isLoadingMyRequests = false; // מצב טעינה עבור "בקשות בטיפול שלי"
+  bool _hasClickedAllRequests = false; // האם המשתמש לחץ על "בקשות בשכונה" - להצגת כפתור "בקשות בטיפול שלי"
   
   // מערכת בונוסים לטווח בקשות
   final int _maxRequestsPerMonth = 1; // מקסימום בקשות בחודש
@@ -1375,8 +1378,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
     _newBusinessesAnimationController?.dispose();
     
     // יצירת בקר אנימציה לתנועה רציפה
-    // כל עסק יוצג למשך 2 שניות
-    final totalDuration = Duration(seconds: 2 * _newBusinesses.length);
+    // כל עסק יוצג למשך 5 שניות
+    final totalDuration = Duration(seconds: 5 * _newBusinesses.length);
     _newBusinessesAnimationController = AnimationController(
       duration: totalDuration,
       vsync: this,
@@ -1466,10 +1469,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
   
   // גלילה לעסק שנבחר מהסליידר - מציג אותו ראשון ברשימה
   void _scrollToSelectedBusiness() {
-    if (_selectedBusinessIdFromSlider == null) return;
+    if (_selectedBusinessIdFromSlider == null) {
+      debugPrint('⚠️ _scrollToSelectedBusiness: _selectedBusinessIdFromSlider is null');
+      return;
+    }
+    
+    debugPrint('🔍 _scrollToSelectedBusiness: Looking for business ID: $_selectedBusinessIdFromSlider');
+    debugPrint('🔍 Current service providers count: ${_serviceProviders.length}');
     
     // אם הרשימה עדיין ריקה, נחכה קצת וננסה שוב
     if (_serviceProviders.isEmpty) {
+      debugPrint('⏳ _scrollToSelectedBusiness: Service providers list is empty, waiting...');
       Future.delayed(const Duration(milliseconds: 500), () {
         if (mounted && _selectedBusinessIdFromSlider != null) {
           _scrollToSelectedBusiness();
@@ -1480,9 +1490,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
     
     // מציאת העסק ברשימה הכללית
     final businessIndex = _serviceProviders.indexWhere((p) => p.userId == _selectedBusinessIdFromSlider);
+    debugPrint('🔍 _scrollToSelectedBusiness: Business index: $businessIndex');
+    
     if (businessIndex < 0) {
+      debugPrint('⚠️ _scrollToSelectedBusiness: Business not found in list, trying to load more or specific business');
       // אם העסק לא נמצא ברשימה הראשונית, ננסה לטעון עוד
       if (_hasMoreServiceProviders && !_isLoadingServiceProviders) {
+        debugPrint('📥 _scrollToSelectedBusiness: Loading more service providers...');
         _loadMoreServiceProviders().then((_) {
           // ננסה שוב אחרי טעינת עוד עסקים
           Future.delayed(const Duration(milliseconds: 500), () {
@@ -1493,18 +1507,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
         });
       } else {
         // אם אין עוד עסקים לטעון, נטען את העסק הספציפי ישירות
+        debugPrint('📥 _scrollToSelectedBusiness: Loading specific business: $_selectedBusinessIdFromSlider');
         _loadSpecificBusiness(_selectedBusinessIdFromSlider!);
       }
       return;
     }
     
+    debugPrint('✅ _scrollToSelectedBusiness: Business found at index $businessIndex, moving to top');
+    debugPrint('🔍 _scrollToSelectedBusiness: Business name: ${_serviceProviders[businessIndex].displayName}');
+    
     // העברת העסק לראש הרשימה
     final selectedBusiness = _serviceProviders[businessIndex];
+    
+    debugPrint('🔍 _scrollToSelectedBusiness: Before reset - _selectedMainCategoryFromCirclesForProviders: $_selectedMainCategoryFromCirclesForProviders');
+    debugPrint('🔍 _scrollToSelectedBusiness: Before reset - _selectedProviderMainCategories: $_selectedProviderMainCategories');
+    debugPrint('🔍 _scrollToSelectedBusiness: Before reset - _filterProvidersByMyLocation: $_filterProvidersByMyLocation');
+    
     setState(() {
-      // הסרת העסק מהמיקום הנוכחי
-      _serviceProviders.removeAt(businessIndex);
-      // הוספת העסק בתחילת הרשימה
-      _serviceProviders.insert(0, selectedBusiness);
+      // אם העסק כבר בראש הרשימה, לא צריך להזיז אותו
+      if (businessIndex != 0) {
+        // הסרת העסק מהמיקום הנוכחי
+        _serviceProviders.removeAt(businessIndex);
+        // הוספת העסק בתחילת הרשימה
+        _serviceProviders.insert(0, selectedBusiness);
+        debugPrint('✅ _scrollToSelectedBusiness: Business moved from index $businessIndex to index 0');
+      } else {
+        debugPrint('ℹ️ _scrollToSelectedBusiness: Business already at index 0, no need to move');
+      }
       
       // איפוס סינונים כדי שהעסק יוצג בוודאות
       _selectedMainCategoryFromCirclesForProviders = null;
@@ -1514,11 +1543,38 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
       _filterProvidersByMyLocation = false;
     });
     
+    debugPrint('✅ _scrollToSelectedBusiness: Filters reset, business should be visible now');
+    
     // גלילה לראש הרשימה (איפה שהעסק נמצא עכשיו)
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollController.hasClients) return;
+      debugPrint('📜 _scrollToSelectedBusiness: PostFrameCallback executed');
+      debugPrint('📜 _scrollToSelectedBusiness: _scrollController.hasClients: ${_scrollController.hasClients}');
+      
+      if (!_scrollController.hasClients) {
+        debugPrint('⚠️ _scrollToSelectedBusiness: ScrollController has no clients, retrying...');
+        // ננסה שוב אחרי קצת זמן
+        Future.delayed(const Duration(milliseconds: 200), () {
+          if (mounted && _scrollController.hasClients) {
+            try {
+              debugPrint('📜 _scrollToSelectedBusiness: Retrying scroll...');
+              _scrollController.animateTo(
+                0.0,
+                duration: const Duration(milliseconds: 500),
+                curve: Curves.easeInOut,
+              );
+              debugPrint('✅ _scrollToSelectedBusiness: Scroll animation started');
+            } catch (e) {
+              debugPrint('❌ _scrollToSelectedBusiness: Error in retry: $e');
+            }
+          }
+        });
+        return;
+      }
       
       try {
+        debugPrint('📜 _scrollToSelectedBusiness: Scrolling to top...');
+        debugPrint('📜 _scrollToSelectedBusiness: Current scroll position: ${_scrollController.offset}');
+        
         // גלילה לראש הרשימה
         _scrollController.animateTo(
           0.0,
@@ -1526,9 +1582,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
           curve: Curves.easeInOut,
         );
         
+        debugPrint('✅ _scrollToSelectedBusiness: Scroll animation started to position 0.0');
+        
         // איפוס ה-ID אחרי הגלילה
         Future.delayed(const Duration(milliseconds: 1000), () {
           if (mounted) {
+            debugPrint('📜 _scrollToSelectedBusiness: Resetting _selectedBusinessIdFromSlider after scroll');
             setState(() {
               _selectedBusinessIdFromSlider = null;
             });
@@ -1543,6 +1602,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
   // טעינת עסק ספציפי אם הוא לא נמצא ברשימה
   Future<void> _loadSpecificBusiness(String businessId) async {
     try {
+      debugPrint('📥 _loadSpecificBusiness: Loading business ID: $businessId');
       final businessDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(businessId)
@@ -1550,6 +1610,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
       
       if (businessDoc.exists) {
         final business = UserProfile.fromFirestore(businessDoc);
+        debugPrint('✅ _loadSpecificBusiness: Business loaded: ${business.displayName}');
         
         setState(() {
           // הוספת העסק בתחילת הרשימה
@@ -1563,11 +1624,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
           _filterProvidersByMyLocation = false;
         });
         
+        debugPrint('✅ _loadSpecificBusiness: Business added to list, scrolling...');
+        
         // גלילה לראש הרשימה
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (!_scrollController.hasClients) return;
+          if (!_scrollController.hasClients) {
+            debugPrint('⚠️ _loadSpecificBusiness: ScrollController has no clients');
+            return;
+          }
           
           try {
+            debugPrint('📜 _loadSpecificBusiness: Scrolling to top...');
             _scrollController.animateTo(
               0.0,
               duration: const Duration(milliseconds: 500),
@@ -1580,12 +1647,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                 setState(() {
                   _selectedBusinessIdFromSlider = null;
                 });
+                debugPrint('✅ _loadSpecificBusiness: Business ID reset');
               }
             });
           } catch (e) {
             debugPrint('❌ Error scrolling to business: $e');
           }
         });
+      } else {
+        debugPrint('❌ _loadSpecificBusiness: Business document does not exist: $businessId');
       }
     } catch (e) {
       debugPrint('❌ Error loading specific business: $e');
@@ -1600,33 +1670,41 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
     
     return SizedBox(
       height: 90, // 50% מגובה קודם (180 -> 90)
-      child: PageView.builder(
-        controller: _newBusinessesPageController,
-        itemCount: _newBusinesses.length,
-        onPageChanged: (index) {
-          // כאשר המשתמש מזיז את הסליידר ידנית (swipe), עוצרים את התנועה האוטומטית
-          _isUserSwiping = true;
-          if (!_isSliderPaused && _newBusinessesAnimationController != null) {
-            setState(() {
-              _isSliderPaused = true;
-              // שמירת המיקום הנוכחי של האנימציה
-              _pausedAnimationValue = _newBusinessesAnimationController!.value;
-            });
-            _newBusinessesAnimationController?.stop();
-          }
-          
-          // אחרי 500ms, אם המשתמש לא נוגע יותר, נמשיך את הסליידר
-          Future.delayed(const Duration(milliseconds: 500), () {
-            if (mounted && _isUserSwiping && _isSliderPaused && _newBusinessesAnimationController != null) {
-              _isUserSwiping = false;
-              _resumeSliderAnimation();
+      child: Listener(
+        onPointerDown: (_) {
+          // כאשר המשתמש נוגע בסליידר, אפשר לזהות זאת כאן אם צריך
+        },
+        behavior: HitTestBehavior.translucent,
+        child: PageView.builder(
+          controller: _newBusinessesPageController,
+          itemCount: _newBusinesses.length,
+          allowImplicitScrolling: false,
+          physics: const ClampingScrollPhysics(), // מאפשר swipe וגם לא חוסם לחיצות
+          onPageChanged: (index) {
+            // כאשר המשתמש מזיז את הסליידר ידנית (swipe), עוצרים את התנועה האוטומטית
+            _isUserSwiping = true;
+            if (!_isSliderPaused && _newBusinessesAnimationController != null) {
+              setState(() {
+                _isSliderPaused = true;
+                // שמירת המיקום הנוכחי של האנימציה
+                _pausedAnimationValue = _newBusinessesAnimationController!.value;
+              });
+              _newBusinessesAnimationController?.stop();
             }
-          });
-        },
-        itemBuilder: (context, index) {
-          final business = _newBusinesses[index];
-          return _buildNewBusinessCard(business);
-        },
+            
+            // אחרי 1 שנייה, אם המשתמש לא נוגע יותר, נמשיך את הסליידר
+            Future.delayed(const Duration(milliseconds: 1000), () {
+              if (mounted && _isUserSwiping && _isSliderPaused && _newBusinessesAnimationController != null) {
+                _isUserSwiping = false;
+                _resumeSliderAnimation();
+              }
+            });
+          },
+          itemBuilder: (context, index) {
+            final business = _newBusinesses[index];
+            return _buildNewBusinessCard(business);
+          },
+        ),
       ),
     );
   }
@@ -1681,30 +1759,39 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
   
   // ווידג'ט לכרטיס עסק בסליידר
   Widget _buildNewBusinessCard(UserProfile business) {
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 8),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // תמונת העסק
-            GestureDetector(
-              onTap: () => _handleBusinessCardTap(business),
-              onLongPress: () => _handleBusinessCardLongPress(),
-              onLongPressEnd: (_) => _handleBusinessCardLongPressEnd(),
-              behavior: HitTestBehavior.opaque,
-              child: business.businessImageUrl != null
+    return GestureDetector(
+      onTap: () {
+        debugPrint('🖱️ Tap detected on business: ${business.displayName}');
+        _handleBusinessCardTap(business);
+      },
+      onLongPress: () {
+        debugPrint('🖱️ Long press detected on business: ${business.displayName}');
+        _handleBusinessCardLongPress();
+      },
+      onLongPressEnd: (_) {
+        debugPrint('🖱️ Long press ended on business: ${business.displayName}');
+        _handleBusinessCardLongPressEnd();
+      },
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.1),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // תמונת העסק
+              business.businessImageUrl != null
                   ? CachedNetworkImage(
                       imageUrl: business.businessImageUrl!,
                       fit: BoxFit.cover,
@@ -1721,16 +1808,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                       color: Colors.grey[300],
                       child: const Icon(Icons.business, size: 60, color: Colors.grey),
                     ),
-            ),
-            // שם העסק בפינה ימנית עליונה
-            Positioned(
-              top: 8,
-              right: 8,
-              child: GestureDetector(
-                onTap: () => _handleBusinessCardTap(business),
-                onLongPress: () => _handleBusinessCardLongPress(),
-                onLongPressEnd: (_) => _handleBusinessCardLongPressEnd(),
-                behavior: HitTestBehavior.opaque,
+              // שם העסק בפינה ימנית עליונה
+              Positioned(
+                top: 8,
+                right: 8,
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
@@ -1757,8 +1838,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -1766,20 +1847,46 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
   
   // פונקציה לטיפול בלחיצה רגילה על כרטיס עסק
   void _handleBusinessCardTap(UserProfile business) {
+    debugPrint('🖱️ _handleBusinessCardTap: Business ID: ${business.userId}, Name: ${business.displayName}');
+    
+    // שמירת ID העסק לפני הטעינה כדי למנוע race condition
+    final selectedBusinessId = business.userId;
+    
     // לחיצה רגילה לא עוצרת את הסליידר - רק מציגה את העסק
     // הסליידר ימשיך לנוע אוטומטית
     
     // שמירת ID העסק שנבחר והצגתו במסך העסקים והעצמאיים
     setState(() {
       _showServiceProviders = true;
-      _selectedBusinessIdFromSlider = business.userId;
+      _selectedBusinessIdFromSlider = selectedBusinessId;
     });
+    
+    debugPrint('✅ _handleBusinessCardTap: Set _selectedBusinessIdFromSlider to: $selectedBusinessId');
+    debugPrint('✅ _handleBusinessCardTap: Set _showServiceProviders to: true');
+    debugPrint('🔍 _handleBusinessCardTap: Current _selectedBusinessIdFromSlider value: $_selectedBusinessIdFromSlider');
     
     // נטען את נותני השירות ואז נגלול לעסק
     _loadInitialServiceProviders().then((_) {
-      if (mounted) {
-        _scrollToSelectedBusiness();
+      debugPrint('✅ _handleBusinessCardTap: _loadInitialServiceProviders completed');
+      debugPrint('🔍 _handleBusinessCardTap: After load, _selectedBusinessIdFromSlider: $_selectedBusinessIdFromSlider');
+      debugPrint('🔍 _handleBusinessCardTap: _serviceProviders count: ${_serviceProviders.length}');
+      
+      // וידוא שהערך עדיין שמור
+      if (_selectedBusinessIdFromSlider == null) {
+        debugPrint('⚠️ _handleBusinessCardTap: _selectedBusinessIdFromSlider became null, restoring it...');
+        setState(() {
+          _selectedBusinessIdFromSlider = selectedBusinessId;
+        });
       }
+      
+      if (mounted) {
+        debugPrint('📞 _handleBusinessCardTap: Calling _scrollToSelectedBusiness...');
+        _scrollToSelectedBusiness();
+      } else {
+        debugPrint('⚠️ _handleBusinessCardTap: Widget not mounted, cannot scroll');
+      }
+    }).catchError((error) {
+      debugPrint('❌ _handleBusinessCardTap: Error loading service providers: $error');
     });
   }
   
@@ -1885,14 +1992,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
         _isLoadingServiceProviders = false;
       });
       
+      debugPrint('✅ Loaded ${newProviders.length} service providers');
+      debugPrint('🔍 _loadInitialServiceProviders: _selectedBusinessIdFromSlider: $_selectedBusinessIdFromSlider');
+      debugPrint('🔍 _loadInitialServiceProviders: _showServiceProviders: $_showServiceProviders');
+      
       // אם יש עסק שנבחר מהסליידר, נגלול אליו
       if (_selectedBusinessIdFromSlider != null) {
+        debugPrint('📞 _loadInitialServiceProviders: Calling _scrollToSelectedBusiness via PostFrameCallback...');
         WidgetsBinding.instance.addPostFrameCallback((_) {
+          debugPrint('📞 _loadInitialServiceProviders: PostFrameCallback executed, calling _scrollToSelectedBusiness...');
           _scrollToSelectedBusiness();
         });
+      } else {
+        debugPrint('⚠️ _loadInitialServiceProviders: _selectedBusinessIdFromSlider is null, not scrolling');
       }
-      
-      debugPrint('✅ Loaded ${newProviders.length} service providers');
     } catch (e) {
       debugPrint('❌ Error loading service providers: $e');
       if (mounted) {
@@ -6031,16 +6144,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                   // שדה חיפוש
                   SizedBox(
                     width: double.infinity,
-                    child: TextField(
-                      controller: _searchController,
-                      keyboardType: TextInputType.text,
-                      textInputAction: TextInputAction.search,
-                      textDirection: _getTextDirection(_searchController.text.isNotEmpty ? _searchController.text : l10n.searchHint),
-                      textAlign: _getTextDirection(_searchController.text.isNotEmpty ? _searchController.text : l10n.searchHint) == TextDirection.rtl
-                          ? TextAlign.right
-                          : TextAlign.left,
-                      decoration: InputDecoration(
-                        hintText: l10n.searchHint,
+                    child: Builder(
+                      builder: (context) {
+                        // בחירת הטקסט המתאים לפי המסך
+                        final searchHintText = _showServiceProviders 
+                            ? l10n.searchProvidersHint 
+                            : l10n.searchHint;
+                        
+                        return TextField(
+                          controller: _searchController,
+                          keyboardType: TextInputType.text,
+                          textInputAction: TextInputAction.search,
+                          textDirection: _getTextDirection(_searchController.text.isNotEmpty ? _searchController.text : searchHintText),
+                          textAlign: _getTextDirection(_searchController.text.isNotEmpty ? _searchController.text : searchHintText) == TextDirection.rtl
+                              ? TextAlign.right
+                              : TextAlign.left,
+                          decoration: InputDecoration(
+                            hintText: searchHintText,
                         prefixIcon: const Icon(Icons.search),
                         suffixIcon: _searchController.text.isNotEmpty
                             ? IconButton(
@@ -6058,12 +6178,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                         ),
                         filled: true,
                         fillColor: Theme.of(context).colorScheme.surfaceContainer,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      ),
-                      onChanged: (value) {
-                        setState(() {});
-                        // הפעלת החיפוש בזמן אמת
-                        _performSearch();
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          ),
+                          onChanged: (value) {
+                            setState(() {});
+                            // הפעלת החיפוש בזמן אמת
+                            _performSearch();
+                          },
+                        );
                       },
                     ),
                   ),
@@ -6076,13 +6198,95 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                       color: Theme.of(context).colorScheme.surfaceContainer,
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.max,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        // כפתור פניות שלי
-                        Expanded(
-                          flex: 1,
-                          child: _buildModernFilterButton(
+                        // שורה ראשונה: כפתורי "בקשות בשכונה" ו-"עסקים ועצמאיים"
+                        Row(
+                          mainAxisSize: MainAxisSize.max,
+                          children: [
+                            // כפתור בקשות בשכונה
+                            Expanded(
+                              flex: 1,
+                              child: _buildModernFilterButton(
+                                icon: Icons.grid_view,
+                                label: l10n.allRequests,
+                                isActive: !_showMyRequests && !_showServiceProviders,
+                                activeColor: Colors.blue,
+                                onTap: () {
+                                  setState(() {
+                                    _showMyRequests = false;
+                                    _showServiceProviders = false;
+                                    _hasClickedAllRequests = true; // הצגת כפתור "בקשות בטיפול שלי"
+                                    // Reload initial requests when switching view
+                                    _allRequests.clear();
+                                    _lastDocumentSnapshot = null;
+                                    _hasMoreRequests = true;
+                                    // Cancel all subscriptions and debounce timers
+                                    for (final subscription in _requestSubscriptions.values) {
+                                      subscription.cancel();
+                                    }
+                                    _requestSubscriptions.clear();
+                                    // ✅ Cancel all debounce timers
+                                    for (final timer in _debounceTimers.values) {
+                                      timer.cancel();
+                                    }
+                                    _debounceTimers.clear();
+                                    _pendingUpdates.clear();
+                                    // ✅ Clear cache when switching views
+                                    _requestCache.clear();
+                                    // Reload initial requests - רק אם לא במסך "פניות שלי"
+                                    if (!_showMyRequests && !_showServiceProviders) {
+                                      _loadInitialRequests();
+                                    }
+                                  });
+                                },
+                              ),
+                            ),
+                            // כפתור נותני שירות
+                            Expanded(
+                              flex: 1,
+                              child: _buildModernFilterButton(
+                                icon: Icons.people,
+                                label: l10n.serviceProviders,
+                                isActive: _showServiceProviders,
+                                activeColor: Colors.green,
+                            onTap: () {
+                              setState(() {
+                                _showMyRequests = false;
+                                _showServiceProviders = true;
+                                // Clear requests cache when switching to service providers
+                                _allRequests.clear();
+                                _lastDocumentSnapshot = null;
+                                _hasMoreRequests = false;
+                                _isLoadingInitial = false;
+                                // Clear service providers cache to reload
+                                _serviceProviders.clear();
+                                _hasMoreServiceProviders = true;
+                                _isLoadingServiceProviders = false;
+                                // Cancel all subscriptions and debounce timers
+                                for (final subscription in _requestSubscriptions.values) {
+                                  subscription.cancel();
+                                }
+                                _requestSubscriptions.clear();
+                                for (final timer in _debounceTimers.values) {
+                                  timer.cancel();
+                                }
+                                _debounceTimers.clear();
+                                _pendingUpdates.clear();
+                                _requestCache.clear();
+                              });
+                              // טעינת נותני שירות
+                              _loadInitialServiceProviders();
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    // שורה שנייה: כפתור "בקשות בטיפול שלי" - מוצג רק אחרי לחיצה על "בקשות בשכונה"
+                        if (_hasClickedAllRequests && !_showServiceProviders) ...[
+                          const SizedBox(height: 8),
+                          _buildModernFilterButton(
                             icon: Icons.favorite,
                             label: l10n.myRequests,
                             isActive: _showMyRequests && !_showServiceProviders,
@@ -6116,82 +6320,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                               await _loadAllInterestedRequests();
                             },
                           ),
-                        ),
-                        // כפתור כל הבקשות
-                        Expanded(
-                          flex: 1,
-                          child: _buildModernFilterButton(
-                            icon: Icons.grid_view,
-                            label: l10n.allRequests,
-                            isActive: !_showMyRequests && !_showServiceProviders,
-                            activeColor: Colors.blue,
-                            onTap: () {
-                              setState(() {
-                                _showMyRequests = false;
-                                _showServiceProviders = false;
-                                // Reload initial requests when switching view
-                                _allRequests.clear();
-                                _lastDocumentSnapshot = null;
-                                _hasMoreRequests = true;
-                                // Cancel all subscriptions and debounce timers
-                                for (final subscription in _requestSubscriptions.values) {
-                                  subscription.cancel();
-                                }
-                                _requestSubscriptions.clear();
-                                // ✅ Cancel all debounce timers
-                                for (final timer in _debounceTimers.values) {
-                                  timer.cancel();
-                                }
-                                _debounceTimers.clear();
-                                _pendingUpdates.clear();
-                                // ✅ Clear cache when switching views
-                                _requestCache.clear();
-                                // Reload initial requests - רק אם לא במסך "פניות שלי"
-                                if (!_showMyRequests && !_showServiceProviders) {
-                                  _loadInitialRequests();
-                                }
-                              });
-                            },
-                          ),
-                        ),
-                        // כפתור נותני שירות
-                        Expanded(
-                          flex: 1,
-                          child: _buildModernFilterButton(
-                            icon: Icons.people,
-                            label: l10n.serviceProviders,
-                            isActive: _showServiceProviders,
-                            activeColor: Colors.green,
-                            onTap: () {
-                              setState(() {
-                                _showMyRequests = false;
-                                _showServiceProviders = true;
-                                // Clear requests cache when switching to service providers
-                                _allRequests.clear();
-                                _lastDocumentSnapshot = null;
-                                _hasMoreRequests = false;
-                                _isLoadingInitial = false;
-                                // Clear service providers cache to reload
-                                _serviceProviders.clear();
-                                _hasMoreServiceProviders = true;
-                                _isLoadingServiceProviders = false;
-                                // Cancel all subscriptions and debounce timers
-                                for (final subscription in _requestSubscriptions.values) {
-                                  subscription.cancel();
-                                }
-                                _requestSubscriptions.clear();
-                                for (final timer in _debounceTimers.values) {
-                                  timer.cancel();
-                                }
-                                _debounceTimers.clear();
-                                _pendingUpdates.clear();
-                                _requestCache.clear();
-                              });
-                              // טעינת נותני שירות
-                              _loadInitialServiceProviders();
-                            },
-                          ),
-                        ),
+                        ],
                       ],
                     ),
                   ),
@@ -6724,6 +6853,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                       }
                     } else {
                       // אם אין מיקום נוכחי, לא נסנן לפי מיקום
+                      return false;
+                    }
+                  }
+                  
+                  // סינון לפי חיפוש טקסט (שם העסק)
+                  final searchQuery = _searchController.text.trim();
+                  if (searchQuery.isNotEmpty) {
+                    final providerName = provider.displayName.toLowerCase();
+                    if (!providerName.contains(searchQuery.toLowerCase())) {
                       return false;
                     }
                   }
@@ -7557,11 +7695,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                   }
                 }
                 
-                final searchQuery = _searchController.text.trim();
-                if (searchQuery.isNotEmpty) {
-                  if (!request.title.toLowerCase().contains(searchQuery.toLowerCase()) &&
-                      !request.description.toLowerCase().contains(searchQuery.toLowerCase())) {
-                    return false;
+                // סינון לפי חיפוש טקסט (רק במסך בקשות, לא במסך עסקים)
+                if (!_showServiceProviders) {
+                  final searchQuery = _searchController.text.trim();
+                  if (searchQuery.isNotEmpty) {
+                    if (!request.title.toLowerCase().contains(searchQuery.toLowerCase()) &&
+                        !request.description.toLowerCase().contains(searchQuery.toLowerCase())) {
+                      return false;
+                    }
                   }
                 }
                 
@@ -7856,7 +7997,263 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
           ),
         ],
         ),
+        floatingActionButton: !_showServiceProviders // הצג רק כשלא במסך "עסקים ועצמאיים"
+            ? StreamBuilder<DocumentSnapshot>(
+                stream: FirebaseAuth.instance.currentUser != null
+                    ? FirebaseFirestore.instance
+                        .collection('users')
+                        .doc(FirebaseAuth.instance.currentUser!.uid)
+                        .snapshots()
+                    : null,
+                builder: (context, snapshot) {
+                  return Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(30),
+                      color: const Color(0xFFFFD700), // צהוב זהב
+                      border: Border.all(
+                        color: const Color(0xFF2196F3),
+                        width: 3,
+                      ),
+                    ),
+                    child: FloatingActionButton(
+                      heroTag: "new_request_home",
+                      onPressed: () {
+                        debugPrint('🔍 FloatingActionButton pressed!');
+                        _showNewRequestDialog();
+                      },
+                      backgroundColor: Colors.transparent,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      child: const Icon(
+                        Icons.add_rounded,
+                        size: 28,
+                      ),
+                    ),
+                  );
+                },
+              )
+            : null,
       ),
+    );
+  }
+  
+  // פונקציה להצגת דיאלוג בקשה חדשה
+  void _showNewRequestDialog() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      try {
+        final userDoc = await FirebaseFirestore.instance
+            .collection('users')
+            .doc(user.uid)
+            .get();
+        
+        if (userDoc.exists) {
+          final userData = userDoc.data()!;
+          final isTemporaryGuest = userData['isTemporaryGuest'] ?? false;
+          
+          if (isTemporaryGuest) {
+            debugPrint('🔍 _showNewRequestDialog: Temporary guest detected, blocking request creation');
+            if (!mounted) return;
+            final l10n = AppLocalizations.of(context);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(l10n.pleaseRegisterFirst),
+                backgroundColor: Colors.orange,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+            return;
+          }
+        }
+      } catch (e) {
+        debugPrint('🔍 _showNewRequestDialog: Error checking temporary guest status: $e');
+      }
+    }
+    
+    // בדיקת מגבלת בקשות חודשיות
+    final canCreateRequest = await _checkMonthlyRequestLimit();
+    debugPrint('🔍 _showNewRequestDialog: canCreateRequest = $canCreateRequest');
+    
+    // Guard context usage after async gap
+    if (!mounted) return;
+    
+    if (!canCreateRequest) {
+      debugPrint('🔍 _showNewRequestDialog: Cannot create request, showing limit dialog');
+      return; // הדיאלוג כבר הוצג
+    }
+    
+    debugPrint('🔍 _showNewRequestDialog: Can create request, navigating to NewRequestScreen');
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const NewRequestScreen(),
+      ),
+    );
+  }
+  
+  // בדיקת מגבלת בקשות חודשיות
+  Future<bool> _checkMonthlyRequestLimit() async {
+    try {
+      debugPrint('🔍 _checkMonthlyRequestLimit: Starting check');
+      
+      final user = FirebaseAuth.instance.currentUser;
+      if (user == null) {
+        debugPrint('🔍 _checkMonthlyRequestLimit: No user found');
+        return false;
+      }
+
+      debugPrint('🔍 _checkMonthlyRequestLimit: User ID: ${user.uid}');
+
+      // בדיקה אם המשתמש הוא מנהל
+      final userEmail = user.email;
+      if (userEmail == 'haitham.ay82@gmail.com' || userEmail == 'admin@gmail.com') {
+        debugPrint('🔍 _checkMonthlyRequestLimit: Admin user detected, bypassing limits');
+        return true;
+      }
+
+      // קבלת פרופיל המשתמש
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      if (!userDoc.exists) {
+        debugPrint('🔍 _checkMonthlyRequestLimit: User document does not exist');
+        return false;
+      }
+
+      final userData = userDoc.data()!;
+      final maxRequestsPerMonth = userData['maxRequestsPerMonth'] ?? 1;
+      
+      debugPrint('🔍 _checkMonthlyRequestLimit: maxRequestsPerMonth = $maxRequestsPerMonth');
+      
+      // שימוש באותה לוגיקה כמו הפרופיל
+      final currentMonthRequests = await MonthlyRequestsTracker.getCurrentMonthRequestsCount();
+      
+      debugPrint('🔍 _checkMonthlyRequestLimit: currentMonthRequests = $currentMonthRequests');
+      debugPrint('🔍 _checkMonthlyRequestLimit: Checking if $currentMonthRequests >= $maxRequestsPerMonth');
+
+      if (currentMonthRequests >= maxRequestsPerMonth) {
+        debugPrint('🔍 _checkMonthlyRequestLimit: LIMIT REACHED! Showing dialog');
+        // חישוב תאריך החודש הבא
+        final now = DateTime.now();
+        final nextMonth = DateTime(now.year, now.month + 1, 1);
+        final nextMonthFormatted = '${nextMonth.day}/${nextMonth.month}/${nextMonth.year}';
+        
+        debugPrint('🔍 _checkMonthlyRequestLimit: nextMonthFormatted = $nextMonthFormatted');
+        
+        // הצגת דיאלוג מגבלה
+        await _showMonthlyLimitDialog(nextMonthFormatted, maxRequestsPerMonth);
+        return false;
+      }
+
+      debugPrint('🔍 _checkMonthlyRequestLimit: Limit not reached, allowing request creation');
+      return true;
+    } catch (e) {
+      debugPrint('🔍 _checkMonthlyRequestLimit: Error: $e');
+      return true; // במקרה של שגיאה, אפשר ליצור בקשה
+    }
+  }
+
+  /// הצגת דיאלוג מגבלת בקשות חודשיות
+  Future<void> _showMonthlyLimitDialog(String nextMonthDate, int maxRequests) async {
+    if (!mounted) return;
+    
+    return showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        final dialogL10n = AppLocalizations.of(context);
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.warning, color: Colors.orange[700], size: 28),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  dialogL10n.monthlyLimitReached,
+                  style: const TextStyle(fontSize: 16),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  dialogL10n.monthlyLimitMessage(maxRequests),
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  dialogL10n.youCan,
+                  style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(Icons.schedule, size: 16, color: Colors.blue),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        dialogL10n.waitForNextMonth(nextMonthDate),
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    const Icon(Icons.upgrade, size: 16, color: Colors.green),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        dialogL10n.upgradeSubscription,
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await playButtonSound();
+                if (context.mounted) {
+                  Navigator.of(context).pop();
+                }
+              },
+              child: Text(dialogL10n.understood),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                await playButtonSound();
+                if (context.mounted) {
+                  Navigator.of(context).pop();
+                }
+                // ניווט ישירות למסך פרופיל
+                if (context.mounted) {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => const ProfileScreen(),
+                    ),
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green[600],
+                foregroundColor: Colors.white,
+              ),
+              child: Text(dialogL10n.upgradeSubscriptionInProfile),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -9494,7 +9891,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
            _selectedProviderMainCategories.isNotEmpty ||
            _selectedProviderSubCategories.isNotEmpty ||
            _selectedProviderRegion != null ||
-           _filterProvidersByMyLocation;
+           _filterProvidersByMyLocation ||
+           _searchController.text.trim().isNotEmpty; // חיפוש טקסט
   }
 
   // ניקוי סינון נותני שירות
@@ -9506,6 +9904,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
         _selectedProviderSubCategories.clear();
         _selectedProviderRegion = null;
         _filterProvidersByMyLocation = false;
+        // ניקוי שדה החיפוש
+        _searchController.clear();
       });
     }
   }
