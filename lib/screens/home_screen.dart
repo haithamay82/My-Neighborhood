@@ -129,7 +129,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
   Animation<double>? _newBusinessesAnimation; // אנימציה לתנועה רציפה
   bool _isSliderPaused = false; // האם הסליידר מושעה (כאשר המשתמש לוחץ עליו)
   double _pausedAnimationValue = 0.0; // ערך האנימציה כשהסליידר הושעה
-  bool _wasTapped = false; // האם המשתמש לחץ על עסק (tap) ולא רק הזיז את הסליידר (swipe)
+  bool _isUserSwiping = false; // האם המשתמש מזיז את הסליידר ידנית
   
   // משתנים לסינון נותני שירות
   MainCategory? _selectedMainCategoryFromCirclesForProviders; // קטגוריה ראשית מהעיגולים
@@ -1369,7 +1369,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
     // איפוס דגל ההשהיה והמיקום
     _isSliderPaused = false;
     _pausedAnimationValue = 0.0;
-    _wasTapped = false;
+    _isUserSwiping = false;
     
     // ביטול אנימציה קודמת אם קיימת
     _newBusinessesAnimationController?.dispose();
@@ -1600,10 +1600,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
     
     return SizedBox(
       height: 90, // 50% מגובה קודם (180 -> 90)
-      child: GestureDetector(
-        onPanStart: (_) {
-          // כאשר המשתמש מתחיל לגעת בסליידר (swipe), עוצרים את התנועה
-          // אבל רק אם זה לא tap (tap יטופל ב-onTap של הכרטיס)
+      child: PageView.builder(
+        controller: _newBusinessesPageController,
+        itemCount: _newBusinesses.length,
+        onPageChanged: (index) {
+          // כאשר המשתמש מזיז את הסליידר ידנית (swipe), עוצרים את התנועה האוטומטית
+          _isUserSwiping = true;
           if (!_isSliderPaused && _newBusinessesAnimationController != null) {
             setState(() {
               _isSliderPaused = true;
@@ -1612,32 +1614,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
             });
             _newBusinessesAnimationController?.stop();
           }
+          
+          // אחרי 500ms, אם המשתמש לא נוגע יותר, נמשיך את הסליידר
+          Future.delayed(const Duration(milliseconds: 500), () {
+            if (mounted && _isUserSwiping && _isSliderPaused && _newBusinessesAnimationController != null) {
+              _isUserSwiping = false;
+              _resumeSliderAnimation();
+            }
+          });
         },
-        onPanEnd: (_) {
-          // כאשר המשתמש עוזב את הסליידר (אחרי swipe), ממשיכים את התנועה מהמיקום הנוכחי
-          // אבל רק אם זה לא היה tap על עסק
-          if (_isSliderPaused && !_wasTapped && _newBusinessesAnimationController != null) {
-            _resumeSliderAnimation();
-          }
-          // איפוס הדגל
-          _wasTapped = false;
+        itemBuilder: (context, index) {
+          final business = _newBusinesses[index];
+          return _buildNewBusinessCard(business);
         },
-        onPanCancel: () {
-          // אם ה-swipe בוטל, נמשיך את הסליידר רק אם זה לא היה tap
-          if (_isSliderPaused && !_wasTapped && _newBusinessesAnimationController != null) {
-            _resumeSliderAnimation();
-          }
-          // איפוס הדגל
-          _wasTapped = false;
-        },
-        child: PageView.builder(
-          controller: _newBusinessesPageController,
-          itemCount: _newBusinesses.length,
-          itemBuilder: (context, index) {
-            final business = _newBusinesses[index];
-            return _buildNewBusinessCard(business);
-          },
-        ),
       ),
     );
   }
@@ -1692,50 +1681,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
   
   // ווידג'ט לכרטיס עסק בסליידר
   Widget _buildNewBusinessCard(UserProfile business) {
-    return GestureDetector(
-      onTap: () {
-        // לחיצה רגילה על עסק - לא ממשיכים את הסליידר, רק מציגים את העסק
-        // עצירת הסליידר כאשר המשתמש לוחץ על עסק (לחיצה רגילה, לא swipe)
-        _wasTapped = true; // סמן שזה tap ולא swipe
-        
-        if (!_isSliderPaused && _newBusinessesAnimationController != null) {
-          setState(() {
-            _isSliderPaused = true;
-            // שמירת המיקום הנוכחי של האנימציה
-            _pausedAnimationValue = _newBusinessesAnimationController!.value;
-          });
-          _newBusinessesAnimationController?.stop();
-        }
-        
-        // שמירת ID העסק שנבחר והצגתו במסך העסקים והעצמאיים
-        setState(() {
-          _showServiceProviders = true;
-          _selectedBusinessIdFromSlider = business.userId;
-        });
-        // נטען את נותני השירות ואז נגלול לעסק
-        _loadInitialServiceProviders().then((_) {
-          _scrollToSelectedBusiness();
-        });
-      },
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 8),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.1),
-              blurRadius: 8,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              // תמונת העסק
-              business.businessImageUrl != null
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // תמונת העסק
+            GestureDetector(
+              onTap: () => _handleBusinessCardTap(business),
+              onLongPress: () => _handleBusinessCardLongPress(),
+              onLongPressEnd: (_) => _handleBusinessCardLongPressEnd(),
+              behavior: HitTestBehavior.opaque,
+              child: business.businessImageUrl != null
                   ? CachedNetworkImage(
                       imageUrl: business.businessImageUrl!,
                       fit: BoxFit.cover,
@@ -1752,10 +1721,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                       color: Colors.grey[300],
                       child: const Icon(Icons.business, size: 60, color: Colors.grey),
                     ),
-              // שם העסק בפינה ימנית עליונה
-              Positioned(
-                top: 8,
-                right: 8,
+            ),
+            // שם העסק בפינה ימנית עליונה
+            Positioned(
+              top: 8,
+              right: 8,
+              child: GestureDetector(
+                onTap: () => _handleBusinessCardTap(business),
+                onLongPress: () => _handleBusinessCardLongPress(),
+                onLongPressEnd: (_) => _handleBusinessCardLongPressEnd(),
+                behavior: HitTestBehavior.opaque,
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
@@ -1782,11 +1757,51 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                   ),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
+  }
+  
+  // פונקציה לטיפול בלחיצה רגילה על כרטיס עסק
+  void _handleBusinessCardTap(UserProfile business) {
+    // לחיצה רגילה לא עוצרת את הסליידר - רק מציגה את העסק
+    // הסליידר ימשיך לנוע אוטומטית
+    
+    // שמירת ID העסק שנבחר והצגתו במסך העסקים והעצמאיים
+    setState(() {
+      _showServiceProviders = true;
+      _selectedBusinessIdFromSlider = business.userId;
+    });
+    
+    // נטען את נותני השירות ואז נגלול לעסק
+    _loadInitialServiceProviders().then((_) {
+      if (mounted) {
+        _scrollToSelectedBusiness();
+      }
+    });
+  }
+  
+  // פונקציה לטיפול בלחיצה ממושכת על כרטיס עסק
+  void _handleBusinessCardLongPress() {
+    // עצירת הסליידר בלחיצה ממושכת
+    if (!_isSliderPaused && _newBusinessesAnimationController != null) {
+      setState(() {
+        _isSliderPaused = true;
+        // שמירת המיקום הנוכחי של האנימציה
+        _pausedAnimationValue = _newBusinessesAnimationController!.value;
+      });
+      _newBusinessesAnimationController?.stop();
+    }
+  }
+  
+  // פונקציה לטיפול בשחרור לחיצה ממושכת
+  void _handleBusinessCardLongPressEnd() {
+    // המשך הסליידר כשעוזבים את הלחיצה הממושכת
+    if (_isSliderPaused && _newBusinessesAnimationController != null) {
+      _resumeSliderAnimation();
+    }
   }
 
   // פונקציה לטעינת נותני שירות ראשוניים
@@ -14699,3 +14714,4 @@ class TimeSlot {
     this.appointmentId,
   });
 }
+
