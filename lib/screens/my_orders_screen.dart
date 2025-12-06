@@ -909,35 +909,50 @@ class _MyOrdersScreenState extends State<MyOrdersScreen> {
             ] else if (order.status == 'pending' || order.status == 'completed' || order.status == 'cancelled') ...[
               // להזמנות רגילות - רק אם הסטטוס הוא pending, completed, או cancelled
               const Divider(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    flex: 1,
-                    child: ElevatedButton(
-                      onPressed: () => _editOrder(order),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue,
-                        foregroundColor: Colors.white,
-                        minimumSize: const Size(double.infinity, 48),
-                      ),
-                      child: const Text('ערוך הזמנה'),
-                    ),
+              // אם זה הזמנה עם שליח בטאב הושלמו - לא להציג את הלחצן "ערוך הזמנה"
+              if (_selectedOrderType == 'courier' && _selectedTab == 'completed' && order.status == 'completed') ...[
+                // רק לחצן מחק עבור הזמנות עם שליח שהושלמו
+                ElevatedButton(
+                  onPressed: () => _deleteOrder(order),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(double.infinity, 48),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    flex: 1,
-                    child: ElevatedButton(
-                      onPressed: () => _deleteOrder(order),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red,
-                        foregroundColor: Colors.white,
-                        minimumSize: const Size(double.infinity, 48),
+                  child: const Text('מחק הזמנה'),
+                ),
+              ] else ...[
+                // להזמנות אחרות - להציג את שני הלחצנים
+                Row(
+                  children: [
+                    Expanded(
+                      flex: 1,
+                      child: ElevatedButton(
+                        onPressed: () => _editOrder(order),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue,
+                          foregroundColor: Colors.white,
+                          minimumSize: const Size(double.infinity, 48),
+                        ),
+                        child: const Text('ערוך הזמנה'),
                       ),
-                      child: const Text('מחק הזמנה'),
                     ),
-                  ),
-                ],
-              ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      flex: 1,
+                      child: ElevatedButton(
+                        onPressed: () => _deleteOrder(order),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          foregroundColor: Colors.white,
+                          minimumSize: const Size(double.infinity, 48),
+                        ),
+                        child: const Text('מחק הזמנה'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ],
         ),

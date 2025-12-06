@@ -38,6 +38,7 @@ import 'about_app_screen.dart';
 import 'admin_contact_inquiries_screen.dart';
 import 'admin_guest_management_screen.dart';
 import 'admin_requests_statistics_screen.dart';
+import 'admin_categories_management_screen.dart';
 import 'appointment_settings_screen.dart';
 import 'business_management_screen.dart';
 import 'business_services_edit_screen.dart';
@@ -3528,6 +3529,27 @@ class _ProfileScreenState extends State<ProfileScreen> with AudioMixin {
                                 label: const Text('סטטיסטיקות בקשות'),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: const Color(0xFF03A9F4),
+                                  foregroundColor: Theme.of(context).colorScheme.onPrimary,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: () {
+                                  AudioService().playSound(AudioEvent.buttonClick);
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => const AdminCategoriesManagementScreen(),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.category),
+                                label: const Text('ניהול קטיגוריות ותחומים'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF4CAF50),
                                   foregroundColor: Theme.of(context).colorScheme.onPrimary,
                                   padding: const EdgeInsets.symmetric(vertical: 12),
                                 ),

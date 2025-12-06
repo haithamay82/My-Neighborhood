@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../l10n/app_localizations.dart';
+import '../services/categories_service.dart';
 
 // איזורים גאוגרפיים בישראל
 enum GeographicRegion {
@@ -300,6 +301,8 @@ class Request {
   final String title;
   final String description;
   final RequestCategory category;
+  // שם קטגוריה מקורי מ-Firestore (אם הקטגוריה לא קיימת ב-enum)
+  final String? customCategoryName;
   final RequestLocation? location;
   final bool isUrgent;
   final List<String> images;
@@ -343,6 +346,7 @@ class Request {
     required this.title,
     required this.description,
     required this.category,
+    this.customCategoryName,
     this.location,
     required this.isUrgent,
     required this.images,
@@ -379,14 +383,46 @@ class Request {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
     final images = List<String>.from(data['images'] ?? []);
     
+    // נסה למצוא את הקטגוריה מ-Firestore או enum
+    RequestCategory category;
+    final categoryName = data['category'] as String?;
+    if (categoryName != null) {
+      // נסה למצוא ב-enum קודם (מהיר יותר)
+      try {
+        category = RequestCategory.values.firstWhere(
+          (e) => e.name == categoryName,
+          orElse: () => RequestCategory.plumbing,
+        );
+        
+        // אם מצאנו ב-enum, נשתמש בו
+        if (category != RequestCategory.plumbing || categoryName == 'plumbing') {
+          // הקטגוריה נמצאה ב-enum או זה plumbing
+        } else {
+          // נסה למצוא ב-Firestore
+          final firestoreCategory = CategoriesService.categoryNameToEnum(categoryName);
+          if (firestoreCategory != null) {
+            category = firestoreCategory;
+          }
+        }
+      } catch (e) {
+        // אם יש שגיאה, נשתמש ב-fallback
+        category = RequestCategory.plumbing;
+      }
+    } else {
+      category = RequestCategory.plumbing;
+    }
+    
+    // בדוק אם יש שם קטגוריה מותאם אישית (אם הקטגוריה לא קיימת ב-enum)
+    final customCategoryName = category == RequestCategory.plumbing && categoryName != 'plumbing' 
+        ? categoryName 
+        : null;
+    
     return Request(
       requestId: doc.id,
       title: data['title'] ?? '',
       description: data['description'] ?? '', // Keep description for card preview
-      category: RequestCategory.values.firstWhere(
-        (e) => e.name == data['category'],
-        orElse: () => RequestCategory.plumbing,
-      ),
+      category: category,
+      customCategoryName: customCategoryName,
       location: null, // Skip location parsing for lightweight
       isUrgent: data['isUrgent'] ?? false,
       images: images,
@@ -435,14 +471,47 @@ class Request {
 
   factory Request.fromFirestore(DocumentSnapshot doc) {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+    
+    // נסה למצוא את הקטגוריה מ-Firestore או enum
+    RequestCategory category;
+    final categoryName = data['category'] as String?;
+    if (categoryName != null) {
+      // נסה למצוא ב-enum קודם (מהיר יותר)
+      try {
+        category = RequestCategory.values.firstWhere(
+          (e) => e.name == categoryName,
+          orElse: () => RequestCategory.plumbing,
+        );
+        
+        // אם מצאנו ב-enum, נשתמש בו
+        if (category != RequestCategory.plumbing || categoryName == 'plumbing') {
+          // הקטגוריה נמצאה ב-enum או זה plumbing
+        } else {
+          // נסה למצוא ב-Firestore
+          final firestoreCategory = CategoriesService.categoryNameToEnum(categoryName);
+          if (firestoreCategory != null) {
+            category = firestoreCategory;
+          }
+        }
+      } catch (e) {
+        // אם יש שגיאה, נשתמש ב-fallback
+        category = RequestCategory.plumbing;
+      }
+    } else {
+      category = RequestCategory.plumbing;
+    }
+    
+    // בדוק אם יש שם קטגוריה מותאם אישית (אם הקטגוריה לא קיימת ב-enum)
+    final customCategoryName = category == RequestCategory.plumbing && categoryName != 'plumbing' 
+        ? categoryName 
+        : null;
+    
     return Request(
       requestId: doc.id,
       title: data['title'] ?? '',
       description: data['description'] ?? '',
-      category: RequestCategory.values.firstWhere(
-        (e) => e.name == data['category'],
-        orElse: () => RequestCategory.plumbing,
-      ),
+      category: category,
+      customCategoryName: customCategoryName,
       location: data['location'] != null 
           ? RequestLocation.values.firstWhere(
               (e) => e.name == data['location'],
@@ -471,10 +540,28 @@ class Request {
       maxDistance: data['maxDistance']?.toDouble(),
       targetVillage: data['targetVillage'],
       targetCategories: data['targetCategories'] != null 
-          ? (data['targetCategories'] as List).map((e) => RequestCategory.values.firstWhere(
-              (cat) => cat.name == e,
-              orElse: () => RequestCategory.plumbing,
-            )).toList()
+          ? (data['targetCategories'] as List).map((e) {
+              final categoryName = e.toString();
+              // נסה למצוא ב-enum קודם
+              try {
+                final category = RequestCategory.values.firstWhere(
+                  (cat) => cat.name == categoryName,
+                  orElse: () => RequestCategory.plumbing,
+                );
+                // אם מצאנו ב-enum, נשתמש בו
+                if (category != RequestCategory.plumbing || categoryName == 'plumbing') {
+                  return category;
+                } else {
+                  // נסה למצוא ב-Firestore
+                  final firestoreCategory = CategoriesService.categoryNameToEnum(categoryName);
+                  return firestoreCategory ?? RequestCategory.plumbing;
+                }
+              } catch (e) {
+                // אם יש שגיאה, נשתמש ב-fallback
+                final firestoreCategory = CategoriesService.categoryNameToEnum(categoryName);
+                return firestoreCategory ?? RequestCategory.plumbing;
+              }
+            }).toList()
           : null,
       minRating: data['minRating']?.toDouble(),
       minReliability: data['minReliability']?.toDouble(),
@@ -506,7 +593,7 @@ class Request {
     return {
       'title': title,
       'description': description,
-      'category': category.name,
+      'category': customCategoryName ?? category.name, // אם יש שם קטגוריה מקורי, נשתמש בו
       'location': location?.name,
       'isUrgent': isUrgent,
       'images': images,

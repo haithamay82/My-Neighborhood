@@ -44,6 +44,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
   String _selectedPhoneNumber = '';
   
   RequestCategory? _selectedCategory;
+  String? _selectedCategoryCustomName; // שם קטגוריה מקורי מ-Firestore (אם הקטגוריה לא קיימת ב-enum)
   RequestLocation? _selectedLocation;
   final List<String> _selectedImages = [];
   final List<File> _selectedImageFiles = [];
@@ -1875,6 +1876,14 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
                               _checkAvailableHelpers();
                             }
                           },
+                          onCustomCategoryNamesChanged: (customNames) {
+                            // שמור את שם הקטגוריה המקורי אם זו קטגוריה חדשה
+                            if (customNames.containsKey(_selectedCategory)) {
+                              _selectedCategoryCustomName = customNames[_selectedCategory];
+                            } else {
+                              _selectedCategoryCustomName = null;
+                            }
+                          },
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -3207,6 +3216,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
         title: _titleController.text.trim(),
         description: _descriptionController.text.trim(),
         category: _selectedCategory!,
+        customCategoryName: _selectedCategoryCustomName, // שם קטגוריה מקורי מ-Firestore (אם הקטגוריה לא קיימת ב-enum)
         location: _selectedLocation,
         isUrgent: _selectedUrgency != UrgencyLevel.normal, // דחוף אם לא רגיל
         images: _selectedImages,
@@ -3274,6 +3284,7 @@ class _NewRequestScreenState extends State<NewRequestScreen> with NetworkAwareMi
           title: request.title,
           description: request.description,
           category: request.category,
+          customCategoryName: request.customCategoryName,
           location: request.location,
           isUrgent: request.isUrgent,
           images: request.images,

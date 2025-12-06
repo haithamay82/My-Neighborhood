@@ -44,6 +44,7 @@ import 'tutorial_center_screen.dart';
 import 'my_requests_screen.dart';
 import 'new_request_screen.dart';
 import '../services/monthly_requests_tracker.dart';
+import '../services/categories_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -3816,6 +3817,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
     _loadNotificationPrefs();
     _loadSavedFilters(); // טעינת סינון שמור
     _loadFilterPreferencesFromFirestore(); // טעינת סינון מ-Firestore (להתראות)
+    _loadCategoriesFromFirestore(); // טעינת קטגוריות מ-Firestore
     _loadInterestedRequests(); // טעינת בקשות שהמשתמש מעוניין בהן
     _loadUserRatings(); // טעינת דירוגים של המשתמש
     _checkForNewNotifications();
@@ -4060,7 +4062,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
           AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeInOut,
-            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
             decoration: BoxDecoration(
               color: isActive ? activeColor : Colors.transparent,
               borderRadius: BorderRadius.circular(6),
@@ -4081,7 +4083,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                   child: Icon(
                     icon,
                     key: ValueKey('$icon-$isActive'),
-                    size: 14,
+                    size: 18,
                     color: isActive ? Colors.white : Colors.grey[600],
                   ),
                 ),
@@ -4090,7 +4092,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                   child: Text(
                     label,
                     style: TextStyle(
-                      fontSize: 10,
+                      fontSize: 14,
                       fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
                       color: isActive ? Theme.of(context).colorScheme.onPrimary : Theme.of(context).colorScheme.onSurfaceVariant,
                     ),
@@ -7332,13 +7334,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                       _isCategoryInMainCategory(request.category, mainCat));
                     debugPrint('🔍 [FILTER] Category check (local main): request.category=${request.category.name}, _selectedMainCategories=$_selectedMainCategories, matches=$categoryMatches');
                     
-                    // בדיקה שנייה: סינון מ-Firestore (רק אם אין תת-תחומים נבחרים מקומית)
+                    // בדיקה נוספת: סינון מ-Firestore (גם אם enum לא מצא התאמה)
+                    if (!categoryMatches) {
+                      // נבדוק מ-Firestore אם הקטגוריה שייכת לאחד מהתחומים הראשיים שנבחרו
+                      categoryMatches = _checkCategoryInMainCategoryFromFirestore(
+                        request.category.name, 
+                        _selectedMainCategories
+                      );
+                      debugPrint('🔍 [FILTER] Category check (Firestore main): request.category=${request.category.name}, _selectedMainCategories=$_selectedMainCategories, matches=$categoryMatches');
+                    }
+                    
+                    // בדיקה שלישית: סינון מ-FilterPreferences (רק אם אין תת-תחומים נבחרים מקומית)
                     if (!categoryMatches && _filterPreferencesFromFirestore?.isEnabled == true && 
                         _filterPreferencesFromFirestore!.categories.isNotEmpty) {
                       // ✅ FilterPreferences.categories הוא List<String>, אז נמיר את request.category (enum) למחרוזת
                       final requestCategoryName = request.category.name;
                       categoryMatches = _filterPreferencesFromFirestore!.categories.contains(requestCategoryName);
-                      debugPrint('🔍 [FILTER] Category check (Firestore): request.category=${request.category.name}, filterCategories=${_filterPreferencesFromFirestore!.categories}, matches=$categoryMatches');
+                      debugPrint('🔍 [FILTER] Category check (Firestore preferences): request.category=${request.category.name}, filterCategories=${_filterPreferencesFromFirestore!.categories}, matches=$categoryMatches');
                     }
                     
                     if (!categoryMatches) {
@@ -10799,6 +10811,92 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
     return categoryMainCategory.displayName == mainCategory;
   }
 
+  // Cache לקטגוריות מ-Firestore (נטען פעם אחת)
+  List<Map<String, dynamic>>? _cachedFirestoreSubCategories;
+  List<Map<String, dynamic>>? _cachedFirestoreMainCategories;
+  DateTime? _categoriesCacheTime;
+  static const Duration _categoriesCacheDuration = Duration(minutes: 5);
+
+  // טעינת קטגוריות מ-Firestore (נקרא פעם אחת)
+  Future<void> _loadCategoriesFromFirestore() async {
+    if (_cachedFirestoreSubCategories != null &&
+        _cachedFirestoreMainCategories != null &&
+        _categoriesCacheTime != null &&
+        DateTime.now().difference(_categoriesCacheTime!) < _categoriesCacheDuration) {
+      debugPrint('✅ [CATEGORIES] Using cached categories: ${_cachedFirestoreMainCategories!.length} main, ${_cachedFirestoreSubCategories!.length} sub');
+      return; // Cache עדיין תקף
+    }
+
+    try {
+      debugPrint('📥 [CATEGORIES] Loading categories from Firestore...');
+      _cachedFirestoreMainCategories = await CategoriesService.getMainCategories();
+      _cachedFirestoreSubCategories = await CategoriesService.getSubCategories();
+      _categoriesCacheTime = DateTime.now();
+      debugPrint('✅ [CATEGORIES] Loaded categories: ${_cachedFirestoreMainCategories!.length} main, ${_cachedFirestoreSubCategories!.length} sub');
+      debugPrint('📋 [CATEGORIES] Main categories: ${_cachedFirestoreMainCategories!.map((c) => c['nameHebrew']).toList()}');
+      debugPrint('📋 [CATEGORIES] Sub categories: ${_cachedFirestoreSubCategories!.map((c) => '${c['name']} (${c['nameHebrew']}) -> ${c['mainCategoryId']}').toList()}');
+    } catch (e) {
+      debugPrint('❌ [CATEGORIES] Error loading categories from Firestore: $e');
+    }
+  }
+
+  // בדיקה אם קטגוריה (לפי שם) שייכת לאחד מהתחומים הראשיים מ-Firestore
+  // הערה: זו פונקציה sync, אבל CategoriesService הוא async
+  // נשתמש ב-cache המקומי אם הוא קיים, אחרת נחזיר false
+  bool _checkCategoryInMainCategoryFromFirestore(String categoryName, Set<String> selectedMainCategories) {
+    // אם ה-cache לא נטען, נחזיר false (הסינון יעבוד רק עם enum)
+    if (_cachedFirestoreSubCategories == null || _cachedFirestoreMainCategories == null) {
+      debugPrint('⚠️ [FILTER] Categories cache not loaded yet for category: $categoryName');
+      return false;
+    }
+
+    try {
+      // מצא את הקטגוריה ב-Firestore
+      debugPrint('🔍 [FILTER] Searching for category in Firestore: $categoryName');
+      debugPrint('📋 [FILTER] Available sub categories: ${_cachedFirestoreSubCategories!.map((c) => c['name']).toList()}');
+      
+      final categoryData = _cachedFirestoreSubCategories!.firstWhere(
+        (cat) => cat['name'] == categoryName,
+        orElse: () => <String, dynamic>{},
+      );
+
+      if (categoryData.isEmpty) {
+        debugPrint('⚠️ [FILTER] Category not found in Firestore cache: $categoryName');
+        debugPrint('📋 [FILTER] Available categories: ${_cachedFirestoreSubCategories!.map((c) => '${c['name']} (${c['nameHebrew']})').toList()}');
+        return false;
+      }
+
+      // מצא את התחום הראשי
+      final mainCategoryId = categoryData['mainCategoryId'] as String?;
+      if (mainCategoryId == null) {
+        debugPrint('⚠️ [FILTER] Category has no mainCategoryId: $categoryName');
+        return false;
+      }
+
+      debugPrint('🔍 [FILTER] Found category, mainCategoryId: $mainCategoryId');
+      debugPrint('📋 [FILTER] Available main categories: ${_cachedFirestoreMainCategories!.map((c) => '${c['id']}: ${c['nameHebrew']}').toList()}');
+
+      final mainCategoryData = _cachedFirestoreMainCategories!.firstWhere(
+        (main) => main['id'] == mainCategoryId,
+        orElse: () => <String, dynamic>{},
+      );
+
+      if (mainCategoryData.isEmpty) {
+        debugPrint('⚠️ [FILTER] Main category not found in Firestore cache: $mainCategoryId');
+        return false;
+      }
+
+      // בדוק אם התחום הראשי נמצא ברשימת התחומים הראשיים שנבחרו
+      final mainCategoryNameHebrew = mainCategoryData['nameHebrew'] as String?;
+      final matches = mainCategoryNameHebrew != null && selectedMainCategories.contains(mainCategoryNameHebrew);
+      debugPrint('🔍 [FILTER] Firestore check: category=$categoryName, mainCategory=$mainCategoryNameHebrew, selected=$selectedMainCategories, matches=$matches');
+      return matches;
+    } catch (e) {
+      debugPrint('❌ [FILTER] Error checking category in main category from Firestore: $e');
+      return false;
+    }
+  }
+
   // פונקציה לבדיקה אם תאריך היעד של בקשה פג תוקף
   bool _isRequestDeadlineExpired(Request request) {
     if (request.deadline == null) return false;
@@ -10807,23 +10905,70 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
 
   // פונקציה לבניית סינון קטגוריות - בחירה מרובה
   Widget _buildCategoryFilter(UserProfile? userProfile, StateSetter setDialogState, AppLocalizations l10n) {
-    // לוגיקה פשוטה - כל המשתמשים יכולים לראות את כל הקטגוריות
-    List<String> availableMainCategories = [];
-      for (MainCategory mainCategory in MainCategory.values) {
-        availableMainCategories.add(mainCategory.displayName);
-      }
-      
-      // הגדרת קטגוריות לפי התחומים הראשיים
-    Map<String, List<RequestCategory>> subCategories = {};
-      for (MainCategory mainCategory in MainCategory.values) {
-        List<RequestCategory> categories = [];
-      for (RequestCategory category in RequestCategory.values) {
-          if (category.mainCategory == mainCategory) {
-            categories.add(category);
-          }
+    // נטען קטגוריות מ-Firestore (אם יש cache, נשתמש בו)
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: CategoriesService.getMainCategories(),
+      builder: (context, mainSnapshot) {
+        if (!mainSnapshot.hasData) {
+          // Fallback ל-enum אם אין נתונים
+          return _buildCategoryFilterFromEnum(setDialogState, l10n);
         }
-        subCategories[mainCategory.displayName] = categories;
-    }
+        
+        return FutureBuilder<List<Map<String, dynamic>>>(
+          future: CategoriesService.getSubCategories(),
+          builder: (context, subSnapshot) {
+            if (!subSnapshot.hasData) {
+              // Fallback ל-enum אם אין נתונים
+              return _buildCategoryFilterFromEnum(setDialogState, l10n);
+            }
+            
+            final mainCategories = mainSnapshot.data!;
+            final subCategories = subSnapshot.data!;
+            
+            // בניית רשימת קטגוריות ראשיות
+            List<String> availableMainCategories = mainCategories.map((c) => c['nameHebrew'] as String).toList();
+            
+            // בניית מפת תת-קטגוריות עם שמות עבריים מ-Firestore
+            Map<String, List<RequestCategory>> subCategoriesMap = {};
+            Map<RequestCategory, String> categoryDisplayNames = {}; // Map לשמירת שמות עבריים מ-Firestore
+            
+            for (final mainCategory in mainCategories) {
+              final mainCategoryId = mainCategory['id'] as String;
+              final mainCategoryNameHebrew = mainCategory['nameHebrew'] as String;
+              final mainSubCategories = subCategories.where((sub) => sub['mainCategoryId'] == mainCategoryId).toList();
+              
+              List<RequestCategory> categories = [];
+              for (final subCategory in mainSubCategories) {
+                final categoryName = subCategory['name'] as String;
+                final categoryNameHebrew = subCategory['nameHebrew'] as String? ?? categoryName;
+                final category = CategoriesService.categoryNameToEnum(categoryName);
+                
+                // אם הקטגוריה לא קיימת ב-enum, נשתמש ב-plumbing כ-fallback
+                final categoryToUse = category ?? RequestCategory.plumbing;
+                categories.add(categoryToUse);
+                
+                // שמור את השם העברי מ-Firestore (גם אם הקטגוריה קיימת ב-enum, נשתמש בשם מ-Firestore)
+                categoryDisplayNames[categoryToUse] = categoryNameHebrew;
+              }
+              subCategoriesMap[mainCategoryNameHebrew] = categories;
+            }
+            
+            return _buildCategoryFilterUI(availableMainCategories, subCategoriesMap, setDialogState, l10n, mainCategories, categoryDisplayNames);
+          },
+        );
+      },
+    );
+  }
+  
+  // פונקציה עזר לבניית UI של סינון קטגוריות
+  Widget _buildCategoryFilterUI(
+    List<String> availableMainCategories,
+    Map<String, List<RequestCategory>> subCategories,
+    StateSetter setDialogState,
+    AppLocalizations l10n,
+    List<Map<String, dynamic>> mainCategoriesData,
+    Map<RequestCategory, String> categoryDisplayNames,
+  ) {
     
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -10864,11 +11009,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
           children: availableMainCategories.map((mainCategory) {
                 final isMainSelected = _selectedMainCategories.contains(mainCategory);
                 final mainCategorySubCategories = subCategories[mainCategory] ?? [];
-                // מצא את ה-MainCategory enum המתאים
-                final mainCategoryEnum = MainCategory.values.firstWhere(
-                  (cat) => cat.displayName == mainCategory,
-                  orElse: () => MainCategory.values.first,
+                // מצא את הנתונים של הקטגוריה הראשית מ-Firestore
+                final mainCategoryData = mainCategoriesData.firstWhere(
+                  (c) => c['nameHebrew'] == mainCategory,
+                  orElse: () => <String, dynamic>{},
                 );
+                final mainCategoryIcon = mainCategoryData['icon'] as String? ?? '';
                 
                 return Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -10890,7 +11036,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                           ),
                           // אייקון הקטגוריה מצד ימין
                           Text(
-                            mainCategoryEnum.icon,
+                            mainCategoryIcon,
                             style: const TextStyle(fontSize: 20),
                           ),
                         ],
@@ -10918,9 +11064,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                         child: Column(
                           children: mainCategorySubCategories.map((category) {
                             final isSubSelected = _selectedSubCategories.contains(category);
+                            // השתמש בשם מ-Firestore אם קיים, אחרת בשם מה-enum
+                            final displayName = categoryDisplayNames[category] ?? category.categoryDisplayName;
                             return CheckboxListTile(
                               title: Text(
-                                category.categoryDisplayName,
+                                displayName,
                                 style: TextStyle(
                                   fontSize: 14,
                                   color: Theme.of(context).textTheme.bodyMedium?.color,
@@ -10950,6 +11098,39 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
         ),
       ],
     );
+  }
+  
+  // Fallback - בניית סינון קטגוריות מ-enum
+  Widget _buildCategoryFilterFromEnum(StateSetter setDialogState, AppLocalizations l10n) {
+    List<String> availableMainCategories = [];
+    for (MainCategory mainCategory in MainCategory.values) {
+      availableMainCategories.add(mainCategory.displayName);
+    }
+    
+    Map<String, List<RequestCategory>> subCategories = {};
+    for (MainCategory mainCategory in MainCategory.values) {
+      List<RequestCategory> categories = [];
+      for (RequestCategory category in RequestCategory.values) {
+        if (category.mainCategory == mainCategory) {
+          categories.add(category);
+        }
+      }
+      subCategories[mainCategory.displayName] = categories;
+    }
+    
+    // יצירת רשימה ריקה של mainCategoriesData עבור fallback
+    final mainCategoriesData = MainCategory.values.map<Map<String, dynamic>>((mc) => {
+      'nameHebrew': mc.displayName,
+      'icon': mc.icon,
+    }).toList();
+    
+    // יצירת map ריק של categoryDisplayNames עבור fallback
+    final categoryDisplayNames = <RequestCategory, String>{};
+    for (final category in RequestCategory.values) {
+      categoryDisplayNames[category] = category.categoryDisplayName;
+    }
+    
+    return _buildCategoryFilterUI(availableMainCategories, subCategories, setDialogState, l10n, mainCategoriesData, categoryDisplayNames);
   }
 
   // פונקציות להצגת סטטוס הבקשה - כמו במסך "בקשות שלי"
@@ -14057,22 +14238,70 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
   
   // פונקציה לבניית סינון קטגוריות לנותני שירות
   Widget _buildProviderCategoryFilter(UserProfile? userProfile, StateSetter setDialogState, AppLocalizations l10n) {
-    List<String> availableMainCategories = [];
-    for (MainCategory mainCategory in MainCategory.values) {
-      availableMainCategories.add(mainCategory.displayName);
-    }
-    
-    Map<String, List<RequestCategory>> subCategories = {};
-    for (MainCategory mainCategory in MainCategory.values) {
-      List<RequestCategory> categories = [];
-      for (RequestCategory category in RequestCategory.values) {
-        if (category.mainCategory == mainCategory) {
-          categories.add(category);
+    // נטען קטגוריות מ-Firestore (אם יש cache, נשתמש בו)
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: CategoriesService.getMainCategories(),
+      builder: (context, mainSnapshot) {
+        if (!mainSnapshot.hasData) {
+          // Fallback ל-enum אם אין נתונים
+          return _buildProviderCategoryFilterFromEnum(setDialogState, l10n);
         }
-      }
-      subCategories[mainCategory.displayName] = categories;
-    }
-    
+        
+        return FutureBuilder<List<Map<String, dynamic>>>(
+          future: CategoriesService.getSubCategories(),
+          builder: (context, subSnapshot) {
+            if (!subSnapshot.hasData) {
+              // Fallback ל-enum אם אין נתונים
+              return _buildProviderCategoryFilterFromEnum(setDialogState, l10n);
+            }
+            
+            final mainCategories = mainSnapshot.data!;
+            final subCategories = subSnapshot.data!;
+            
+            // בניית רשימת קטגוריות ראשיות
+            List<String> availableMainCategories = mainCategories.map((c) => c['nameHebrew'] as String).toList();
+            
+            // בניית מפת תת-קטגוריות עם שמות עבריים מ-Firestore
+            Map<String, List<RequestCategory>> subCategoriesMap = {};
+            Map<RequestCategory, String> categoryDisplayNames = {}; // Map לשמירת שמות עבריים מ-Firestore
+            
+            for (final mainCategory in mainCategories) {
+              final mainCategoryId = mainCategory['id'] as String;
+              final mainCategoryNameHebrew = mainCategory['nameHebrew'] as String;
+              final mainSubCategories = subCategories.where((sub) => sub['mainCategoryId'] == mainCategoryId).toList();
+              
+              List<RequestCategory> categories = [];
+              for (final subCategory in mainSubCategories) {
+                final categoryName = subCategory['name'] as String;
+                final categoryNameHebrew = subCategory['nameHebrew'] as String? ?? categoryName;
+                final category = CategoriesService.categoryNameToEnum(categoryName);
+                
+                // אם הקטגוריה לא קיימת ב-enum, נשתמש ב-plumbing כ-fallback
+                final categoryToUse = category ?? RequestCategory.plumbing;
+                categories.add(categoryToUse);
+                
+                // שמור את השם העברי מ-Firestore (גם אם הקטגוריה קיימת ב-enum, נשתמש בשם מ-Firestore)
+                categoryDisplayNames[categoryToUse] = categoryNameHebrew;
+              }
+              subCategoriesMap[mainCategoryNameHebrew] = categories;
+            }
+            
+            return _buildProviderCategoryFilterUI(availableMainCategories, subCategoriesMap, setDialogState, l10n, mainCategories, categoryDisplayNames);
+          },
+        );
+      },
+    );
+  }
+  
+  // פונקציה עזר לבניית UI של סינון קטגוריות לנותני שירות
+  Widget _buildProviderCategoryFilterUI(
+    List<String> availableMainCategories,
+    Map<String, List<RequestCategory>> subCategories,
+    StateSetter setDialogState,
+    AppLocalizations l10n,
+    List<Map<String, dynamic>> mainCategoriesData,
+    Map<RequestCategory, String> categoryDisplayNames,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -14109,10 +14338,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
           children: availableMainCategories.map((mainCategory) {
             final isMainSelected = _selectedProviderMainCategories.contains(mainCategory);
             final mainCategorySubCategories = subCategories[mainCategory] ?? [];
-            final mainCategoryEnum = MainCategory.values.firstWhere(
-              (cat) => cat.displayName == mainCategory,
-              orElse: () => MainCategory.values.first,
+            // מצא את הנתונים של הקטגוריה הראשית מ-Firestore
+            final mainCategoryData = mainCategoriesData.firstWhere(
+              (c) => c['nameHebrew'] == mainCategory,
+              orElse: () => <String, dynamic>{},
             );
+            final mainCategoryIcon = mainCategoryData['icon'] as String? ?? '';
             
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -14132,7 +14363,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                         ),
                       ),
                       Text(
-                        mainCategoryEnum.icon,
+                        mainCategoryIcon,
                         style: const TextStyle(fontSize: 20),
                       ),
                     ],
@@ -14158,8 +14389,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
                     child: Column(
                       children: mainCategorySubCategories.map((subCategory) {
                         final isSubSelected = _selectedProviderSubCategories.contains(subCategory);
+                        // השתמש בשם מ-Firestore אם קיים, אחרת בשם מה-enum
+                        final displayName = categoryDisplayNames[subCategory] ?? subCategory.categoryDisplayName;
                         return CheckboxListTile(
-                          title: Text(subCategory.categoryDisplayName),
+                          title: Text(displayName),
                           value: isSubSelected,
                           onChanged: (bool? value) {
                             setDialogState(() {
@@ -14183,6 +14416,39 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ne
         ),
       ],
     );
+  }
+  
+  // Fallback - בניית סינון קטגוריות לנותני שירות מ-enum
+  Widget _buildProviderCategoryFilterFromEnum(StateSetter setDialogState, AppLocalizations l10n) {
+    List<String> availableMainCategories = [];
+    for (MainCategory mainCategory in MainCategory.values) {
+      availableMainCategories.add(mainCategory.displayName);
+    }
+    
+    Map<String, List<RequestCategory>> subCategories = {};
+    for (MainCategory mainCategory in MainCategory.values) {
+      List<RequestCategory> categories = [];
+      for (RequestCategory category in RequestCategory.values) {
+        if (category.mainCategory == mainCategory) {
+          categories.add(category);
+        }
+      }
+      subCategories[mainCategory.displayName] = categories;
+    }
+    
+    // יצירת רשימה ריקה של mainCategoriesData עבור fallback
+    final mainCategoriesData = MainCategory.values.map<Map<String, dynamic>>((mc) => {
+      'nameHebrew': mc.displayName,
+      'icon': mc.icon,
+    }).toList();
+    
+    // יצירת map ריק של categoryDisplayNames עבור fallback
+    final categoryDisplayNames = <RequestCategory, String>{};
+    for (final category in RequestCategory.values) {
+      categoryDisplayNames[category] = category.categoryDisplayName;
+    }
+    
+    return _buildProviderCategoryFilterUI(availableMainCategories, subCategories, setDialogState, l10n, mainCategoriesData, categoryDisplayNames);
   }
 
   // שיתוף האפליקציה לנותני שירות

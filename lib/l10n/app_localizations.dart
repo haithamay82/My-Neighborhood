@@ -1496,6 +1496,48 @@ class AppLocalizations {
       'tagUrgentElderlyHelp': '👴 עזרה דחופה לקשיש',
       'tagUrgentVolunteering': '❤️ התנדבות דחופה',
       'tagUrgentPetCare': '🐾 טיפול דחוף בבעלי חיים',
+      // Categories Management
+      'categoriesManagementTitle': 'ניהול קטיגוריות ותחומים',
+      'searchCategories': 'חפש קטיגוריות ותחומים...',
+      'mainCategories': 'תחומים ראשיים',
+      'addMainCategory': 'הוסף תחום ראשי',
+      'addSubCategory': 'הוסף תחום משנה',
+      'noMainCategories': 'אין קטיגוריות ראשיות',
+      'noSubCategories': 'אין תחומי משנה',
+      'selectMainCategory': 'בחר תחום ראשי',
+      'allMainCategories': 'כל התחומים הראשיים',
+      'selectMainCategoryToViewSub': 'בחר תחום ראשי כדי לראות את תחומי המשנה',
+      'editMainCategory': 'ערוך תחום ראשי',
+      'editSubCategory': 'ערוך תחום משנה',
+      'addMainCategoryTitle': 'הוסף תחום ראשי',
+      'addSubCategoryTitle': 'הוסף תחום משנה',
+      'categoryName': 'שם (מזהה)',
+      'categoryNameHebrew': 'שם בעברית',
+      'categoryNameArabic': 'שם בערבית',
+      'categoryNameEnglish': 'שם באנגלית',
+      'categoryIcon': 'אייקון (אימוג\'י)',
+      'displayOrder': 'סדר תצוגה',
+      'categoryNameRequired': 'יש למלא שם ושם בעברית',
+      'allFieldsRequired': 'יש למלא את כל השדות הנדרשים',
+      'mainCategoryAdded': 'תחום ראשי נוסף בהצלחה',
+      'subCategoryAdded': 'תחום משנה נוסף בהצלחה',
+      'mainCategoryUpdated': 'תחום ראשי עודכן בהצלחה',
+      'subCategoryUpdated': 'תחום משנה עודכן בהצלחה',
+      'mainCategoryDeleted': 'תחום ראשי נמחק בהצלחה',
+      'subCategoryDeleted': 'תחום משנה נמחק בהצלחה',
+      'deleteMainCategory': 'מחיקת תחום ראשי',
+      'deleteSubCategory': 'מחיקת תחום משנה',
+      'cannotDeleteMainCategoryWithSub': 'לא ניתן למחוק תחום ראשי שיש לו תחומי משנה. יש למחוק תחילה את כל תחומי המשנה.',
+      'confirmDeleteMainCategory': 'האם אתה בטוח שברצונך למחוק את התחום הראשי "{name}"?',
+      'confirmDeleteSubCategory': 'האם אתה בטוח שברצונך למחוק את התחום "{name}"?',
+      'errorLoadingCategories': 'שגיאה בטעינת קטיגוריות',
+      'errorAddingMainCategory': 'שגיאה בהוספת תחום ראשי',
+      'errorAddingSubCategory': 'שגיאה בהוספת תחום משנה',
+      'errorUpdatingMainCategory': 'שגיאה בעדכון תחום ראשי',
+      'errorUpdatingSubCategory': 'שגיאה בעדכון תחום משנה',
+      'errorDeletingMainCategory': 'שגיאה במחיקת תחום ראשי',
+      'errorDeletingSubCategory': 'שגיאה במחיקת תחום משנה',
+      'mustCreateMainCategoryFirst': 'יש ליצור תחום ראשי קודם',
     },
     'ar': {
       'appTitle': 'حارتي',
@@ -2937,6 +2979,48 @@ class AppLocalizations {
       'tagUrgentElderlyHelp': '👴 مساعدة عاجلة للمسنين',
       'tagUrgentVolunteering': '❤️ تطوع عاجل',
       'tagUrgentPetCare': '🐾 رعاية عاجلة للحيوانات الأليفة',
+      // Categories Management
+      'categoriesManagementTitle': 'إدارة الفئات والمجالات',
+      'searchCategories': 'البحث عن الفئات والمجالات...',
+      'mainCategories': 'المجالات الرئيسية',
+      'addMainCategory': 'إضافة مجال رئيسي',
+      'addSubCategory': 'إضافة مجال فرعي',
+      'noMainCategories': 'لا توجد فئات رئيسية',
+      'noSubCategories': 'لا توجد مجالات فرعية',
+      'selectMainCategory': 'اختر المجال الرئيسي',
+      'allMainCategories': 'جميع المجالات الرئيسية',
+      'selectMainCategoryToViewSub': 'اختر المجال الرئيسي لعرض المجالات الفرعية',
+      'editMainCategory': 'تعديل المجال الرئيسي',
+      'editSubCategory': 'تعديل المجال الفرعي',
+      'addMainCategoryTitle': 'إضافة مجال رئيسي',
+      'addSubCategoryTitle': 'إضافة مجال فرعي',
+      'categoryName': 'الاسم (المعرف)',
+      'categoryNameHebrew': 'الاسم بالعبرية',
+      'categoryNameArabic': 'الاسم بالعربية',
+      'categoryNameEnglish': 'الاسم بالإنجليزية',
+      'categoryIcon': 'الأيقونة (إيموجي)',
+      'displayOrder': 'ترتيب العرض',
+      'categoryNameRequired': 'يجب ملء الاسم والاسم بالعبرية',
+      'allFieldsRequired': 'يجب ملء جميع الحقول المطلوبة',
+      'mainCategoryAdded': 'تمت إضافة المجال الرئيسي بنجاح',
+      'subCategoryAdded': 'تمت إضافة المجال الفرعي بنجاح',
+      'mainCategoryUpdated': 'تم تحديث المجال الرئيسي بنجاح',
+      'subCategoryUpdated': 'تم تحديث المجال الفرعي بنجاح',
+      'mainCategoryDeleted': 'تم حذف المجال الرئيسي بنجاح',
+      'subCategoryDeleted': 'تم حذف المجال الفرعي بنجاح',
+      'deleteMainCategory': 'حذف المجال الرئيسي',
+      'deleteSubCategory': 'حذف المجال الفرعي',
+      'cannotDeleteMainCategoryWithSub': 'لا يمكن حذف المجال الرئيسي الذي يحتوي على مجالات فرعية. يجب حذف جميع المجالات الفرعية أولاً.',
+      'confirmDeleteMainCategory': 'هل أنت متأكد من أنك تريد حذف المجال الرئيسي "{name}"؟',
+      'confirmDeleteSubCategory': 'هل أنت متأكد من أنك تريد حذف المجال "{name}"؟',
+      'errorLoadingCategories': 'خطأ في تحميل الفئات',
+      'errorAddingMainCategory': 'خطأ في إضافة المجال الرئيسي',
+      'errorAddingSubCategory': 'خطأ في إضافة المجال الفرعي',
+      'errorUpdatingMainCategory': 'خطأ في تحديث المجال الرئيسي',
+      'errorUpdatingSubCategory': 'خطأ في تحديث المجال الفرعي',
+      'errorDeletingMainCategory': 'خطأ في حذف المجال الرئيسي',
+      'errorDeletingSubCategory': 'خطأ في حذف المجال الفرعي',
+      'mustCreateMainCategoryFirst': 'يجب إنشاء مجال رئيسي أولاً',
     },
     'en': {
       'appTitle': 'My Neighborhood',
@@ -4224,6 +4308,48 @@ Payments:
       'selectCategory': 'Select category',
       'pleaseSelectCategoryFirst': 'Please select a category first',
       'title': 'Title',
+      // Categories Management
+      'categoriesManagementTitle': 'Categories and Fields Management',
+      'searchCategories': 'Search categories and fields...',
+      'mainCategories': 'Main Categories',
+      'addMainCategory': 'Add Main Category',
+      'addSubCategory': 'Add Sub Category',
+      'noMainCategories': 'No main categories',
+      'noSubCategories': 'No sub categories',
+      'selectMainCategory': 'Select Main Category',
+      'allMainCategories': 'All Main Categories',
+      'selectMainCategoryToViewSub': 'Select a main category to view sub categories',
+      'editMainCategory': 'Edit Main Category',
+      'editSubCategory': 'Edit Sub Category',
+      'addMainCategoryTitle': 'Add Main Category',
+      'addSubCategoryTitle': 'Add Sub Category',
+      'categoryName': 'Name (ID)',
+      'categoryNameHebrew': 'Name in Hebrew',
+      'categoryNameArabic': 'Name in Arabic',
+      'categoryNameEnglish': 'Name in English',
+      'categoryIcon': 'Icon (Emoji)',
+      'displayOrder': 'Display Order',
+      'categoryNameRequired': 'Please fill in name and name in Hebrew',
+      'allFieldsRequired': 'Please fill in all required fields',
+      'mainCategoryAdded': 'Main category added successfully',
+      'subCategoryAdded': 'Sub category added successfully',
+      'mainCategoryUpdated': 'Main category updated successfully',
+      'subCategoryUpdated': 'Sub category updated successfully',
+      'mainCategoryDeleted': 'Main category deleted successfully',
+      'subCategoryDeleted': 'Sub category deleted successfully',
+      'deleteMainCategory': 'Delete Main Category',
+      'deleteSubCategory': 'Delete Sub Category',
+      'cannotDeleteMainCategoryWithSub': 'Cannot delete a main category that has sub categories. Please delete all sub categories first.',
+      'confirmDeleteMainCategory': 'Are you sure you want to delete the main category "{name}"?',
+      'confirmDeleteSubCategory': 'Are you sure you want to delete the category "{name}"?',
+      'errorLoadingCategories': 'Error loading categories',
+      'errorAddingMainCategory': 'Error adding main category',
+      'errorAddingSubCategory': 'Error adding sub category',
+      'errorUpdatingMainCategory': 'Error updating main category',
+      'errorUpdatingSubCategory': 'Error updating sub category',
+      'errorDeletingMainCategory': 'Error deleting main category',
+      'errorDeletingSubCategory': 'Error deleting sub category',
+      'mustCreateMainCategoryFirst': 'Must create a main category first',
     },
   };
 
@@ -5811,6 +5937,55 @@ Payments:
   String get tagUrgentElderlyHelp => _safeGet('tagUrgentElderlyHelp', fallback: '👴 Urgent elderly help');
   String get tagUrgentVolunteering => _safeGet('tagUrgentVolunteering', fallback: '❤️ Urgent volunteering');
   String get tagUrgentPetCare => _safeGet('tagUrgentPetCare', fallback: '🐾 Urgent pet care');
+  
+  // Categories Management
+  String get categoriesManagementTitle => _safeGet('categoriesManagementTitle', fallback: 'Categories and Fields Management');
+  String get searchCategories => _safeGet('searchCategories', fallback: 'Search categories and fields...');
+  String get mainCategories => _safeGet('mainCategories', fallback: 'Main Categories');
+  String get addMainCategory => _safeGet('addMainCategory', fallback: 'Add Main Category');
+  String get addSubCategory => _safeGet('addSubCategory', fallback: 'Add Sub Category');
+  String get noMainCategories => _safeGet('noMainCategories', fallback: 'No main categories');
+  String get noSubCategories => _safeGet('noSubCategories', fallback: 'No sub categories');
+  String get selectMainCategory => _safeGet('selectMainCategory', fallback: 'Select Main Category');
+  String get allMainCategories => _safeGet('allMainCategories', fallback: 'All Main Categories');
+  String get selectMainCategoryToViewSub => _safeGet('selectMainCategoryToViewSub', fallback: 'Select a main category to view sub categories');
+  String get editMainCategory => _safeGet('editMainCategory', fallback: 'Edit Main Category');
+  String get editSubCategory => _safeGet('editSubCategory', fallback: 'Edit Sub Category');
+  String get addMainCategoryTitle => _safeGet('addMainCategoryTitle', fallback: 'Add Main Category');
+  String get addSubCategoryTitle => _safeGet('addSubCategoryTitle', fallback: 'Add Sub Category');
+  String get categoryName => _safeGet('categoryName', fallback: 'Name (ID)');
+  String get categoryNameHebrew => _safeGet('categoryNameHebrew', fallback: 'Name in Hebrew');
+  String get categoryNameArabic => _safeGet('categoryNameArabic', fallback: 'Name in Arabic');
+  String get categoryNameEnglish => _safeGet('categoryNameEnglish', fallback: 'Name in English');
+  String get categoryIcon => _safeGet('categoryIcon', fallback: 'Icon (Emoji)');
+  String get displayOrder => _safeGet('displayOrder', fallback: 'Display Order');
+  String get categoryNameRequired => _safeGet('categoryNameRequired', fallback: 'Please fill in name and name in Hebrew');
+  String get allFieldsRequired => _safeGet('allFieldsRequired', fallback: 'Please fill in all required fields');
+  String get mainCategoryAdded => _safeGet('mainCategoryAdded', fallback: 'Main category added successfully');
+  String get subCategoryAdded => _safeGet('subCategoryAdded', fallback: 'Sub category added successfully');
+  String get mainCategoryUpdated => _safeGet('mainCategoryUpdated', fallback: 'Main category updated successfully');
+  String get subCategoryUpdated => _safeGet('subCategoryUpdated', fallback: 'Sub category updated successfully');
+  String get mainCategoryDeleted => _safeGet('mainCategoryDeleted', fallback: 'Main category deleted successfully');
+  String get subCategoryDeleted => _safeGet('subCategoryDeleted', fallback: 'Sub category deleted successfully');
+  String get deleteMainCategory => _safeGet('deleteMainCategory', fallback: 'Delete Main Category');
+  String get deleteSubCategory => _safeGet('deleteSubCategory', fallback: 'Delete Sub Category');
+  String get cannotDeleteMainCategoryWithSub => _safeGet('cannotDeleteMainCategoryWithSub', fallback: 'Cannot delete a main category that has sub categories. Please delete all sub categories first.');
+  String confirmDeleteMainCategory(String name) {
+    final template = _safeGet('confirmDeleteMainCategory', fallback: 'Are you sure you want to delete the main category "{name}"?');
+    return template.replaceAll('{name}', name);
+  }
+  String confirmDeleteSubCategory(String name) {
+    final template = _safeGet('confirmDeleteSubCategory', fallback: 'Are you sure you want to delete the category "{name}"?');
+    return template.replaceAll('{name}', name);
+  }
+  String get errorLoadingCategories => _safeGet('errorLoadingCategories', fallback: 'Error loading categories');
+  String get errorAddingMainCategory => _safeGet('errorAddingMainCategory', fallback: 'Error adding main category');
+  String get errorAddingSubCategory => _safeGet('errorAddingSubCategory', fallback: 'Error adding sub category');
+  String get errorUpdatingMainCategory => _safeGet('errorUpdatingMainCategory', fallback: 'Error updating main category');
+  String get errorUpdatingSubCategory => _safeGet('errorUpdatingSubCategory', fallback: 'Error updating sub category');
+  String get errorDeletingMainCategory => _safeGet('errorDeletingMainCategory', fallback: 'Error deleting main category');
+  String get errorDeletingSubCategory => _safeGet('errorDeletingSubCategory', fallback: 'Error deleting sub category');
+  String get mustCreateMainCategoryFirst => _safeGet('mustCreateMainCategoryFirst', fallback: 'Must create a main category first');
 }
 
 class _AppLocalizationsDelegate extends LocalizationsDelegate<AppLocalizations> {
